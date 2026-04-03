@@ -1,0 +1,19 @@
+{
+  "name": "antigravity-batch-auth",
+  "version": "10.0.0",
+  "description": "Antigravity Batch OAuth Authorization Tool v10",
+  "main": "auth.js",
+  "scripts": {
+    "start": "node auth.js",
+    "start:verbose": "node auth.js --verbose",
+    "start:test": "node auth.js --test 2 --verbose"
+  },
+  "dependencies": {
+    "puppeteer-core": "^24.2.1",
+    "dotenv": "^16.4.7"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "private": true
+}

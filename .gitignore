@@ -1,0 +1,24 @@
+# Dependencies
+node_modules/
+
+# Runtime output
+src/credentials.json
+src/failed.json
+src/enableAPI_failed.json
+
+# Chrome temp data
+src/chrome_data_temp_auth_*/
+
+# Debug screenshots
+src/debug_*.png
+
+# OS files
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Editor files
+*.swp
+*.swo
+.vscode/
+.idea/

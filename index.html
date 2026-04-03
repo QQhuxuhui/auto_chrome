@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Antigravity Batch Auth Tool v10 - Documentation</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Inter:wght@400;500;600;700;800&display=swap');
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background: #0a0a0f;
+            color: #e0e0e0;
+        }
+
+        .mono { font-family: 'JetBrains Mono', monospace; }
+
+        .glow-green { text-shadow: 0 0 20px rgba(34, 197, 94, 0.4); }
+        .glow-blue { text-shadow: 0 0 20px rgba(59, 130, 246, 0.4); }
+
+        .card {
+            background: linear-gradient(135deg, rgba(30,30,50,0.8), rgba(20,20,35,0.9));
+            border: 1px solid rgba(100,100,150,0.2);
+            backdrop-filter: blur(10px);
+        }
+
+        .card:hover {
+            border-color: rgba(100,100,200,0.4);
+            box-shadow: 0 0 30px rgba(100,100,200,0.1);
+        }
+
+        .tree-line {
+            border-left: 2px solid rgba(100,100,150,0.3);
+        }
+
+        pre {
+            background: rgba(0,0,0,0.5);
+            border: 1px solid rgba(100,100,150,0.2);
+            border-radius: 8px;
+            overflow-x: auto;
+        }
+
+        code {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.85em;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 2px 10px;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+
+        .step-num {
+            width: 32px;
+            height: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+            font-weight: 700;
+            font-size: 0.875rem;
+            flex-shrink: 0;
+        }
+
+        .gradient-text {
+            background: linear-gradient(135deg, #22c55e, #3b82f6);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .hero-bg {
+            background: radial-gradient(ellipse at 50% 0%, rgba(34,197,94,0.08) 0%, transparent 60%),
+                        radial-gradient(ellipse at 80% 50%, rgba(59,130,246,0.05) 0%, transparent 50%);
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            animation: pulse-dot 2s infinite;
+        }
+
+        @keyframes pulse-dot {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+
+        .fade-in {
+            animation: fadeIn 0.6s ease-out;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .accordion-content {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.3s ease-out;
+        }
+
+        .accordion-content.open {
+            max-height: 1000px;
+        }
+
+        .copy-btn:active {
+            transform: scale(0.95);
+        }
+
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: rgba(100,100,150,0.3); border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: rgba(100,100,150,0.5); }
+    </style>
+</head>
+<body class="min-h-screen">
+
+    <!-- Hero Section -->
+    <div class="hero-bg">
+        <div class="max-w-5xl mx-auto px-6 pt-16 pb-12">
+            <div class="fade-in">
+                <div class="flex items-center gap-3 mb-4">
+                    <div class="status-dot bg-green-500"></div>
+                    <span class="badge bg-green-500/20 text-green-400 border border-green-500/30">v10.0</span>
+                    <span class="badge bg-blue-500/20 text-blue-400 border border-blue-500/30">Concurrency Fixed</span>
+                </div>
+                <h1 class="text-4xl md:text-5xl font-extrabold mb-4">
+                    <span class="gradient-text">Antigravity</span>
+                    <span class="text-white"> Batch Auth</span>
+                </h1>
+                <p class="text-lg text-gray-400 max-w-2xl leading-relaxed">
+                    Google OAuth 批量授权工具 — 自动登录、自动授权、自动开启 Gemini API，
+                    支持多 Worker 并发，内置真人行为模拟。
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Content -->
+    <div class="max-w-5xl mx-auto px-6 pb-20">
+
+        <!-- File Structure -->
+        <section class="mb-12 fade-in" style="animation-delay: 0.1s;">
+            <h2 class="text-2xl font-bold text-white mb-6 flex items-center gap-3">
+                <span class="text-2xl">📁</span> 文件结构
+            </h2>
+            <div class="card rounded-xl p-6">
+                <div class="mono text-sm leading-loose">
+                    <div class="flex items-center gap-2">
+                        <span class="text-yellow-400">📦</span>
+                        <span class="text-white font-semibold">Antigravity-Auth/</span>
+                        <span class="text-gray-500 ml-2">← 项目根目录</span>
+                    </div>
+                    <div class="ml-6 tree-line pl-4 space-y-1 mt-1">
+                        <div class="flex items-center gap-2">
+                            <span class="text-green-400">⚡</span>
+                            <span class="text-green-300 font-semibold">run.bat</span>
+                            <span class="text-gray-500 ml-2">— 一键启动脚本（自动检查环境 + 安装依赖 + 运行）</span>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <span class="text-blue-400">📝</span>
+                            <span class="text-blue-300 font-semibold">accounts.txt</span>
+                            <span class="text-gray-500 ml-2">— 账号配置文件（一行一个账号）</span>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <span class="text-purple-400">📂</span>
+                            <span class="text-purple-300 font-semibold">src/</span>
+                            <span class="text-gray-500 ml-2">— 源码与配置目录</span>
+                        </div>
+                        <div class="ml-6 tree-line pl-4 space-y-1">
+                            <div class="flex items-center gap-2">
+                                <span class="text-gray-400">📄</span>
+                                <span class="text-gray-300">auth.js</span>
+                                <span class="text-gray-500 ml-2">— 主脚本源码</span>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <span class="text-gray-400">📄</span>
+                                <span class="text-gray-300">package.json</span>
+                                <span class="text-gray-500 ml-2">— Node.js 依赖声明</span>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <span class="text-gray-400">🔒</span>
+                                <span class="text-gray-300">.env</span>
+                                <span class="text-gray-500 ml-2">— 环境变量配置</span>
+                            </div>
+                            <div class="flex items-center gap-2 text-gray-600">
+                                <span>📄</span>
+                                <span>credentials.json</span>
+                                <span class="ml-2">— 运行后生成：成功的凭证</span>
+                            </div>
+                            <div class="flex items-center gap-2 text-gray-600">
+                                <span>📄</span>
+                                <span>failed.json</span>
+                                <span class="ml-2">— 运行后生成：失败记录</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Quick Start -->
+        <section class="mb-12 fade-in" style="animation-delay: 0.2s;">
+            <h2 class="text-2xl font-bold text-white mb-6 flex items-center gap-3">
+                <span class="text-2xl">🚀</span> 快速开始
+            </h2>
+            <div class="space-y-4">
+                <!-- Step 1 -->
+                <div class="card rounded-xl p-5">
+                    <div class="flex items-start gap-4">
+                        <div class="step-num bg-green-500/20 text-green-400 border border-green-500/40">1</div>
+                        <div class="flex-1">
+                            <h3 class="text-white font-semibold text-lg mb-2">编辑账号文件</h3>
+                            <p class="text-gray-400 mb-3">
+                                打开根目录下的 <code class="text-blue-300 bg-blue-500/10 px-2 py-0.5 rounded">accounts.txt</code>，
+                                按格式添加你的账号：
+                            </p>
+                            <pre class="p-4 text-sm"><code class="text-gray-300"><span class="text-gray-600"># 格式一：邮箱:密码</span>
+<span class="text-green-300">user1@gmail.com</span><span class="text-yellow-300">:</span><span class="text-blue-300">MyPassword123</span>
+<span class="text-green-300">user2@gmail.com</span><span class="text-yellow-300">:</span><span class="text-blue-300">AnotherPass456</span>
+
+<span class="text-gray-600"># 格式二：邮箱----密码----恢复邮箱 （密码含冒号时使用）</span>
+<span class="text-green-300">user3@gmail.com</span><span class="text-yellow-300">----</span><span class="text-blue-300">Pass:With:Colons</span><span class="text-yellow-300">----</span><span class="text-purple-300">recovery@email.com</span></code></pre>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Step 2 -->
+                <div class="card rounded-xl p-5">
+                    <div class="flex items-start gap-4">
+                        <div class="step-num bg-blue-500/20 text-blue-400 border border-blue-500/40">2</div>
+                        <div class="flex-1">
+                            <h3 class="text-white font-semibold text-lg mb-2">双击 run.bat 启动</h3>
+                            <p class="text-gray-400 mb-3">
+                                脚本会自动完成以下操作：
+                            </p>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                <div class="flex items-center gap-2 text-sm">
+                                    <span class="text-green-400">✓</span>
+                                    <span class="text-gray-300">检查 Node.js 环境（未安装则自动安装）</span>
+                                </div>
+                                <div class="flex items-center gap-2 text-sm">
+                                    <span class="text-green-400">✓</span>
+                                    <span class="text-gray-300">检查账号配置文件是否存在</span>
+                                </div>
+                                <div class="flex items-center gap-2 text-sm">
+                                    <span class="text-green-400">✓</span>
+                                    <span class="text-gray-300">自动安装 npm 依赖（首次运行）</span>
+                                </div>
+                                <div class="flex items-center gap-2 text-sm">
+                                    <span class="text-green-400">✓</span>
+                                    <span class="text-gray-300">启动授权脚本，开始处理</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Step 3 -->
+                <div class="card rounded-xl p-5">
+                    <div class="flex items-start gap-4">
+                        <div class="step-num bg-purple-500/20 text-purple-400 border border-purple-500/40">3</div>
+                        <div class="flex-1">
+                            <h3 class="text-white font-semibold text-lg mb-2">等待完成</h3>
+                            <p class="text-gray-400">
+                                脚本会自动打开 Chrome 窗口，依次处理每个账号。
+                                完成后查看 <code class="text-green-300 bg-green-500/10 px-2 py-0.5 rounded">src/credentials.json</code> 获取凭证。
+                                失败的账号会记录在 <code class="text-red-300 bg-red-500/10 px-2 py-0.5 rounded">src/failed.json</code>。
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Advanced Options -->
+        <section class="mb-12 fade-in" style="animation-delay: 0.3s;">
+            <h2 class="text-2xl font-bold text-white mb-6 flex items-center gap-3">
+                <span class="text-2xl">⚙️</span> 高级选项
+            </h2>
+            <div class="card rounded-xl p-6">
+                <p class="text-gray-400 mb-4">在 run.bat 后面追加参数即可使用高级功能：</p>
+                <div class="space-y-3">
+                    <div class="flex items-start gap-3 p-3 rounded-lg bg-black/30">
+                        <code class="text-yellow-300 mono text-sm whitespace-nowrap">--verbose</code>
+                        <span class="text-gray-400 text-sm">开启详细调试日志（DEBUG 级别），排查问题时使用</span>
+                    </div>
+                    <div class="flex items-start gap-3 p-3 rounded-lg bg-black/30">
+                        <code class="text-yellow-300 mono text-sm whitespace-nowrap">--concurrency 5</code>
+                        <span class="text-gray-400 text-sm">设置并发 Worker 数量（默认 3），更多并发 = 更快但更吃资源</span>
+                    </div>
+                    <div class="flex items-start gap-3 p-3 rounded-lg bg-black/30">
+                        <code class="text-yellow-300 mono text-sm whitespace-nowrap">--test 3</code>
+                        <span class="text-gray-400 text-sm">只处理前 3 个账号（用于测试）</span>
+                    </div>
+                    <div class="flex items-start gap-3 p-3 rounded-lg bg-black/30">
+                        <code class="text-yellow-300 mono text-sm whitespace-nowrap">--screenshot-all</code>
+                        <span class="text-gray-400 text-sm">每一步都截图保存（会产生大量文件）</span>
+                    </div>
+                    <div class="flex items-start gap-3 p-3 rounded-lg bg-black/30">
+                        <code class="text-yellow-300 mono text-sm whitespace-nowrap">--start 10 --end 20</code>
+                        <span class="text-gray-400 text-sm">只处理第 10~20 个账号</span>
+                    </div>
+                </div>
+
+                <div class="mt-5 p-4 rounded-lg bg-black/40 border border-gray-700">
+                    <p class="text-gray-500 text-xs mb-2">示例：测试前 2 个账号 + 详细日志</p>
+                    <code class="text-green-300 mono text-sm">run.bat --test 2 --verbose</code>
+                </div>
+            </div>
+        </section>
+
+        <!-- .env Configuration -->
+        <section class="mb-12 fade-in" style="animation-delay: 0.35s;">
+            <h2 class="text-2xl font-bold text-white mb-6 flex items-center gap-3">
+                <span class="text-2xl">🔧</span> 环境配置 (src/.env)
+            </h2>
+            <div class="card rounded-xl p-6">
+                <table class="w-full text-sm">
+                    <thead>
+                        <tr class="text-gray-500 border-b border-gray-700">
+                            <th class="text-left py-2 pr-4">变量名</th>
+                            <th class="text-left py-2 pr-4">默认值</th>
+                            <th class="text-left py-2">说明</th>
+                        </tr>
+                    </thead>
+                    <tbody class="text-gray-300">
+                        <tr class="border-b border-gray-800">
+                            <td class="py-3 pr-4 mono text-yellow-300">CLIENT_ID</td>
+                            <td class="py-3 pr-4 mono text-gray-500 text-xs">1071006...（内置）</td>
+                            <td class="py-3 text-gray-400">Google OAuth Client ID</td>
+                        </tr>
+                        <tr class="border-b border-gray-800">
+                            <td class="py-3 pr-4 mono text-yellow-300">CLIENT_SECRET</td>
+                            <td class="py-3 pr-4 mono text-gray-500 text-xs">GOCSPX-...（内置）</td>
+                            <td class="py-3 text-gray-400">Google OAuth Client Secret</td>
+                        </tr>
+                        <tr class="border-b border-gray-800">
+                            <td class="py-3 pr-4 mono text-yellow-300">CONCURRENCY</td>
+                            <td class="py-3 pr-4 mono text-blue-300">3</td>
+                            <td class="py-3 text-gray-400">并发 Chrome 实例数</td>
+                        </tr>
+                        <tr>
+                            <td class="py-3 pr-4 mono text-yellow-300">DEBUG_PORT</td>
+                            <td class="py-3 pr-4 mono text-blue-300">9234</td>
+                            <td class="py-3 text-gray-400">Chrome DevTools 调试端口起始值</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- Features -->
+        <section class="mb-12 fade-in" style="animation-delay: 0.4s;">
+            <h2 class="text-2xl font-bold text-white mb-6 flex items-center gap-3">
+                <span class="text-2xl">✨</span> v10 特性
+            </h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div class="card rounded-xl p-5">
+                    <h3 class="text-green-400 font-semibold mb-2">🔀 并发修复</h3>
+                    <ul class="text-gray-400 text-sm space-y-1.5">
+                        <li>• Worker 预分配独立端口段</li>
+                        <li>• AsyncMutex 消除文件写入竞态</li>
+                        <li>• 合理错峰延迟（3-5s）</li>
+                        <li>• 全链路 Worker 隔离</li>
+                    </ul>
+                </div>
+                <div class="card rounded-xl p-5">
+                    <h3 class="text-blue-400 font-semibold mb-2">🔍 调试增强</h3>
+                    <ul class="text-gray-400 text-sm space-y-1.5">
+                        <li>• 分级日志 + 终端颜色输出</li>
+                        <li>• 页面状态 + URL + 文本摘要</li>
+                        <li>• 每步耗时计时</li>
+                        <li>• 关键节点自动截图</li>
+                    </ul>
+                </div>
+                <div class="card rounded-xl p-5">
+                    <h3 class="text-purple-400 font-semibold mb-2">🛡️ 健壮性</h3>
+                    <ul class="text-gray-400 text-sm space-y-1.5">
+                        <li>• 单账号失败自动重试（最多 2 次）</li>
+                        <li>• Chrome 崩溃自动重启</li>
+                        <li>• 凭证去重保护</li>
+                        <li>• 中断后可续跑</li>
+                    </ul>
+                </div>
+                <div class="card rounded-xl p-5">
+                    <h3 class="text-yellow-400 font-semibold mb-2">🤖 行为模拟</h3>
+                    <ul class="text-gray-400 text-sm space-y-1.5">
+                        <li>• 贝塞尔曲线鼠标移动</li>
+                        <li>• 打字节奏 + 偶发错误修正</li>
+                        <li>• 随机思考停顿 + 滚动</li>
+                        <li>• 多策略按钮点击</li>
+                    </ul>
+                </div>
+            </div>
+        </section>
+
+        <!-- Troubleshooting -->
+        <section class="mb-12 fade-in" style="animation-delay: 0.5s;">
+            <h2 class="text-2xl font-bold text-white mb-6 flex items-center gap-3">
+                <span class="text-2xl">🔧</span> 常见问题
+            </h2>
+            <div class="space-y-3" id="faq">
+                <!-- FAQ items -->
+            </div>
+        </section>
+
+        <!-- Footer -->
+        <div class="text-center text-gray-600 text-sm pt-8 border-t border-gray-800">
+            <p>Antigravity Batch Auth Tool v10 — Built for efficiency and reliability</p>
+        </div>
+
+    </div>
+
+    <script>
+        // FAQ Data
+        const faqData = [
+            {
+                q: 'Windows 提示"此文件可能有害"怎么办？',
+                a: `这是 Windows SmartScreen 的安全提示，因为 .bat 文件从网络下载。解决方法：
+<br><br>
+<strong>方法 1：</strong>右键点击 run.bat → 属性 → 勾选底部的"解除锁定" → 确定
+<br><br>
+<strong>方法 2：</strong>运行时弹出提示，点击"更多信息" → "仍要运行"
+<br><br>
+<strong>方法 3：</strong>用记事本打开 run.bat，Ctrl+A 全选复制，新建一个 .bat 文件粘贴保存`
+            },
+            {
+                q: 'bat 运行时出现乱码/中文报错怎么办？',
+                a: `这是编码问题。run.bat 开头已包含 <code>chcp 65001</code> 命令切换到 UTF-8。如果仍有问题：
+<br><br>
+1. 确保 run.bat 文件保存为 <strong>UTF-8</strong> 编码（用 VS Code 或 Notepad++ 查看）
+<br>
+2. 右键 CMD 窗口标题栏 → 属性 → 字体 → 选择 <strong>Consolas</strong> 或 <strong>新宋体</strong>`
+            },
+            {
+                q: 'Node.js 自动安装失败怎么办？',
+                a: `手动安装：
+<br><br>
+1. 访问 <a href="https://nodejs.org/" class="text-blue-400 underline" target="_blank">https://nodejs.org/</a>
+<br>
+2. 下载 LTS 版本（推荐 v20+）
+<br>
+3. 安装时保持默认选项，确保勾选"Add to PATH"
+<br>
+4. 安装完成后<strong>重新打开</strong> CMD 窗口再运行 run.bat`
+            },
+            {
+                q: '提示找不到 Chrome 怎么办？',
+                a: `脚本会自动检测常见安装路径。如果找不到：
+<br><br>
+1. 确保已安装 <a href="https://www.google.com/chrome/" class="text-blue-400 underline" target="_blank">Google Chrome</a>
+<br>
+2. 安装在默认路径（C:\\Program Files\\Google\\Chrome\\）`
+            },
+            {
+                q: '运行中 Chrome 崩溃/闪退怎么办？',
+                a: `v10 已内置自动重启机制。如果频繁崩溃：
+<br><br>
+1. 降低并发数：<code>run.bat --concurrency 1</code>
+<br>
+2. 检查系统内存是否充足（每个 Chrome 约占 300MB）
+<br>
+3. 关闭其他占用内存的程序`
+            },
+            {
+                q: '账号登录失败（密码错误/安全验证）怎么办？',
+                a: `• 密码错误的账号会自动跳过，记录在 failed.json
+<br>
+• 需要手机验证的账号会自动跳过
+<br>
+• 安全挑战（恢复邮箱验证）需要在 accounts.txt 中提供恢复邮箱（使用 ---- 分隔符格式）
+<br>
+• 查看 failed.json 了解具体失败原因`
+            },
+            {
+                q: '如何断点续跑？',
+                a: `脚本会自动跳过 credentials.json 中已存在的账号。直接再次运行 run.bat 即可继续处理剩余账号。`
+            },
+        ];
+
+        // Render FAQ
+        const faqContainer = document.getElementById('faq');
+        faqData.forEach((item, i) => {
+            const div = document.createElement('div');
+            div.className = 'card rounded-xl overflow-hidden';
+            div.innerHTML = `
+                <button class="w-full text-left p-5 flex items-center justify-between hover:bg-white/5 transition-colors" onclick="toggleFaq(this)">
+                    <span class="text-white font-medium pr-4">${item.q}</span>
+                    <svg class="w-5 h-5 text-gray-500 flex-shrink-0 transform transition-transform faq-arrow" viewBox="0 0 20 20" fill="currentColor">
+                        <path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd"/>
+                    </svg>
+                </button>
+                <div class="accordion-content">
+                    <div class="px-5 pb-5 text-gray-400 text-sm leading-relaxed border-t border-gray-800 pt-4">${item.a}</div>
+                </div>
+            `;
+            faqContainer.appendChild(div);
+        });
+
+        function toggleFaq(btn) {
+            const content = btn.nextElementSibling;
+            const arrow = btn.querySelector('.faq-arrow');
+            const isOpen = content.classList.contains('open');
+
+            // Close all
+            document.querySelectorAll('.accordion-content').forEach(c => c.classList.remove('open'));
+            document.querySelectorAll('.faq-arrow').forEach(a => a.style.transform = '');
+
+            if (!isOpen) {
+                content.classList.add('open');
+                arrow.style.transform = 'rotate(180deg)';
+            }
+        }
+
+        // Auto-open first FAQ
+        setTimeout(() => {
+            const firstBtn = faqContainer.querySelector('button');
+            if (firstBtn) toggleFaq(firstBtn);
+        }, 500);
+    </script>
+
+</body>
+</html>
