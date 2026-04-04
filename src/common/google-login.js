@@ -62,13 +62,6 @@ async function googleLogin(page, account, wlog) {
             }
 
             case 'password': {
-                // 如果连续多次回到 password 状态，说明密码错误，立即失败
-                const pwCount = stateHistory.filter(s => s === 'password').length;
-                if (pwCount >= 3) {
-                    await takeScreenshot(page, `login_wrong_password_${account.email}`, wlog);
-                    throw new Error('Wrong password: login returned to password page multiple times');
-                }
-
                 // 检查页面上是否已有密码错误提示
                 const hasError = await page.evaluate(() => {
                     const text = (document.body ? document.body.innerText : '').toLowerCase();
@@ -84,6 +77,13 @@ async function googleLogin(page, account, wlog) {
                     throw new Error('Wrong password: error message detected on page');
                 }
 
+                // 如果已经输入过密码（上一个状态也是 password），说明密码可能错误
+                const pwCount = stateHistory.filter(s => s === 'password').length;
+                if (pwCount >= 4) {
+                    await takeScreenshot(page, `login_wrong_password_${account.email}`, wlog);
+                    throw new Error('Wrong password: login returned to password page multiple times');
+                }
+
                 wlog.debug('Entering password');
                 await fastType(page, 'input[type="password"]', account.pass, wlog);
                 await sleep(100);
@@ -91,7 +91,8 @@ async function googleLogin(page, account, wlog) {
                     page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 15000 }).catch(() => { }),
                     page.keyboard.press('Enter'),
                 ]);
-                await sleep(500);
+                // 等待足够长时间让页面跳转，避免误判
+                await sleep(3000);
                 break;
             }
 
@@ -120,6 +121,93 @@ async function googleLogin(page, account, wlog) {
                 }
                 await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 8000 }).catch(() => { });
                 await sleep(200);
+                break;
+            }
+
+            case 'profile_info': {
+                // 登记信息页面 — 填写手机号，其他字段通常已预填
+                wlog.info('  Profile info page detected, filling phone number...');
+
+                const phoneNumber = '+8613004588605';
+
+                // 查找手机号输入框（尝试多种选择器）
+                const phoneFilled = await page.evaluate((phone) => {
+                    const selectors = [
+                        'input[type="tel"]',
+                        'input[name*="phone" i]',
+                        'input[name*="Phone" i]',
+                        'input[autocomplete*="tel"]',
+                        'input[aria-label*="phone" i]',
+                        'input[aria-label*="电话" i]',
+                        'input[aria-label*="手机" i]',
+                    ];
+                    for (const sel of selectors) {
+                        const inputs = document.querySelectorAll(sel);
+                        for (const inp of inputs) {
+                            const r = inp.getBoundingClientRect();
+                            if (r.width > 0 && r.height > 0) {
+                                inp.focus();
+                                inp.click();
+                                // 清空再填写
+                                inp.value = '';
+                                inp.dispatchEvent(new Event('input', { bubbles: true }));
+                                return { found: true, sel };
+                            }
+                        }
+                    }
+                    return { found: false };
+                }, phoneNumber).catch(() => ({ found: false }));
+
+                if (phoneFilled.found) {
+                    wlog.debug(`  Found phone input via: ${phoneFilled.sel}`);
+                    // 用键盘输入最可靠
+                    const mod = process.platform === 'darwin' ? 'Meta' : 'Control';
+                    await page.keyboard.down(mod);
+                    await page.keyboard.press('KeyA');
+                    await page.keyboard.up(mod);
+                    await page.keyboard.press('Backspace');
+                    await sleep(200);
+                    await page.keyboard.type(phoneNumber, { delay: 30 });
+                } else {
+                    wlog.debug('  Phone input not found by selector, trying keyboard navigation...');
+                    // 直接用 fastType 兜底
+                    await fastType(page, 'input[type="tel"]', phoneNumber, wlog);
+                }
+
+                await sleep(1000);
+                await takeScreenshot(page, `profile_info_filled_${account.email}`, wlog);
+
+                // 点击 Next/Continue/提交（使用更多按钮文本）
+                const nextClicked = await tryClickStrategies(page,
+                    ['next', 'continue', 'submit', 'save', '下一步', '继续', '提交', '保存', '完成', 'done'],
+                    wlog, 'profile_next');
+                if (!nextClicked) {
+                    // 尝试 Tab + Enter
+                    for (let t = 0; t < 5; t++) { await page.keyboard.press('Tab'); await sleep(50); }
+                    await page.keyboard.press('Enter');
+                }
+                await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 15000 }).catch(() => { });
+                await sleep(3000);
+                wlog.success('  Profile info submitted');
+                break;
+            }
+
+            case 'profile_address': {
+                // 住址页面 — 直接跳过
+                wlog.info('  Address page detected, skipping...');
+
+                const skipped = await tryClickStrategies(page,
+                    ['skip', 'not now', 'later', '跳过', '以后再说', '暂时不', '稍后'],
+                    wlog, 'address_skip');
+                if (!skipped) {
+                    // 如果没有 skip 按钮，尝试 next/continue
+                    await tryClickStrategies(page,
+                        ['next', 'continue', '下一步', '继续'],
+                        wlog, 'address_next');
+                }
+                await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 10000 }).catch(() => { });
+                await sleep(2000);
+                wlog.success('  Address page skipped');
                 break;
             }
 
@@ -219,13 +307,136 @@ async function googleLogin(page, account, wlog) {
                 break;
             }
 
-            case 'phone_verification': {
+            case 'verify_recovery_email': {
+                // 优先级 1：备用邮箱验证 — 自动填写
+                if (!account.recovery) {
+                    wlog.warn('  Recovery email verification required but no recovery email configured!');
+                    wlog.warn(`  Add recovery email to members.txt: ${account.email}:password:recovery@email.com`);
+                    await takeScreenshot(page, `verify_no_recovery_${account.email}`, wlog);
+                    throw new Error('recovery_email_required_but_not_configured');
+                }
+
+                wlog.info(`  Entering recovery email: ${account.recovery}`);
+
+                // 先尝试点击输入框聚焦
+                const inputFocused = await page.evaluate(() => {
+                    function findInputInShadow(root) {
+                        const selectors = [
+                            'input[name="knowledgePreregisteredEmailResponse"]',
+                            'input[type="email"]',
+                            'input[type="text"]',
+                            'input:not([type="hidden"]):not([type="password"]):not([type="submit"])',
+                        ];
+                        for (const sel of selectors) {
+                            const inputs = root.querySelectorAll(sel);
+                            for (const inp of inputs) {
+                                const r = inp.getBoundingClientRect();
+                                if (r.width > 0 && r.height > 0) {
+                                    inp.focus();
+                                    inp.click();
+                                    // 清空现有内容
+                                    inp.value = '';
+                                    inp.dispatchEvent(new Event('input', { bubbles: true }));
+                                    return true;
+                                }
+                            }
+                        }
+                        const allEls = root.querySelectorAll('*');
+                        for (const el of allEls) {
+                            if (el.shadowRoot) {
+                                const result = findInputInShadow(el.shadowRoot);
+                                if (result) return result;
+                            }
+                        }
+                        return false;
+                    }
+                    return findInputInShadow(document);
+                }).catch(() => false);
+
+                if (inputFocused) {
+                    // 用键盘 Ctrl+A 清空再输入，最可靠
+                    const mod = process.platform === 'darwin' ? 'Meta' : 'Control';
+                    await page.keyboard.down(mod);
+                    await page.keyboard.press('KeyA');
+                    await page.keyboard.up(mod);
+                    await page.keyboard.press('Backspace');
+                    await sleep(200);
+                    await page.keyboard.type(account.recovery, { delay: 30 });
+                } else {
+                    // 尝试用 fastType 兜底
+                    await fastType(page, 'input[type="email"], input[type="text"]', account.recovery, wlog);
+                }
+
+                await sleep(500);
+                // 先尝试点击 "Next" / "下一步" 按钮
+                const nextClicked = await tryClickStrategies(page,
+                    ['next', 'continue', '下一步', '继续', '下一个', 'verify', '验证'],
+                    wlog, 'recovery_next');
+                if (!nextClicked) {
+                    await page.keyboard.press('Enter');
+                }
+                await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 15000 }).catch(() => { });
+                await sleep(3000);
+
+                // 检查是否有错误提示（备用邮箱错误）
+                const recoveryError = await page.evaluate(() => {
+                    const text = (document.body ? document.body.innerText : '').toLowerCase();
+                    return text.includes('wrong') || text.includes('incorrect') ||
+                        text.includes('try again') || text.includes('错误') ||
+                        text.includes('不正确') || text.includes('重试');
+                }).catch(() => false);
+
+                if (recoveryError) {
+                    await takeScreenshot(page, `verify_recovery_wrong_${account.email}`, wlog);
+                    throw new Error('Wrong recovery email');
+                }
+
+                wlog.success('  Recovery email submitted');
+                break;
+            }
+
+            case 'verify_authenticator': {
+                // 优先级 2：Google 验证码 — 等待用户输入
                 wlog.info('  ============================================');
-                wlog.info('  Phone verification required!');
+                wlog.info('  Google Authenticator code required!');
+                wlog.info(`  Account: ${account.email}`);
+                wlog.info('  Please enter the 6-digit code in the Chrome window.');
+                wlog.info('  Waiting (checking every 5s, timeout 5min)...');
+                wlog.info('  ============================================');
+                await takeScreenshot(page, `verify_authenticator_${account.email}`, wlog);
+
+                const authStart = Date.now();
+                const AUTH_TIMEOUT = 5 * 60 * 1000;
+                let authResolved = false;
+
+                while (Date.now() - authStart < AUTH_TIMEOUT) {
+                    await sleep(5000);
+                    const newState = await detectPageState(page, wlog);
+                    if (newState.state !== 'verify_authenticator' &&
+                        newState.state !== 'identity_verify' &&
+                        newState.state !== 'challenge') {
+                        wlog.success('  Authenticator verification completed!');
+                        authResolved = true;
+                        break;
+                    }
+                }
+
+                if (!authResolved) {
+                    throw new Error('authenticator_verification_timeout');
+                }
+                break;
+            }
+
+            case 'verify_phone':
+            case 'phone_verification': {
+                // 优先级 3：手机短信验证 — 等待用户输入
+                wlog.info('  ============================================');
+                wlog.info('  Phone/SMS verification required!');
+                wlog.info(`  Account: ${account.email}`);
                 wlog.info('  Please complete it manually in the Chrome window.');
                 wlog.info('  Waiting (checking every 5s, timeout 5min)...');
                 wlog.info('  ============================================');
-                await takeScreenshot(page, `phone_verify_${account.email}`, wlog);
+                await takeScreenshot(page, `verify_phone_${account.email}`, wlog);
 
                 const phoneStart = Date.now();
                 const PHONE_TIMEOUT = 5 * 60 * 1000;
@@ -234,7 +445,10 @@ async function googleLogin(page, account, wlog) {
                 while (Date.now() - phoneStart < PHONE_TIMEOUT) {
                     await sleep(5000);
                     const newState = await detectPageState(page, wlog);
-                    if (newState.state !== 'phone_verification' && newState.state !== 'challenge') {
+                    if (newState.state !== 'verify_phone' &&
+                        newState.state !== 'phone_verification' &&
+                        newState.state !== 'identity_verify' &&
+                        newState.state !== 'challenge') {
                         wlog.success('  Phone verification completed!');
                         phoneResolved = true;
                         break;
@@ -248,9 +462,65 @@ async function googleLogin(page, account, wlog) {
             }
 
             case 'identity_verify': {
-                wlog.warn('  Identity verification required!');
+                // 通用身份验证 — 按优先级选择验证方式
+                wlog.info('  Identity verification required, checking available methods...');
                 await takeScreenshot(page, `identity_verify_${account.email}`, wlog);
-                throw new Error('identity_verification_required');
+
+                // 按优先级尝试选择验证方式：备用邮箱 > 验证码 > 手机
+                const methodPriority = [
+                    {
+                        name: 'recovery_email',
+                        keywords: ['确认您的辅助邮箱', '辅助邮箱', 'recovery email', 'confirm your recovery email'],
+                    },
+                    {
+                        name: 'authenticator',
+                        keywords: ['authenticator', 'google 验证', '验证码应用', '两步验证'],
+                    },
+                ];
+
+                let methodSelected = false;
+                for (const method of methodPriority) {
+                    if (account.recovery || method.name !== 'recovery_email') {
+                        const clicked = await tryClickStrategies(page, method.keywords, wlog, `select_${method.name}`);
+                        if (clicked) {
+                            wlog.info(`  Selected ${method.name} verification method`);
+                            await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 10000 }).catch(() => { });
+                            await sleep(3000);
+                            methodSelected = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (!methodSelected) {
+                    // 没有找到可自动选择的方式，等待人工处理
+                    wlog.warn('  Could not find preferred verification method');
+                    wlog.info('  ============================================');
+                    wlog.info(`  Account: ${account.email}`);
+                    wlog.info('  Please complete verification manually in the Chrome window.');
+                    wlog.info('  Waiting (checking every 5s, timeout 5min)...');
+                    wlog.info('  ============================================');
+
+                    const verifyStart = Date.now();
+                    const VERIFY_TIMEOUT = 5 * 60 * 1000;
+                    let verifyResolved = false;
+
+                    while (Date.now() - verifyStart < VERIFY_TIMEOUT) {
+                        await sleep(5000);
+                        const newState = await detectPageState(page, wlog);
+                        if (newState.state !== 'identity_verify' &&
+                            newState.state !== 'challenge') {
+                            wlog.success('  Identity verification completed!');
+                            verifyResolved = true;
+                            break;
+                        }
+                    }
+
+                    if (!verifyResolved) {
+                        throw new Error('identity_verification_timeout');
+                    }
+                }
+                break;
             }
 
             case 'error': {
