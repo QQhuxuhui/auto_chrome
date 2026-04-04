@@ -390,7 +390,15 @@ async function detectPageState(page, wlog) {
         t.includes('条款和隐私')) {
         state = 'tos';
     } else if (u.includes('challenge') && !pageInfo.hasPasswordInput) {
-        state = 'challenge';
+        // challenge URL 下进一步细分：如果是 SMS 验证页面，走 verify_phone
+        if (t.includes('receive an sms') || t.includes('接收短信') ||
+            t.includes('sms code') || t.includes('短信验证码') ||
+            t.includes('send an sms') || t.includes('发送短信') ||
+            (t.includes('phone number') && (t.includes('send') || t.includes('发送')))) {
+            state = 'verify_phone';
+        } else {
+            state = 'challenge';
+        }
     } else if (t.includes('选择帐号') || t.includes('choose an account') ||
         t.includes('choose account')) {
         state = 'choose_account';

@@ -4,7 +4,7 @@
  * 成员账号登录 Gmail → 搜索邀请邮件 → 点击接受链接
  */
 
-require('dotenv').config();
+require('dotenv').config({ path: require('path').resolve(__dirname, '.env') });
 const path = require('path');
 const { log, createWorkerLogger, setVerbose, LOG_COLORS, StepTimer } = require('./common/logger');
 const {
@@ -108,6 +108,29 @@ async function acceptInvite(memberAccount, browser, workerId) {
                 wlog.info(`  Poll ${poll}: refreshing inbox (${Math.round(elapsed)}s elapsed)...`);
                 await page.goto(GMAIL_URL, { waitUntil: 'networkidle2', timeout: 30000 }).catch(() => { });
                 await sleep(2000);
+            }
+
+            // 检查是否还在 Gmail 页面（可能跳转到验证页面或其他页面）
+            const currentPollUrl = page.url();
+            if (!currentPollUrl.includes('mail.google.com')) {
+                wlog.warn(`  Not on Gmail (URL: ${currentPollUrl.substring(0, 80)}), handling...`);
+
+                // 检查是否需要登录或验证
+                const pageState = await detectPageState(page, wlog);
+                if (pageState.state === 'identity_verify' || pageState.state === 'verify_phone' ||
+                    pageState.state === 'verify_recovery_email' || pageState.state === 'challenge' ||
+                    pageState.state === 'email' || pageState.state === 'password') {
+                    wlog.info(`  Detected ${pageState.state}, re-running login...`);
+                    await googleLogin(page, memberAccount, wlog);
+                    await sleep(2000);
+                    await page.goto(GMAIL_URL, { waitUntil: 'networkidle2', timeout: 30000 }).catch(() => { });
+                    await sleep(2000);
+                } else {
+                    // 尝试直接导航回 Gmail
+                    await page.goto(GMAIL_URL, { waitUntil: 'networkidle2', timeout: 30000 }).catch(() => { });
+                    await sleep(2000);
+                }
+                continue;
             }
 
             // 尝试在收件箱搜索邀请邮件

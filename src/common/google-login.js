@@ -610,26 +610,34 @@ async function googleLogin(page, account, wlog) {
                 wlog.info('  Identity verification required, checking available methods...');
                 await takeScreenshot(page, `identity_verify_${account.email}`, wlog);
 
-                // 按优先级尝试选择验证方式：备用邮箱 > 验证码 > 手机
+                // 按优先级尝试选择验证方式：备用邮箱 > 验证码 > 手机短信
                 const methodPriority = [
                     {
                         name: 'recovery_email',
                         keywords: ['确认您的辅助邮箱', '辅助邮箱', 'recovery email', 'confirm your recovery email'],
+                        condition: () => !!account.recovery,
                     },
                     {
                         name: 'authenticator',
                         keywords: ['authenticator', 'google 验证', '验证码应用', '两步验证'],
+                        condition: () => true,
+                    },
+                    {
+                        name: 'phone',
+                        keywords: ['verifying your phone', 'phone number', '验证您的电话', '电话号码',
+                            '手机号码', '短信', 'sms', 'text message'],
+                        condition: () => true,
                     },
                 ];
 
                 let methodSelected = false;
                 for (const method of methodPriority) {
-                    if (account.recovery || method.name !== 'recovery_email') {
+                    if (method.condition()) {
                         const clicked = await tryClickStrategies(page, method.keywords, wlog, `select_${method.name}`);
                         if (clicked) {
                             wlog.info(`  Selected ${method.name} verification method`);
-                            await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 10000 }).catch(() => { });
-                            await sleep(3000);
+                            await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 15000 }).catch(() => { });
+                            await sleep(5000);
                             methodSelected = true;
                             break;
                         }
@@ -746,16 +754,24 @@ async function googleLogin(page, account, wlog) {
                 }
 
                 wlog.warn('  Unknown page state');
-                await takeScreenshot(page, `login_unknown_${account.email}_step${step}`, wlog);
-                const unknownKws = [
-                    'continue', 'next', 'ok', 'accept', 'agree', 'allow', 'confirm', 'sign in',
-                    '继续', '下一步', '确定', '接受', '同意', '允许', '确认', '登录',
-                    '我了解', '我知道了', '了解', 'i understand', 'got it',
-                ];
-                const clicked = await tryClickStrategies(page, unknownKws, wlog, 'unknown');
-                if (!clicked) {
-                    for (let t = 0; t < 3; t++) { await page.keyboard.press('Tab'); await sleep(50); }
-                    await page.keyboard.press('Enter');
+                await takeScreenshot(page, `login_unknown_${account.email}_step${step}`, wlog).catch(() => {});
+
+                // 页面可能还在加载，先等一下再操作
+                await sleep(2000);
+
+                try {
+                    const unknownKws = [
+                        'continue', 'next', 'ok', 'accept', 'agree', 'allow', 'confirm', 'sign in',
+                        '继续', '下一步', '确定', '接受', '同意', '允许', '确认', '登录',
+                        '我了解', '我知道了', '了解', 'i understand', 'got it',
+                    ];
+                    const clicked = await tryClickStrategies(page, unknownKws, wlog, 'unknown');
+                    if (!clicked) {
+                        for (let t = 0; t < 3; t++) { await page.keyboard.press('Tab'); await sleep(50); }
+                        await page.keyboard.press('Enter');
+                    }
+                } catch (unknownErr) {
+                    wlog.debug(`  Unknown state handler error: ${unknownErr.message}`);
                 }
                 await sleep(1000);
                 break;

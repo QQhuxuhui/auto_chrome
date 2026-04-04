@@ -9,12 +9,15 @@ const https = require('https');
 const { log } = require('./logger');
 
 const API_BASE = process.env.HERO_SMS_API_URL || 'https://hero-sms.com/stubs/handler_api.php';
-const API_KEY = process.env.HERO_SMS_API_KEY || '';
+
+function getApiKey() {
+    return process.env.HERO_SMS_API_KEY || '';
+}
 
 // ============ HTTP 请求 ============
 async function apiRequest(params) {
     const url = new URL(API_BASE);
-    url.searchParams.set('api_key', API_KEY);
+    url.searchParams.set('api_key', getApiKey());
     for (const [k, v] of Object.entries(params)) {
         url.searchParams.set(k, v);
     }
