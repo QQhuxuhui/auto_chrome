@@ -317,13 +317,70 @@ async function detectPageState(page, wlog) {
     // URL-based detection takes priority for certain patterns
     if (u.includes('challenge/pwd')) {
         state = 'password';
-    } else if (t.includes('verificer, at det er dig') || t.includes('验证身份')) {
-        state = 'identity_verify';
+    } else if (t.includes('verificer, at det er dig') || t.includes('验证身份') ||
+        t.includes("verify it's you") || t.includes('verify your identity') ||
+        t.includes('验证您的身份') || t.includes('verify your info') ||
+        t.includes('choose a way to verify') || t.includes('选择验证方式')) {
+        // 这是身份验证页面，需要细分类型
+        // 关键判断：页面是"选择验证方式"还是"已进入某种验证方式的输入页面"
+        const hasVisibleTextInput = pageInfo.hasEmailInput || await (async () => {
+            // 额外检查是否有可见的 text 输入框（不含密码框）
+            return false; // detectPageState 是同步的，这里用已有的 pageInfo
+        })();
+
+        if (pageInfo.hasEmailInput && (
+            t.includes('recovery email') || t.includes('备用邮箱') ||
+            t.includes('辅助邮箱') || t.includes('恢复电子邮件'))) {
+            // 有可见的邮箱输入框 + 页面提到备用邮箱 = 输入备用邮箱页面
+            state = 'verify_recovery_email';
+        } else if (t.includes('enter code') || t.includes('输入验证码') ||
+            t.includes('输入代码') || t.includes('6-digit') || t.includes('6 位') ||
+            t.includes('enter the code')) {
+            // 页面要求输入验证码（可能是 authenticator 或短信验证码）
+            if (t.includes('authenticator') || t.includes('google 验证') ||
+                t.includes('两步验证') || t.includes('2-step')) {
+                state = 'verify_authenticator';
+            } else if (t.includes('phone') || t.includes('电话') ||
+                t.includes('短信') || t.includes('sms') || t.includes('手机')) {
+                state = 'verify_phone';
+            } else {
+                state = 'verify_authenticator'; // 默认当验证码处理
+            }
+        } else {
+            // 这是"选择验证方式"的页面，走 identity_verify 逻辑去选择
+            state = 'identity_verify';
+        }
     } else if (pageInfo.hasPasswordInput) {
         state = 'password';
     } else if (pageInfo.hasEmailInput &&
         (u.includes('identifier') || u.includes('signin'))) {
         state = 'email';
+    } else if ((u.includes('personal-info') || u.includes('personalinfo') ||
+        t.includes('birthday') || t.includes('出生日期') ||
+        t.includes('gender') || t.includes('性别')) &&
+        !t.includes('verify') && !t.includes('验证')) {
+        // 个人信息登记页面（手机号、生日等），但排除验证页面
+        state = 'profile_info';
+    } else if ((t.includes('phone number') || t.includes('电话号码') ||
+        t.includes('手机号码') || t.includes('phone')) &&
+        !t.includes('verify') && !t.includes('验证') &&
+        (t.includes('add') || t.includes('添加') || t.includes('recovery') ||
+         t.includes('备用') || t.includes('update') || t.includes('更新'))) {
+        // 添加/更新手机号页面（非验证）
+        state = 'profile_info';
+    } else if ((t.includes('add a phone number') || t.includes('添加电话号码') ||
+        t.includes('添加手机号') || t.includes('add phone')) &&
+        (t.includes('skip') || t.includes('跳过') || t.includes("yes, i'm in") ||
+         t.includes('not now') || t.includes('以后再说'))) {
+        // "添加手机号"等可跳过的中间页面
+        state = 'skippable_prompt';
+    } else if ((t.includes('street') || t.includes('街道') ||
+        t.includes('city') || t.includes('城市') ||
+        t.includes('postal') || t.includes('邮政') ||
+        t.includes('zip code') || t.includes('邮编') ||
+        t.includes('mailing address') || t.includes('通讯地址')) &&
+        !t.includes('email address') && !t.includes('verify')) {
+        state = 'profile_address';
     } else if (u.includes('speedbump') ||
         t.includes('欢迎使用您的新账号') ||
         t.includes('welcome to your new account')) {
@@ -343,10 +400,6 @@ async function detectPageState(page, wlog) {
     } else if (t.includes('选择帐号') || t.includes('choose an account') ||
         t.includes('choose account')) {
         state = 'choose_account';
-    } else if ((t.includes("verify it's you") || t.includes('验证您的身份') ||
-        t.includes('get a verification code')) &&
-        (t.includes('phone') || t.includes('电话号码'))) {
-        state = 'phone_verification';
     } else if (u.includes('consent') || u.includes('approval') ||
         t.includes('wants to access') || t.includes('请求以下权限') ||
         t.includes('想要访问') || t.includes('google antigravity') ||
