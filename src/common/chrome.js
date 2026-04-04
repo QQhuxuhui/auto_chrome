@@ -355,25 +355,19 @@ async function detectPageState(page, wlog) {
     } else if (pageInfo.hasEmailInput &&
         (u.includes('identifier') || u.includes('signin'))) {
         state = 'email';
-    } else if ((u.includes('personal-info') || u.includes('personalinfo') ||
-        t.includes('birthday') || t.includes('出生日期') ||
-        t.includes('gender') || t.includes('性别')) &&
-        !t.includes('verify') && !t.includes('验证')) {
-        // 个人信息登记页面（手机号、生日等），但排除验证页面
-        state = 'profile_info';
-    } else if ((t.includes('phone number') || t.includes('电话号码') ||
-        t.includes('手机号码') || t.includes('phone')) &&
-        !t.includes('verify') && !t.includes('验证') &&
-        (t.includes('add') || t.includes('添加') || t.includes('recovery') ||
-         t.includes('备用') || t.includes('update') || t.includes('更新'))) {
-        // 添加/更新手机号页面（非验证）
-        state = 'profile_info';
     } else if ((t.includes('add a phone number') || t.includes('添加电话号码') ||
         t.includes('添加手机号') || t.includes('add phone')) &&
         (t.includes('skip') || t.includes('跳过') || t.includes("yes, i'm in") ||
          t.includes('not now') || t.includes('以后再说'))) {
-        // "添加手机号"等可跳过的中间页面
+        // "添加手机号"等可跳过的中间页面 — 必须在 profile_info 之前检测
         state = 'skippable_prompt';
+    } else if ((u.includes('personal-info') || u.includes('personalinfo') ||
+        t.includes('birthday') || t.includes('出生日期') ||
+        t.includes('gender') || t.includes('性别')) &&
+        !t.includes('verify') && !t.includes('验证') &&
+        !t.includes('skip') && !t.includes('跳过')) {
+        // 个人信息登记页面（手机号、生日等），排除验证页面和可跳过页面
+        state = 'profile_info';
     } else if ((t.includes('street') || t.includes('街道') ||
         t.includes('city') || t.includes('城市') ||
         t.includes('postal') || t.includes('邮政') ||

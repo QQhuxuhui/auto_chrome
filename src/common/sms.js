@@ -8,7 +8,7 @@ const http = require('http');
 const https = require('https');
 const { log } = require('./logger');
 
-const API_BASE = process.env.HERO_SMS_API_URL || 'https://api.hero-sms.com/stubs/handler_api.php';
+const API_BASE = process.env.HERO_SMS_API_URL || 'https://hero-sms.com/stubs/handler_api.php';
 const API_KEY = process.env.HERO_SMS_API_KEY || '';
 
 // ============ HTTP 请求 ============
