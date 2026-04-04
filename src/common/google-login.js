@@ -192,22 +192,52 @@ async function googleLogin(page, account, wlog) {
                 break;
             }
 
+            case 'skippable_prompt':
             case 'profile_address': {
-                // 住址页面 — 直接跳过
-                wlog.info('  Address page detected, skipping...');
+                // 可跳过的中间页面（添加手机号、住址等）— 直接跳过
+                wlog.info(`  Skippable page detected (${state}), skipping...`);
 
-                const skipped = await tryClickStrategies(page,
-                    ['skip', 'not now', 'later', '跳过', '以后再说', '暂时不', '稍后'],
-                    wlog, 'address_skip');
-                if (!skipped) {
-                    // 如果没有 skip 按钮，尝试 next/continue
-                    await tryClickStrategies(page,
-                        ['next', 'continue', '下一步', '继续'],
-                        wlog, 'address_next');
+                // 先用 evaluate 在 Shadow DOM 中搜索 Skip 按钮
+                const skipClicked = await page.evaluate(() => {
+                    const kws = ['skip', '跳过', 'not now', '以后再说', 'no thanks', '不用了'];
+                    function findInShadow(root) {
+                        const els = root.querySelectorAll('button, a, span, div[role="button"], [jscontroller]');
+                        for (const el of els) {
+                            const txt = (el.textContent || '').trim().toLowerCase();
+                            const r = el.getBoundingClientRect();
+                            if (r.width > 0 && r.height > 0 && kws.some(k => txt === k || txt.includes(k))) {
+                                el.click();
+                                return txt;
+                            }
+                        }
+                        const allEls = root.querySelectorAll('*');
+                        for (const el of allEls) {
+                            if (el.shadowRoot) {
+                                const result = findInShadow(el.shadowRoot);
+                                if (result) return result;
+                            }
+                        }
+                        return null;
+                    }
+                    return findInShadow(document);
+                }).catch(() => null);
+
+                if (skipClicked) {
+                    wlog.debug(`  Clicked skip via evaluate: "${skipClicked}"`);
+                } else {
+                    // 退回 tryClickStrategies
+                    const clicked = await tryClickStrategies(page,
+                        ['skip', 'not now', 'later', 'no thanks', '跳过', '以后再说', '暂时不', '稍后', '不用了'],
+                        wlog, 'skip_prompt');
+                    if (!clicked) {
+                        await tryClickStrategies(page,
+                            ['next', 'continue', 'done', '下一步', '继续', '完成'],
+                            wlog, 'skip_next');
+                    }
                 }
                 await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 10000 }).catch(() => { });
                 await sleep(2000);
-                wlog.success('  Address page skipped');
+                wlog.success('  Page skipped');
                 break;
             }
 
@@ -555,7 +585,10 @@ async function googleLogin(page, account, wlog) {
                 const currentUrl = page.url();
                 if (!currentUrl.includes('accounts.google.com') &&
                     !currentUrl.includes('about:blank') &&
-                    !currentUrl.startsWith('chrome://')) {
+                    !currentUrl.startsWith('chrome://') &&
+                    !currentUrl.includes('workspace.google.com') &&
+                    !currentUrl.includes('google.com/gmail') &&
+                    !currentUrl.includes('accounts.youtube.com')) {
                     wlog.info(`  Login appears complete (URL: ${currentUrl.substring(0, 80)})`);
                     return;
                 }

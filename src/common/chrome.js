@@ -368,11 +368,18 @@ async function detectPageState(page, wlog) {
          t.includes('备用') || t.includes('update') || t.includes('更新'))) {
         // 添加/更新手机号页面（非验证）
         state = 'profile_info';
-    } else if (t.includes('address') || t.includes('地址') ||
-        t.includes('street') || t.includes('街道') ||
+    } else if ((t.includes('add a phone number') || t.includes('添加电话号码') ||
+        t.includes('添加手机号') || t.includes('add phone')) &&
+        (t.includes('skip') || t.includes('跳过') || t.includes("yes, i'm in") ||
+         t.includes('not now') || t.includes('以后再说'))) {
+        // "添加手机号"等可跳过的中间页面
+        state = 'skippable_prompt';
+    } else if ((t.includes('street') || t.includes('街道') ||
         t.includes('city') || t.includes('城市') ||
         t.includes('postal') || t.includes('邮政') ||
-        t.includes('zip code') || t.includes('邮编')) {
+        t.includes('zip code') || t.includes('邮编') ||
+        t.includes('mailing address') || t.includes('通讯地址')) &&
+        !t.includes('email address') && !t.includes('verify')) {
         state = 'profile_address';
     } else if (u.includes('speedbump') ||
         t.includes('欢迎使用您的新账号') ||
