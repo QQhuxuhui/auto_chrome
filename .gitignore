@@ -5,12 +5,23 @@ node_modules/
 src/credentials.json
 src/failed.json
 src/enableAPI_failed.json
+failed.json
+state.json
+
+# Sensitive files
+src/.env
+hosts.txt
+members.txt
 
 # Chrome temp data
 src/chrome_data_temp_auth_*/
+src/chrome_data_temp_pipeline_*/
 
 # Debug screenshots
 src/debug_*.png
+
+# Claude Code
+.claude/
 
 # OS files
 Thumbs.db
