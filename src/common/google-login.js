@@ -10,6 +10,7 @@ const {
     sleep, fastType, detectPageState, tryClickStrategies,
     takeScreenshot, listVisibleElements, fastClick,
 } = require('./chrome');
+const { getNumberAndWaitCode } = require('./sms');
 
 const MAX_LOGIN_STEPS = 25;
 
@@ -459,34 +460,147 @@ async function googleLogin(page, account, wlog) {
 
             case 'verify_phone':
             case 'phone_verification': {
-                // 优先级 3：手机短信验证 — 等待用户输入
+                // 手机短信验证 — 使用 hero-sms API 自动获取验证码
                 wlog.info('  ============================================');
                 wlog.info('  Phone/SMS verification required!');
                 wlog.info(`  Account: ${account.email}`);
-                wlog.info('  Please complete it manually in the Chrome window.');
-                wlog.info('  Waiting (checking every 5s, timeout 5min)...');
                 wlog.info('  ============================================');
                 await takeScreenshot(page, `verify_phone_${account.email}`, wlog);
 
-                const phoneStart = Date.now();
-                const PHONE_TIMEOUT = 5 * 60 * 1000;
-                let phoneResolved = false;
+                const smsApiKey = process.env.HERO_SMS_API_KEY;
+                if (!smsApiKey) {
+                    // 没有配置 API Key，退回手动模式
+                    wlog.warn('  HERO_SMS_API_KEY not configured, waiting for manual input...');
+                    wlog.info('  Please complete SMS verification manually in the Chrome window.');
+                    wlog.info('  Waiting (checking every 5s, timeout 5min)...');
 
-                while (Date.now() - phoneStart < PHONE_TIMEOUT) {
-                    await sleep(5000);
-                    const newState = await detectPageState(page, wlog);
-                    if (newState.state !== 'verify_phone' &&
-                        newState.state !== 'phone_verification' &&
-                        newState.state !== 'identity_verify' &&
-                        newState.state !== 'challenge') {
-                        wlog.success('  Phone verification completed!');
-                        phoneResolved = true;
-                        break;
+                    const phoneStartManual = Date.now();
+                    let phoneResolvedManual = false;
+                    while (Date.now() - phoneStartManual < 5 * 60 * 1000) {
+                        await sleep(5000);
+                        const ns = await detectPageState(page, wlog);
+                        if (ns.state !== 'verify_phone' && ns.state !== 'phone_verification' &&
+                            ns.state !== 'identity_verify' && ns.state !== 'challenge') {
+                            wlog.success('  Phone verification completed!');
+                            phoneResolvedManual = true;
+                            break;
+                        }
                     }
+                    if (!phoneResolvedManual) throw new Error('phone_verification_timeout');
+                    break;
                 }
 
-                if (!phoneResolved) {
-                    throw new Error('phone_verification_timeout');
+                // 有 API Key，自动获取号码和验证码
+                try {
+                    const smsResult = await getNumberAndWaitCode({
+                        service: process.env.HERO_SMS_SERVICE || 'go',
+                        country: parseInt(process.env.HERO_SMS_COUNTRY || '0', 10),
+                        timeout: parseInt(process.env.HERO_SMS_TIMEOUT || '120', 10),
+                        pollInterval: parseInt(process.env.HERO_SMS_POLL_INTERVAL || '5', 10),
+                        wlog,
+                        onNumber: async (phone) => {
+                            const phoneFormatted = phone.startsWith('+') ? phone : `+${phone}`;
+                            wlog.info(`  [SMS] Filling phone number: ${phoneFormatted}`);
+
+                            // 查找手机号输入框
+                            const found = await page.evaluate(() => {
+                                const sels = ['input[type="tel"]', 'input[name*="phone" i]',
+                                    'input[autocomplete*="tel"]', 'input[aria-label*="phone" i]',
+                                    'input[aria-label*="\u7535\u8bdd" i]'];
+                                for (const sel of sels) {
+                                    for (const inp of document.querySelectorAll(sel)) {
+                                        const r = inp.getBoundingClientRect();
+                                        if (r.width > 0 && r.height > 0) {
+                                            inp.focus(); inp.click(); inp.value = '';
+                                            inp.dispatchEvent(new Event('input', { bubbles: true }));
+                                            return true;
+                                        }
+                                    }
+                                }
+                                return false;
+                            }).catch(() => false);
+
+                            if (found) {
+                                const mod = process.platform === 'darwin' ? 'Meta' : 'Control';
+                                await page.keyboard.down(mod);
+                                await page.keyboard.press('KeyA');
+                                await page.keyboard.up(mod);
+                                await page.keyboard.press('Backspace');
+                                await sleep(200);
+                                await page.keyboard.type(phoneFormatted, { delay: 30 });
+                            } else {
+                                await fastType(page, 'input[type="tel"]', phoneFormatted, wlog);
+                            }
+
+                            await sleep(500);
+                            const sendClicked = await tryClickStrategies(page,
+                                ['send', 'next', 'get code', 'send code', '\u53d1\u9001', '\u4e0b\u4e00\u6b65', '\u83b7\u53d6\u9a8c\u8bc1\u7801'],
+                                wlog, 'phone_send');
+                            if (!sendClicked) await page.keyboard.press('Enter');
+                            await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 15000 }).catch(() => {});
+                            await sleep(3000);
+                            wlog.info('  [SMS] Phone number submitted, waiting for code...');
+                        },
+                    });
+
+                    // 收到验证码，填入页面
+                    wlog.info(`  [SMS] Entering verification code: ${smsResult.code}`);
+                    const codeFound = await page.evaluate(() => {
+                        const sels = ['input[type="tel"]', 'input[type="number"]', 'input[type="text"]',
+                            'input[name*="code" i]', 'input[name*="pin" i]',
+                            'input[aria-label*="code" i]', 'input[aria-label*="\u9a8c\u8bc1\u7801" i]'];
+                        for (const sel of sels) {
+                            for (const inp of document.querySelectorAll(sel)) {
+                                const r = inp.getBoundingClientRect();
+                                if (r.width > 0 && r.height > 0) {
+                                    inp.focus(); inp.click(); inp.value = '';
+                                    inp.dispatchEvent(new Event('input', { bubbles: true }));
+                                    return true;
+                                }
+                            }
+                        }
+                        return false;
+                    }).catch(() => false);
+
+                    if (codeFound) {
+                        const mod = process.platform === 'darwin' ? 'Meta' : 'Control';
+                        await page.keyboard.down(mod);
+                        await page.keyboard.press('KeyA');
+                        await page.keyboard.up(mod);
+                        await page.keyboard.press('Backspace');
+                        await sleep(200);
+                        await page.keyboard.type(smsResult.code, { delay: 30 });
+                    } else {
+                        await fastType(page, 'input[type="tel"], input[type="text"]', smsResult.code, wlog);
+                    }
+
+                    await sleep(500);
+                    const verifyClicked = await tryClickStrategies(page,
+                        ['verify', 'next', 'continue', 'confirm', '\u9a8c\u8bc1', '\u4e0b\u4e00\u6b65', '\u7ee7\u7eed', '\u786e\u8ba4'],
+                        wlog, 'phone_verify');
+                    if (!verifyClicked) await page.keyboard.press('Enter');
+                    await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 15000 }).catch(() => {});
+                    await sleep(3000);
+                    wlog.success('  [SMS] Phone verification code submitted!');
+
+                } catch (smsErr) {
+                    wlog.error(`  [SMS] Auto verification failed: ${smsErr.message}`);
+                    wlog.info('  Falling back to manual mode...');
+                    await takeScreenshot(page, `sms_error_${account.email}`, wlog);
+
+                    const phoneStartFb = Date.now();
+                    let phoneResolvedFb = false;
+                    while (Date.now() - phoneStartFb < 5 * 60 * 1000) {
+                        await sleep(5000);
+                        const ns = await detectPageState(page, wlog);
+                        if (ns.state !== 'verify_phone' && ns.state !== 'phone_verification' &&
+                            ns.state !== 'identity_verify' && ns.state !== 'challenge') {
+                            wlog.success('  Phone verification completed!');
+                            phoneResolvedFb = true;
+                            break;
+                        }
+                    }
+                    if (!phoneResolvedFb) throw new Error('phone_verification_timeout');
                 }
                 break;
             }
