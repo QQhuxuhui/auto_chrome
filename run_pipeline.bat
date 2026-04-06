@@ -11,7 +11,7 @@ echo.
 echo  ===========================================================
 echo.
 echo    Gemini Family Group Pipeline
-echo    4-Stage Automation
+echo    2-Stage Automation (Invite + Accept)
 echo.
 echo  ===========================================================
 echo.
@@ -55,7 +55,7 @@ if not exist "%SRC%node_modules\puppeteer-core" (
 cd /d "%SRC%"
 
 if "%RUN_ALL%"=="1" (
-    echo  Running all 4 stages...
+    echo  Running all 2 stages...
     echo.
     echo  ---- Stage 1: Send Family Invitations ----
     node 1_invite.js %EXTRA_ARGS%
@@ -64,21 +64,11 @@ if "%RUN_ALL%"=="1" (
     echo  ---- Stage 2: Accept Family Invitations ----
     node 2_accept.js %EXTRA_ARGS%
     if %errorlevel% neq 0 echo  WARNING: Stage 2 had errors
-    echo.
-    echo  ---- Stage 3: Add Accounts to sub2api ----
-    node 3_add_sub2api.js %EXTRA_ARGS%
-    if %errorlevel% neq 0 echo  WARNING: Stage 3 had errors
-    echo.
-    echo  ---- Stage 4: Verify Accounts ----
-    node 4_verify.js %EXTRA_ARGS%
-    if %errorlevel% neq 0 echo  WARNING: Stage 4 had errors
 ) else (
     for %%s in (%STAGE%) do (
         echo  ---- Running Stage %%s ----
         if "%%s"=="1" node 1_invite.js %EXTRA_ARGS%
         if "%%s"=="2" node 2_accept.js %EXTRA_ARGS%
-        if "%%s"=="3" node 3_add_sub2api.js %EXTRA_ARGS%
-        if "%%s"=="4" node 4_verify.js %EXTRA_ARGS%
         echo.
     )
 )

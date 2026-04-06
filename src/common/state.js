@@ -187,9 +187,6 @@ async function initState(groups) {
                 members: g.members.map(m => m.email),
                 stage1_invited: false,
                 stage2_accepted: g.members.map(() => false),
-                stage3_added: g.members.map(() => false),
-                stage4_verified: g.members.map(() => false),
-                refreshTokens: {},
             });
         }
 
