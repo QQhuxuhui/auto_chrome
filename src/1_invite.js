@@ -269,6 +269,28 @@ async function inviteGroup(groupState, hostAccount, memberEmails, browser, worke
     }
 }
 
+// ============ 浏览器清理（支持 KEEP_BROWSER_OPEN） ============
+const keepBrowserOpen = (process.env.KEEP_BROWSER_OPEN || '').toLowerCase() === 'true';
+let _workers = [];
+
+function cleanupWorkers(workers) {
+    for (const w of workers) {
+        if (keepBrowserOpen) {
+            try { w.browser.disconnect(); } catch (_) { }
+        } else {
+            try { w.browser.close(); } catch (_) { }
+            try { w.proc.kill(); } catch (_) { }
+        }
+    }
+    if (keepBrowserOpen && workers.length > 0) log('Browsers kept open (KEEP_BROWSER_OPEN=true)');
+}
+
+process.on('SIGINT', () => {
+    log('\nInterrupted (Ctrl+C). Cleaning up...', 'WARN');
+    cleanupWorkers(_workers);
+    process.exit();
+});
+
 // ============ main ============
 async function main() {
     const hostsFile = path.resolve(__dirname, '..', 'hosts.txt');
@@ -310,7 +332,7 @@ async function main() {
     }
 
     // 启动 Chrome
-    const workers = [];
+    const workers = _workers = [];
     for (let w = 0; w < Math.min(concurrency, pendingGroups.length); w++) {
         try {
             const chrome = await launchRealChrome(chromePath, w);
@@ -375,10 +397,7 @@ async function main() {
     await Promise.all(workers.map(w => workerFn(w)));
 
     // 清理
-    for (const w of workers) {
-        try { w.browser.close(); } catch (_) { }
-        try { w.proc.kill(); } catch (_) { }
-    }
+    cleanupWorkers(workers);
 
     log('');
     log(`${'='.repeat(60)}`);

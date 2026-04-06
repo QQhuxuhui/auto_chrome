@@ -99,11 +99,15 @@ async function googleLogin(page, account, wlog) {
 
             case 'speedbump': {
                 wlog.info('  Handling speedbump...');
+                const speedbumpCount = stateHistory.filter(s => s === 'speedbump').length;
+
                 const kws = [
                     'i understand', 'understood', 'got it', 'accept', 'ok', 'continue', 'next',
                     'i agree', 'agree', '我了解', '我知道了', '知道了', '了解', '明白',
                     '接受', '确定', '好', '继续', '下一步', '我同意', '同意',
                 ];
+
+                // 策略 1: 提交按钮
                 const submitClicked = await page.evaluate(() => {
                     const submits = document.querySelectorAll('input[type="submit"], button[type="submit"]');
                     for (const s of submits) {
@@ -114,14 +118,50 @@ async function googleLogin(page, account, wlog) {
                 }).catch(() => false);
 
                 if (!submitClicked) {
-                    const clicked = await tryClickStrategies(page, kws, wlog, 'speedbump');
-                    if (!clicked) {
-                        for (let t = 0; t < 8; t++) { await page.keyboard.press('Tab'); await sleep(50); }
-                        await page.keyboard.press('Enter');
+                    // 策略 2: Shadow DOM 深度搜索（类似 skippable_prompt）
+                    const shadowClicked = await page.evaluate((kws2) => {
+                        function findInShadow(root) {
+                            const els = root.querySelectorAll('button, a, span, div[role="button"], input[type="submit"], [jscontroller]');
+                            for (const el of els) {
+                                const txt = (el.textContent || '').trim().toLowerCase();
+                                const r = el.getBoundingClientRect();
+                                if (r.width > 0 && r.height > 0 && kws2.some(k => txt === k || txt.includes(k))) {
+                                    el.click();
+                                    return txt;
+                                }
+                            }
+                            const allEls = root.querySelectorAll('*');
+                            for (const el of allEls) {
+                                if (el.shadowRoot) {
+                                    const result = findInShadow(el.shadowRoot);
+                                    if (result) return result;
+                                }
+                            }
+                            return null;
+                        }
+                        return findInShadow(document);
+                    }, kws).catch(() => null);
+
+                    if (shadowClicked) {
+                        wlog.debug(`  Shadow DOM click: "${shadowClicked}"`);
+                    } else {
+                        // 策略 3: tryClickStrategies
+                        const clicked = await tryClickStrategies(page, kws, wlog, 'speedbump');
+                        if (!clicked) {
+                            // 策略 4: 激进键盘导航（重试次数越多 Tab 次数越多）
+                            const tabCount = 3 + speedbumpCount * 2;
+                            wlog.debug(`  Keyboard fallback: ${tabCount} Tabs + Enter`);
+                            for (let t = 0; t < tabCount; t++) {
+                                await page.keyboard.press('Tab');
+                                await sleep(80);
+                            }
+                            await page.keyboard.press('Enter');
+                        }
                     }
                 }
+
                 await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 8000 }).catch(() => { });
-                await sleep(200);
+                await sleep(1000);
                 break;
             }
 
@@ -490,103 +530,137 @@ async function googleLogin(page, account, wlog) {
                     break;
                 }
 
-                // 有 API Key，自动获取号码和验证码
-                try {
-                    const smsResult = await getNumberAndWaitCode({
-                        service: process.env.HERO_SMS_SERVICE || 'go',
-                        country: parseInt(process.env.HERO_SMS_COUNTRY || '0', 10),
-                        timeout: parseInt(process.env.HERO_SMS_TIMEOUT || '120', 10),
-                        pollInterval: parseInt(process.env.HERO_SMS_POLL_INTERVAL || '5', 10),
-                        wlog,
-                        onNumber: async (phone) => {
-                            const phoneFormatted = phone.startsWith('+') ? phone : `+${phone}`;
-                            wlog.info(`  [SMS] Filling phone number: ${phoneFormatted}`);
+                // 有 API Key，自动获取号码和验证码（支持换号重试）
+                const SMS_MAX_RETRIES = parseInt(process.env.HERO_SMS_MAX_RETRIES || '3', 10);
+                let smsSuccess = false;
 
-                            // 查找手机号输入框
-                            const found = await page.evaluate(() => {
-                                const sels = ['input[type="tel"]', 'input[name*="phone" i]',
-                                    'input[autocomplete*="tel"]', 'input[aria-label*="phone" i]',
-                                    'input[aria-label*="\u7535\u8bdd" i]'];
-                                for (const sel of sels) {
-                                    for (const inp of document.querySelectorAll(sel)) {
-                                        const r = inp.getBoundingClientRect();
-                                        if (r.width > 0 && r.height > 0) {
-                                            inp.focus(); inp.click(); inp.value = '';
-                                            inp.dispatchEvent(new Event('input', { bubbles: true }));
-                                            return true;
+                for (let smsAttempt = 1; smsAttempt <= SMS_MAX_RETRIES; smsAttempt++) {
+                    try {
+                        wlog.info(`  [SMS] Attempt ${smsAttempt}/${SMS_MAX_RETRIES}`);
+                        const smsResult = await getNumberAndWaitCode({
+                            service: process.env.HERO_SMS_SERVICE || 'go',
+                            country: parseInt(process.env.HERO_SMS_COUNTRY || '0', 10),
+                            timeout: parseInt(process.env.HERO_SMS_TIMEOUT || '120', 10),
+                            pollInterval: parseInt(process.env.HERO_SMS_POLL_INTERVAL || '5', 10),
+                            wlog,
+                            onNumber: async (phone) => {
+                                const phoneFormatted = phone.startsWith('+') ? phone : `+${phone}`;
+                                wlog.info(`  [SMS] Filling phone number: ${phoneFormatted}`);
+
+                                // 查找手机号输入框
+                                const found = await page.evaluate(() => {
+                                    const sels = ['input[type="tel"]', 'input[name*="phone" i]',
+                                        'input[autocomplete*="tel"]', 'input[aria-label*="phone" i]',
+                                        'input[aria-label*="\u7535\u8bdd" i]'];
+                                    for (const sel of sels) {
+                                        for (const inp of document.querySelectorAll(sel)) {
+                                            const r = inp.getBoundingClientRect();
+                                            if (r.width > 0 && r.height > 0) {
+                                                inp.focus(); inp.click(); inp.value = '';
+                                                inp.dispatchEvent(new Event('input', { bubbles: true }));
+                                                return true;
+                                            }
                                         }
                                     }
+                                    return false;
+                                }).catch(() => false);
+
+                                if (found) {
+                                    const mod = process.platform === 'darwin' ? 'Meta' : 'Control';
+                                    await page.keyboard.down(mod);
+                                    await page.keyboard.press('KeyA');
+                                    await page.keyboard.up(mod);
+                                    await page.keyboard.press('Backspace');
+                                    await sleep(200);
+                                    await page.keyboard.type(phoneFormatted, { delay: 30 });
+                                } else {
+                                    await fastType(page, 'input[type="tel"]', phoneFormatted, wlog);
                                 }
-                                return false;
-                            }).catch(() => false);
 
-                            if (found) {
-                                const mod = process.platform === 'darwin' ? 'Meta' : 'Control';
-                                await page.keyboard.down(mod);
-                                await page.keyboard.press('KeyA');
-                                await page.keyboard.up(mod);
-                                await page.keyboard.press('Backspace');
-                                await sleep(200);
-                                await page.keyboard.type(phoneFormatted, { delay: 30 });
-                            } else {
-                                await fastType(page, 'input[type="tel"]', phoneFormatted, wlog);
+                                await sleep(500);
+                                const sendClicked = await tryClickStrategies(page,
+                                    ['send', 'next', 'get code', 'send code', '\u53d1\u9001', '\u4e0b\u4e00\u6b65', '\u83b7\u53d6\u9a8c\u8bc1\u7801'],
+                                    wlog, 'phone_send');
+                                if (!sendClicked) await page.keyboard.press('Enter');
+                                await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 15000 }).catch(() => {});
+                                await sleep(3000);
+                                wlog.info('  [SMS] Phone number submitted, waiting for code...');
+                            },
+                        });
+
+                        // 收到验证码，填入页面
+                        wlog.info(`  [SMS] Entering verification code: ${smsResult.code}`);
+                        const codeFound = await page.evaluate(() => {
+                            const sels = ['input[type="tel"]', 'input[type="number"]', 'input[type="text"]',
+                                'input[name*="code" i]', 'input[name*="pin" i]',
+                                'input[aria-label*="code" i]', 'input[aria-label*="\u9a8c\u8bc1\u7801" i]'];
+                            for (const sel of sels) {
+                                for (const inp of document.querySelectorAll(sel)) {
+                                    const r = inp.getBoundingClientRect();
+                                    if (r.width > 0 && r.height > 0) {
+                                        inp.focus(); inp.click(); inp.value = '';
+                                        inp.dispatchEvent(new Event('input', { bubbles: true }));
+                                        return true;
+                                    }
+                                }
                             }
+                            return false;
+                        }).catch(() => false);
 
-                            await sleep(500);
-                            const sendClicked = await tryClickStrategies(page,
-                                ['send', 'next', 'get code', 'send code', '\u53d1\u9001', '\u4e0b\u4e00\u6b65', '\u83b7\u53d6\u9a8c\u8bc1\u7801'],
-                                wlog, 'phone_send');
-                            if (!sendClicked) await page.keyboard.press('Enter');
-                            await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 15000 }).catch(() => {});
-                            await sleep(3000);
-                            wlog.info('  [SMS] Phone number submitted, waiting for code...');
-                        },
-                    });
+                        if (codeFound) {
+                            const mod = process.platform === 'darwin' ? 'Meta' : 'Control';
+                            await page.keyboard.down(mod);
+                            await page.keyboard.press('KeyA');
+                            await page.keyboard.up(mod);
+                            await page.keyboard.press('Backspace');
+                            await sleep(200);
+                            await page.keyboard.type(smsResult.code, { delay: 30 });
+                        } else {
+                            await fastType(page, 'input[type="tel"], input[type="text"]', smsResult.code, wlog);
+                        }
 
-                    // 收到验证码，填入页面
-                    wlog.info(`  [SMS] Entering verification code: ${smsResult.code}`);
-                    const codeFound = await page.evaluate(() => {
-                        const sels = ['input[type="tel"]', 'input[type="number"]', 'input[type="text"]',
-                            'input[name*="code" i]', 'input[name*="pin" i]',
-                            'input[aria-label*="code" i]', 'input[aria-label*="\u9a8c\u8bc1\u7801" i]'];
-                        for (const sel of sels) {
-                            for (const inp of document.querySelectorAll(sel)) {
-                                const r = inp.getBoundingClientRect();
-                                if (r.width > 0 && r.height > 0) {
-                                    inp.focus(); inp.click(); inp.value = '';
-                                    inp.dispatchEvent(new Event('input', { bubbles: true }));
-                                    return true;
+                        await sleep(500);
+                        const verifyClicked = await tryClickStrategies(page,
+                            ['verify', 'next', 'continue', 'confirm', '\u9a8c\u8bc1', '\u4e0b\u4e00\u6b65', '\u7ee7\u7eed', '\u786e\u8ba4'],
+                            wlog, 'phone_verify');
+                        if (!verifyClicked) await page.keyboard.press('Enter');
+                        await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 15000 }).catch(() => {});
+                        await sleep(3000);
+                        wlog.success('  [SMS] Phone verification code submitted!');
+                        smsSuccess = true;
+                        break;
+
+                    } catch (smsErr) {
+                        wlog.error(`  [SMS] Attempt ${smsAttempt} failed: ${smsErr.message}`);
+                        if (smsAttempt < SMS_MAX_RETRIES) {
+                            wlog.info(`  [SMS] Retrying with new number...`);
+                            // 尝试回到手机号输入页面（点浏览器后退或检测当前状态）
+                            await page.goBack({ waitUntil: 'networkidle2', timeout: 10000 }).catch(() => {});
+                            await sleep(2000);
+                            // 检查是否回到了手机号输入页
+                            const retryState = await detectPageState(page, wlog);
+                            if (retryState.state !== 'verify_phone' && retryState.state !== 'phone_verification') {
+                                wlog.warn(`  [SMS] Could not return to phone input (state: ${retryState.state})`);
+                                // 如果回到 identity_verify，重新选 phone
+                                if (retryState.state === 'identity_verify') {
+                                    const reClicked = await tryClickStrategies(page,
+                                        ['verifying your phone', 'verify your phone', 'phone number',
+                                            '验证您的电话', '电话号码', '手机号码', '短信', 'sms', 'text message',
+                                            'get a verification code'],
+                                        wlog, 'retry_select_phone');
+                                    if (reClicked) {
+                                        await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 8000 }).catch(() => {});
+                                        await sleep(3000);
+                                    }
                                 }
                             }
                         }
-                        return false;
-                    }).catch(() => false);
-
-                    if (codeFound) {
-                        const mod = process.platform === 'darwin' ? 'Meta' : 'Control';
-                        await page.keyboard.down(mod);
-                        await page.keyboard.press('KeyA');
-                        await page.keyboard.up(mod);
-                        await page.keyboard.press('Backspace');
-                        await sleep(200);
-                        await page.keyboard.type(smsResult.code, { delay: 30 });
-                    } else {
-                        await fastType(page, 'input[type="tel"], input[type="text"]', smsResult.code, wlog);
                     }
+                }
 
-                    await sleep(500);
-                    const verifyClicked = await tryClickStrategies(page,
-                        ['verify', 'next', 'continue', 'confirm', '\u9a8c\u8bc1', '\u4e0b\u4e00\u6b65', '\u7ee7\u7eed', '\u786e\u8ba4'],
-                        wlog, 'phone_verify');
-                    if (!verifyClicked) await page.keyboard.press('Enter');
-                    await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 15000 }).catch(() => {});
-                    await sleep(3000);
-                    wlog.success('  [SMS] Phone verification code submitted!');
-
-                } catch (smsErr) {
-                    wlog.error(`  [SMS] Auto verification failed: ${smsErr.message}`);
-                    wlog.info('  Falling back to manual mode...');
-                    await takeScreenshot(page, `sms_error_${account.email}`, wlog);
+                if (!smsSuccess) {
+                    wlog.warn('  [SMS] All auto attempts exhausted, falling back to manual mode...');
+                    await takeScreenshot(page, `sms_all_failed_${account.email}`, wlog);
 
                     const phoneStartFb = Date.now();
                     let phoneResolvedFb = false;
@@ -610,6 +684,31 @@ async function googleLogin(page, account, wlog) {
                 wlog.info('  Identity verification required, checking available methods...');
                 await takeScreenshot(page, `identity_verify_${account.email}`, wlog);
 
+                // 检测是否反复进入 identity_verify（说明选择后没生效）
+                const identityCount = stateHistory.filter(s => s === 'identity_verify').length;
+                if (identityCount >= 4) {
+                    wlog.warn('  identity_verify repeated too many times, falling back to manual mode');
+                    wlog.info('  ============================================');
+                    wlog.info(`  Account: ${account.email}`);
+                    wlog.info('  Please complete verification manually in the Chrome window.');
+                    wlog.info('  Waiting (checking every 5s, timeout 5min)...');
+                    wlog.info('  ============================================');
+
+                    const verifyStart = Date.now();
+                    let verifyResolved = false;
+                    while (Date.now() - verifyStart < 5 * 60 * 1000) {
+                        await sleep(5000);
+                        const newState = await detectPageState(page, wlog);
+                        if (newState.state !== 'identity_verify' && newState.state !== 'challenge') {
+                            wlog.success('  Identity verification completed!');
+                            verifyResolved = true;
+                            break;
+                        }
+                    }
+                    if (!verifyResolved) throw new Error('identity_verification_timeout');
+                    break;
+                }
+
                 // 按优先级尝试选择验证方式：备用邮箱 > 验证码 > 手机短信
                 const methodPriority = [
                     {
@@ -624,8 +723,9 @@ async function googleLogin(page, account, wlog) {
                     },
                     {
                         name: 'phone',
-                        keywords: ['verifying your phone', 'phone number', '验证您的电话', '电话号码',
-                            '手机号码', '短信', 'sms', 'text message'],
+                        keywords: ['verifying your phone', 'verify your phone', 'phone number',
+                            '验证您的电话', '电话号码', '手机号码', '短信', 'sms', 'text message',
+                            'get a verification code'],
                         condition: () => true,
                     },
                 ];
@@ -636,8 +736,22 @@ async function googleLogin(page, account, wlog) {
                         const clicked = await tryClickStrategies(page, method.keywords, wlog, `select_${method.name}`);
                         if (clicked) {
                             wlog.info(`  Selected ${method.name} verification method`);
-                            await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 15000 }).catch(() => { });
-                            await sleep(5000);
+                            // Google 可能用 AJAX 更新页面而非整页导航，两种都等
+                            await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 8000 }).catch(() => { });
+                            await sleep(3000);
+                            // 检查页面是否已变化
+                            const afterState = await detectPageState(page, wlog);
+                            if (afterState.state === 'identity_verify') {
+                                // 页面没变，可能需要点击 Next/Continue
+                                wlog.debug('  Page still on identity_verify after click, trying Next...');
+                                const nextClicked = await tryClickStrategies(page,
+                                    ['next', 'continue', '下一步', '继续', 'try another way', '尝试其他方式'],
+                                    wlog, 'identity_next');
+                                if (nextClicked) {
+                                    await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 8000 }).catch(() => { });
+                                    await sleep(2000);
+                                }
+                            }
                             methodSelected = true;
                             break;
                         }

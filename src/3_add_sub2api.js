@@ -302,6 +302,27 @@ async function addAccountToSub2api(page, memberEmail, refreshToken, wlog) {
     throw new Error(`Add account may have failed: ${resultText.substring(0, 200)}`);
 }
 
+// ============ 浏览器清理（支持 KEEP_BROWSER_OPEN） ============
+const keepBrowserOpen = (process.env.KEEP_BROWSER_OPEN || '').toLowerCase() === 'true';
+let _chrome = null;
+
+function cleanupChrome() {
+    if (!_chrome) return;
+    if (keepBrowserOpen) {
+        try { _chrome.browser.disconnect(); } catch (_) { }
+        log('Browser kept open (KEEP_BROWSER_OPEN=true)');
+    } else {
+        try { _chrome.browser.close(); } catch (_) { }
+        try { _chrome.proc.kill(); } catch (_) { }
+    }
+}
+
+process.on('SIGINT', () => {
+    log('\nInterrupted (Ctrl+C). Cleaning up...', 'WARN');
+    cleanupChrome();
+    process.exit();
+});
+
 // ============ main ============
 async function main() {
     const chromePath = findChrome();
@@ -353,7 +374,7 @@ async function main() {
     }
 
     // 启动 Chrome（串行操作，只需1个）
-    const chrome = await launchRealChrome(chromePath, 0);
+    const chrome = _chrome = await launchRealChrome(chromePath, 0);
     const wlog = createWorkerLogger(0);
 
     try {
@@ -403,8 +424,7 @@ async function main() {
         log('');
 
     } finally {
-        try { chrome.browser.close(); } catch (_) { }
-        try { chrome.proc.kill(); } catch (_) { }
+        cleanupChrome();
     }
 }
 

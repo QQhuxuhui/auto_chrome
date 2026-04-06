@@ -381,7 +381,12 @@ async function launchRealChrome(chromePath, workerId = 0) {
         '--disable-domain-reliability',
         '--no-sandbox',
         '--metrics-recording-only',
-    ], { detached: false, stdio: 'ignore' });
+    ], { detached: (process.env.KEEP_BROWSER_OPEN || '').toLowerCase() === 'true', stdio: 'ignore' });
+
+    // 如果 KEEP_BROWSER_OPEN，unref 让 Node 退出时不等待 Chrome
+    if ((process.env.KEEP_BROWSER_OPEN || '').toLowerCase() === 'true') {
+        proc.unref();
+    }
 
     proc.on('error', e => { wlog.error(`Chrome process error: ${e.message}`, e); });
     proc.on('exit', (code, signal) => {
@@ -1819,11 +1824,21 @@ async function main() {
         }
     }, 60000);
 
+    const keepBrowserOpen = (process.env.KEEP_BROWSER_OPEN || '').toLowerCase() === 'true';
+
     function cleanup() {
         clearInterval(progressInterval);
         for (const w of workers) {
-            try { w.browser.close(); } catch (_) { }
-            try { w.proc.kill(); } catch (_) { }
+            if (keepBrowserOpen) {
+                // 仅断开 Puppeteer 连接，保留 Chrome 进程运行
+                try { w.browser.disconnect(); } catch (_) { }
+            } else {
+                try { w.browser.close(); } catch (_) { }
+                try { w.proc.kill(); } catch (_) { }
+            }
+        }
+        if (keepBrowserOpen) {
+            log('Browsers kept open (KEEP_BROWSER_OPEN=true)', 'INFO');
         }
     }
 

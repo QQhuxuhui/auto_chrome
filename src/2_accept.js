@@ -172,42 +172,78 @@ async function acceptInvite(memberAccount, browser, workerId) {
             if (emailFound) {
                 wlog.success(`  Found invite email: "${emailFound}"`);
 
-                // 用 tryClickStrategies 点击邮件行（比 evaluate 中 el.click() 更可靠）
-                const emailKws = ['family group', 'google one', '家庭组', 'family plan',
-                    "join bond's family", "join", 'family'];
-                const rowClicked = await tryClickStrategies(page, emailKws, wlog, 'open_email');
-
-                if (!rowClicked) {
-                    // 退回 evaluate 点击
-                    await page.evaluate((keywords) => {
-                        const rows = document.querySelectorAll('tr, div[role="row"], div[class*="zA"]');
-                        for (const row of rows) {
-                            const text = (row.textContent || '').toLowerCase();
-                            if (keywords.some(k => text.includes(k.toLowerCase()))) {
-                                const clickable = row.querySelector('td, span[id], div[role="link"], a');
-                                if (clickable) { clickable.click(); return; }
-                                row.click();
-                                return;
+                // 点击邮件行打开邮件 — Gmail 搜索结果的行需要精确点击
+                // 策略 1: 直接 evaluate 点击邮件行中间区域（最可靠）
+                const openedByEval = await page.evaluate((keywords) => {
+                    const rows = document.querySelectorAll('tr, div[role="row"], div[class*="zA"]');
+                    for (const row of rows) {
+                        const text = (row.textContent || '').toLowerCase();
+                        if (keywords.some(k => text.includes(k.toLowerCase()))) {
+                            // 在邮件行中寻找可点击的主体区域（邮件标题/摘要）
+                            // Gmail 的邮件标题通常在 td.xY 或 span.bog 或 span.bqe 内
+                            const targets = [
+                                ...row.querySelectorAll('td.xY, td.yX, span.bog, span.bqe'),
+                                ...row.querySelectorAll('span[id]:not([class*="checkbox"])'),
+                                ...row.querySelectorAll('td:nth-child(n+3)'), // 跳过 checkbox 和星标列
+                            ];
+                            for (const target of targets) {
+                                const r = target.getBoundingClientRect();
+                                if (r.width > 50 && r.height > 10) {
+                                    target.click();
+                                    return 'clicked_target';
+                                }
                             }
+                            // 兜底：直接点击行
+                            row.click();
+                            return 'clicked_row';
                         }
-                    }, searchKeywords).catch(() => { });
-                }
+                    }
+                    return null;
+                }, searchKeywords).catch(() => null);
 
+                if (openedByEval) {
+                    wlog.debug(`  Email open attempt: ${openedByEval}`);
+                }
                 await sleep(3000);
 
-                // 验证是否已进入邮件内容页面（URL 应包含邮件 ID 或页面有邮件正文）
-                const inEmailView = await page.evaluate(() => {
-                    // 邮件内容页面通常有 h2 标题、或者 email body
-                    const hasBody = document.querySelector('div[data-message-id], div[class*="adn"], div.a3s');
-                    const url = location.href;
-                    return !!(hasBody || url.includes('#inbox/') || url.includes('#search/'));
+                // 验证是否已进入邮件内容页面
+                let inEmailView = await page.evaluate(() => {
+                    // 邮件内容页面有 message body 元素
+                    const hasBody = document.querySelector('div[data-message-id], div[class*="adn"], div.a3s, div.ii.gt');
+                    return !!hasBody;
                 }).catch(() => false);
 
                 if (!inEmailView) {
-                    wlog.warn('  Email row clicked but may not have opened, retrying...');
-                    // 再尝试一次键盘方式：点击搜索结果中第一条
+                    wlog.warn('  Email not opened yet, trying keyboard navigation...');
+                    // 策略 2: 键盘 Enter 打开第一封搜索结果
                     await page.keyboard.press('Enter');
                     await sleep(3000);
+
+                    inEmailView = await page.evaluate(() => {
+                        const hasBody = document.querySelector('div[data-message-id], div[class*="adn"], div.a3s, div.ii.gt');
+                        return !!hasBody;
+                    }).catch(() => false);
+                }
+
+                if (!inEmailView) {
+                    // 策略 3: 用 tryClickStrategies 精确点击邮件标题
+                    wlog.warn('  Still not in email view, trying tryClickStrategies...');
+                    const rowClicked = await tryClickStrategies(page,
+                        ['family group', 'google one', "join bond's family", 'family plan', '家庭组'],
+                        wlog, 'open_email');
+                    if (rowClicked) {
+                        await sleep(3000);
+                    }
+                }
+
+                // 最终验证
+                const finalCheck = await page.evaluate(() => {
+                    const hasBody = document.querySelector('div[data-message-id], div[class*="adn"], div.a3s, div.ii.gt');
+                    return !!hasBody;
+                }).catch(() => false);
+
+                if (!finalCheck) {
+                    wlog.warn('  Could not confirm email opened, proceeding anyway...');
                 }
 
                 inviteFound = true;
@@ -419,6 +455,28 @@ async function acceptInvite(memberAccount, browser, workerId) {
     }
 }
 
+// ============ 浏览器清理（支持 KEEP_BROWSER_OPEN） ============
+const keepBrowserOpen = (process.env.KEEP_BROWSER_OPEN || '').toLowerCase() === 'true';
+let _workers = []; // 供 SIGINT handler 访问
+
+function cleanupWorkers(workers) {
+    for (const w of workers) {
+        if (keepBrowserOpen) {
+            try { w.browser.disconnect(); } catch (_) { }
+        } else {
+            try { w.browser.close(); } catch (_) { }
+            try { w.proc.kill(); } catch (_) { }
+        }
+    }
+    if (keepBrowserOpen && workers.length > 0) log('Browsers kept open (KEEP_BROWSER_OPEN=true)');
+}
+
+process.on('SIGINT', () => {
+    log('\nInterrupted (Ctrl+C). Cleaning up...', 'WARN');
+    cleanupWorkers(_workers);
+    process.exit();
+});
+
 // ============ main ============
 async function main() {
     const membersFile = path.resolve(__dirname, '..', 'members.txt');
@@ -474,7 +532,7 @@ async function main() {
     }
 
     // 启动 Chrome
-    const workers = [];
+    const workers = _workers = [];
     for (let w = 0; w < Math.min(concurrency, pendingMembers.length); w++) {
         try {
             const chrome = await launchRealChrome(chromePath, w);
@@ -532,10 +590,7 @@ async function main() {
     await Promise.all(workers.map(w => workerFn(w)));
 
     // 清理
-    for (const w of workers) {
-        try { w.browser.close(); } catch (_) { }
-        try { w.proc.kill(); } catch (_) { }
-    }
+    cleanupWorkers(workers);
 
     log('');
     log(`${'='.repeat(60)}`);

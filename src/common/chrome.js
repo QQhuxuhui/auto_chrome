@@ -106,7 +106,12 @@ async function launchRealChrome(chromePath, workerId = 0) {
         '--disable-domain-reliability',
         '--no-sandbox',
         '--metrics-recording-only',
-    ], { detached: false, stdio: 'ignore' });
+    ], { detached: (process.env.KEEP_BROWSER_OPEN || '').toLowerCase() === 'true', stdio: 'ignore' });
+
+    // 如果 KEEP_BROWSER_OPEN，unref 让 Node 退出时不等待 Chrome
+    if ((process.env.KEEP_BROWSER_OPEN || '').toLowerCase() === 'true') {
+        proc.unref();
+    }
 
     proc.on('error', e => { wlog.error(`Chrome process error: ${e.message}`, e); });
     proc.on('exit', (code, signal) => {
@@ -284,18 +289,21 @@ async function detectPageState(page, wlog) {
         const hasVisibleEmail = emailInputs.some(isVisible);
         const pwInputs = Array.from(document.querySelectorAll('input[type="password"]'));
         const hasVisiblePassword = pwInputs.some(isVisible);
+        const telInputs = Array.from(document.querySelectorAll('input[type="tel"]'));
+        const hasVisibleTel = telInputs.some(isVisible);
         return {
             text: text.substring(0, 3000),
             title: document.title || '',
             hasEmailInput: hasVisibleEmail,
             hasPasswordInput: hasVisiblePassword,
+            hasPhoneInput: hasVisibleTel,
             url: location.href,
             inputCount: document.querySelectorAll('input').length,
             buttonCount: document.querySelectorAll('button, [role="button"]').length,
             formCount: document.querySelectorAll('form').length,
         };
     }).catch(() => ({
-        text: '', title: '', hasEmailInput: false, hasPasswordInput: false,
+        text: '', title: '', hasEmailInput: false, hasPasswordInput: false, hasPhoneInput: false,
         url: pageUrl, inputCount: 0, buttonCount: 0, formCount: 0,
     }));
 
@@ -333,6 +341,11 @@ async function detectPageState(page, wlog) {
             t.includes('辅助邮箱') || t.includes('恢复电子邮件'))) {
             // 有可见的邮箱输入框 + 页面提到备用邮箱 = 输入备用邮箱页面
             state = 'verify_recovery_email';
+        } else if (pageInfo.hasPhoneInput && (
+            t.includes('phone') || t.includes('电话') || t.includes('手机') ||
+            t.includes('sms') || t.includes('短信') || t.includes('verify your phone'))) {
+            // 有可见的手机号输入框 = 已进入手机号填写页面
+            state = 'verify_phone';
         } else if (t.includes('enter code') || t.includes('输入验证码') ||
             t.includes('输入代码') || t.includes('6-digit') || t.includes('6 位') ||
             t.includes('enter the code')) {
