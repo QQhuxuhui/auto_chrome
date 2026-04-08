@@ -11,6 +11,7 @@ const {
     takeScreenshot, listVisibleElements, fastClick,
 } = require('./chrome');
 const { getNumberAndWaitCode } = require('./sms');
+const { generateTOTP, getTOTPWithTTL } = require('./totp');
 
 const MAX_LOGIN_STEPS = 25;
 
@@ -467,33 +468,97 @@ async function googleLogin(page, account, wlog) {
             }
 
             case 'verify_authenticator': {
-                // 优先级 2：Google 验证码 — 等待用户输入
-                wlog.info('  ============================================');
-                wlog.info('  Google Authenticator code required!');
-                wlog.info(`  Account: ${account.email}`);
-                wlog.info('  Please enter the 6-digit code in the Chrome window.');
-                wlog.info('  Waiting (checking every 5s, timeout 5min)...');
-                wlog.info('  ============================================');
-                await takeScreenshot(page, `verify_authenticator_${account.email}`, wlog);
+                if (account.totp_secret) {
+                    // 自动生成并填入 TOTP 验证码
+                    const { code, remainingSeconds } = getTOTPWithTTL(account.totp_secret);
+                    wlog.info('  ============================================');
+                    wlog.info('  Auto-generating TOTP code from fa_secret');
+                    wlog.info(`  Account: ${account.email}`);
+                    wlog.info(`  Code: ${code} (valid for ${remainingSeconds}s)`);
+                    wlog.info('  ============================================');
 
-                const authStart = Date.now();
-                const AUTH_TIMEOUT = 5 * 60 * 1000;
-                let authResolved = false;
-
-                while (Date.now() - authStart < AUTH_TIMEOUT) {
-                    await sleep(5000);
-                    const newState = await detectPageState(page, wlog);
-                    if (newState.state !== 'verify_authenticator' &&
-                        newState.state !== 'identity_verify' &&
-                        newState.state !== 'challenge') {
-                        wlog.success('  Authenticator verification completed!');
-                        authResolved = true;
-                        break;
+                    // 如果剩余时间太短，等待下一个周期
+                    if (remainingSeconds < 5) {
+                        wlog.info(`  Code expiring soon, waiting ${remainingSeconds + 1}s for new code...`);
+                        await sleep((remainingSeconds + 1) * 1000);
+                        const fresh = getTOTPWithTTL(account.totp_secret);
+                        wlog.info(`  New code: ${fresh.code} (valid for ${fresh.remainingSeconds}s)`);
+                        var totpCode = fresh.code;
+                    } else {
+                        var totpCode = code;
                     }
-                }
 
-                if (!authResolved) {
-                    throw new Error('authenticator_verification_timeout');
+                    // 查找输入框并填入验证码
+                    const inputFound = await page.evaluate(() => {
+                        const sels = ['input[type="tel"]', 'input[type="number"]', 'input[type="text"]',
+                            'input[name*="totpPin" i]', 'input[name*="pin" i]', 'input[name*="code" i]',
+                            'input[aria-label*="code" i]', 'input[aria-label*="验证码" i]',
+                            '#totpPin', '#idvPin'];
+                        for (const sel of sels) {
+                            for (const inp of document.querySelectorAll(sel)) {
+                                const r = inp.getBoundingClientRect();
+                                if (r.width > 0 && r.height > 0 && !inp.disabled) {
+                                    inp.focus();
+                                    inp.value = '';
+                                    return true;
+                                }
+                            }
+                        }
+                        return false;
+                    });
+
+                    if (inputFound) {
+                        await sleep(200);
+                        await page.keyboard.type(totpCode, { delay: 30 });
+                    } else {
+                        await fastType(page, 'input[type="tel"], input[type="text"]', totpCode, wlog);
+                    }
+
+                    await sleep(500);
+                    const clicked = await tryClickStrategies(page,
+                        ['verify', 'next', 'continue', 'confirm', '验证', '下一步', '继续', '确认'],
+                        wlog, 'totp_verify');
+                    if (!clicked) await page.keyboard.press('Enter');
+                    await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 15000 }).catch(() => {});
+                    await sleep(3000);
+
+                    // 检查是否通过
+                    const postState = await detectPageState(page, wlog);
+                    if (postState.state === 'verify_authenticator') {
+                        wlog.warn('  TOTP code may have been rejected, will retry on next loop...');
+                    } else {
+                        wlog.success('  TOTP verification completed automatically!');
+                    }
+                } else {
+                    // 无 fa_secret — 回退到手动模式
+                    wlog.info('  ============================================');
+                    wlog.info('  Google Authenticator code required!');
+                    wlog.info(`  Account: ${account.email}`);
+                    wlog.info('  No totp_secret configured — manual input required.');
+                    wlog.info('  Please enter the 6-digit code in the Chrome window.');
+                    wlog.info('  Waiting (checking every 5s, timeout 5min)...');
+                    wlog.info('  ============================================');
+                    await takeScreenshot(page, `verify_authenticator_${account.email}`, wlog);
+
+                    const authStart = Date.now();
+                    const AUTH_TIMEOUT = 5 * 60 * 1000;
+                    let authResolved = false;
+
+                    while (Date.now() - authStart < AUTH_TIMEOUT) {
+                        await sleep(5000);
+                        const newState = await detectPageState(page, wlog);
+                        if (newState.state !== 'verify_authenticator' &&
+                            newState.state !== 'identity_verify' &&
+                            newState.state !== 'challenge') {
+                            wlog.success('  Authenticator verification completed!');
+                            authResolved = true;
+                            break;
+                        }
+                    }
+
+                    if (!authResolved) {
+                        throw new Error('authenticator_verification_timeout');
+                    }
                 }
                 break;
             }

@@ -79,7 +79,7 @@ function parseAccounts(f) {
             return null;
         }
 
-        let pass, recovery;
+        let pass, recovery, totp_secret;
         const restDashPos = rest.indexOf('----');
         if (restDashPos >= 0) {
             const before = rest.substring(0, restDashPos).trim();
@@ -91,20 +91,35 @@ function parseAccounts(f) {
         }
 
         if (pass === undefined) {
-            const lastColon = rest.lastIndexOf(':');
-            if (lastColon < 0) {
-                pass = rest.trim();
-                recovery = '';
-            } else {
-                const afterLast = rest.substring(lastColon + 1).trim();
-                const beforeLast = rest.substring(0, lastColon).trim();
+            // 支持格式: pass:recovery:totp_secret 或 pass:recovery 或 pass
+            // totp_secret 是纯 base32 字符串（A-Z2-7），不含 @ 也不含空格
+            const parts = rest.split(':');
+            if (parts.length >= 3) {
+                // email:pass:recovery:fa_secret 格式
+                pass = parts[0].trim();
+                recovery = parts[1].trim();
+                totp_secret = parts.slice(2).join(':').trim(); // fa码可能含特殊字符，保留完整
+            } else if (parts.length === 2) {
+                const afterLast = parts[1].trim();
+                const beforeLast = parts[0].trim();
                 if (afterLast === '' || afterLast.includes('@')) {
                     pass = beforeLast;
                     recovery = afterLast;
                 } else {
-                    pass = rest.trim();
-                    recovery = '';
+                    // 没有 @ 符号 — 可能是 pass:fa_secret（无 recovery）
+                    // 判断：如果看起来像 base32（只含 A-Z 和 2-7，长度>=16），当作 fa_secret
+                    if (/^[A-Za-z2-7]{16,}$/.test(afterLast)) {
+                        pass = beforeLast;
+                        recovery = '';
+                        totp_secret = afterLast;
+                    } else {
+                        pass = rest.trim();
+                        recovery = '';
+                    }
                 }
+            } else {
+                pass = rest.trim();
+                recovery = '';
             }
         }
 
@@ -117,7 +132,9 @@ function parseAccounts(f) {
             return null;
         }
 
-        return { idx: i + 1, email, pass, recovery: recovery || '' };
+        const account = { idx: i + 1, email, pass, recovery: recovery || '' };
+        if (totp_secret) account.totp_secret = totp_secret;
+        return account;
     }).filter(Boolean);
 }
 
