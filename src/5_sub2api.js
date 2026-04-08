@@ -173,18 +173,39 @@ async function fillAddAccountForm(page, memberEmail, wlog) {
 
     // 4. 选择代理: 点击 "无代理" 下拉框，选择 socks5 代理
     wlog.debug('  Selecting proxy...');
-    await clickButtonByText(page, '无代理');
-    await sleep(1000);
+    // 需要滚动到代理区域先
+    await page.evaluate(() => {
+        const labels = document.querySelectorAll('label, span, div');
+        for (const el of labels) {
+            if (el.textContent.trim() === '代理') {
+                el.scrollIntoView({ behavior: 'instant', block: 'center' });
+                return;
+            }
+        }
+    }).catch(() => {});
+    await sleep(500);
 
-    // 在弹出的下拉列表中选择包含 "216.175.194.166" 的选项
+    await clickButtonByText(page, '无代理');
+    await sleep(1500);
+
+    // 在弹出的下拉列表中精确选择包含 "216.175.194.166" 的选项
+    // 需要找到列表中单独的选项元素，而非整个容器
     const proxySelected = await page.evaluate(() => {
-        // 查找下拉菜单项
-        const items = document.querySelectorAll('[role="option"], [role="menuitem"], li, div[class*="option"], div[class*="item"]');
-        for (const item of items) {
-            const text = item.textContent || '';
-            if (text.includes('216.175.194.166') || text.includes('socks5')) {
-                item.click();
-                return text.trim().substring(0, 60);
+        // 找到所有可点击的下拉选项 — 通常是直接子元素
+        const allElements = document.querySelectorAll('*');
+        for (const el of allElements) {
+            const r = el.getBoundingClientRect();
+            if (r.width <= 0 || r.height <= 0) continue;
+            const text = el.textContent?.trim() || '';
+            const ownText = el.childElementCount === 0 ? text : '';
+            // 匹配包含目标IP的叶子节点或浅层元素
+            if (text.includes('216.175.194.166') && !text.includes('216.151') && r.height < 60) {
+                el.click();
+                return text.substring(0, 80);
+            }
+            if (ownText.includes('216.175.194.166')) {
+                el.click();
+                return ownText.substring(0, 80);
             }
         }
         return null;
@@ -193,8 +214,9 @@ async function fillAddAccountForm(page, memberEmail, wlog) {
     if (proxySelected) {
         wlog.debug(`  Selected proxy: ${proxySelected}`);
     } else {
-        wlog.warn('  Proxy option not found in dropdown, trying text search...');
-        await tryClickStrategies(page, ['216.175', 'socks5', '443'], wlog, 'proxy_select');
+        wlog.warn('  Proxy 216.175.194.166 not found in dropdown');
+        // 点击任意位置关闭下拉
+        await page.keyboard.press('Escape');
     }
     await sleep(500);
 
@@ -243,8 +265,19 @@ async function fillAddAccountForm(page, memberEmail, wlog) {
 
     // 6. 点击 "下一步"
     wlog.info('  Clicking 下一步...');
+    // 先滚动到下一步按钮
+    await page.evaluate(() => {
+        for (const btn of document.querySelectorAll('button')) {
+            if (btn.textContent.trim() === '下一步') {
+                btn.scrollIntoView({ behavior: 'instant', block: 'center' });
+                return;
+            }
+        }
+    }).catch(() => {});
+    await sleep(500);
     await clickButtonByText(page, '下一步');
     await sleep(3000);
+    await takeScreenshot(page, `sub2api_after_next_${memberEmail.split('@')[0]}`, wlog);
 
     return accountName;
 }
@@ -256,11 +289,18 @@ async function completeOAuthAuthorization(page, browser, memberAccount, wlog) {
     // 等待第二步页面加载
     wlog.info('  Waiting for authorization step...');
     let authPageReady = false;
-    for (let i = 0; i < 10; i++) {
-        const text = await page.evaluate(() => document.body?.innerText?.substring(0, 2000) || '').catch(() => '');
-        if (text.includes('生成授权链接') || text.includes('授权') || text.includes('authorization')) {
+    for (let i = 0; i < 15; i++) {
+        // Search the ENTIRE page text, not just first 3000 chars
+        const text = await page.evaluate(() => document.body?.innerText || '').catch(() => '');
+        // 第二步特有的文本: "生成授权链接", "输入授权链接", "完成授权"
+        if (text.includes('生成授权链接') || text.includes('输入授权链接') || text.includes('完成授权')) {
             authPageReady = true;
             break;
+        }
+        // 也检查是否有错误提示
+        if (i === 5) {
+            wlog.debug(`  Still waiting... page text preview: ${text.substring(0, 200)}`);
+            await takeScreenshot(page, `sub2api_waiting_auth_${memberAccount.email.split('@')[0]}`, wlog);
         }
         await sleep(1000);
     }
@@ -279,29 +319,33 @@ async function completeOAuthAuthorization(page, browser, memberAccount, wlog) {
     // 提取生成的授权 URL
     const authUrl = await page.evaluate(() => {
         const text = document.body?.innerText || '';
-        // 匹配 URL
         const urlPattern = /https?:\/\/[^\s<>"']+/gi;
         const urls = text.match(urlPattern) || [];
+
+        // 优先匹配 Google OAuth URL
         for (const url of urls) {
-            if (url.includes('accounts.google.com') ||
-                url.includes('oauth') ||
-                url.includes('auth') ||
-                url.includes('consent')) {
-                return url;
-            }
+            if (url.includes('accounts.google.com')) return url;
         }
-        // 也检查 input 中的 URL
+        // 其次匹配其他 Google 相关 URL (排除 localhost)
+        for (const url of urls) {
+            if (url.includes('localhost') || url.includes('127.0.0.1')) continue;
+            if (url.includes('google.com/o/oauth') || url.includes('consent')) return url;
+        }
+
+        // 检查 input/textarea 中的 URL
         for (const input of document.querySelectorAll('input, textarea')) {
             const val = input.value || '';
-            if (val.startsWith('http') && (val.includes('google') || val.includes('oauth'))) {
-                return val;
-            }
+            if (val.startsWith('http') && val.includes('accounts.google.com')) return val;
         }
-        // 查找链接元素
+        // 检查链接元素
         for (const a of document.querySelectorAll('a[href]')) {
-            if (a.href.includes('accounts.google.com') || a.href.includes('oauth')) {
-                return a.href;
-            }
+            if (a.href.includes('accounts.google.com')) return a.href;
+        }
+
+        // 最后: 返回任何非 localhost/sub2api 的 OAuth URL
+        for (const url of urls) {
+            if (url.includes('localhost') || url.includes('127.0.0.1') || url.includes('104.194.91.23')) continue;
+            if (url.includes('oauth') || url.includes('auth')) return url;
         }
         return null;
     }).catch(() => null);
@@ -323,46 +367,156 @@ async function completeOAuthAuthorization(page, browser, memberAccount, wlog) {
             .catch(e => wlog.warn(`Auth page load timeout: ${e.message}`));
         await sleep(3000);
 
-        // 检查是否需要选择 "使用其他账号"
-        const useOtherClicked = await authPage.evaluate(() => {
-            // 查找 "使用其他账号" 或 "Use another account"
-            for (const el of document.querySelectorAll('div, li, button, a')) {
-                const text = (el.textContent || '').toLowerCase();
-                if (text.includes('use another account') || text.includes('使用其他账号') ||
-                    text.includes('使用其他帐号') || text.includes('other account')) {
-                    el.click();
-                    return true;
-                }
-            }
-            return false;
-        }).catch(() => false);
+        // 处理 Google 账号选择页面
+        wlog.info('  Handling Google account chooser...');
+        for (let step = 0; step < 3; step++) {
+            await sleep(1500);
+            const pageText = await authPage.evaluate(() =>
+                document.body?.innerText?.substring(0, 1000).toLowerCase() || ''
+            ).catch(() => '');
 
-        if (useOtherClicked) {
-            wlog.debug('  Clicked "Use another account"');
-            await sleep(2000);
+            if (!pageText.includes('choose an account') && !pageText.includes('选择帐号') &&
+                !pageText.includes('选择账号')) {
+                break;
+            }
+
+            // 用坐标点击 "Use another account" — 更可靠
+            const clickPos = await authPage.evaluate(() => {
+                const allEls = document.querySelectorAll('li, div[role="link"], div[data-identifier], button');
+                for (const el of allEls) {
+                    const text = (el.textContent || '').toLowerCase().trim();
+                    // 精确匹配 "use another account" 的最内层可点击元素
+                    if ((text === 'use another account' || text === '使用其他账号' || text === '使用其他帐号') ||
+                        (text.startsWith('use another') && text.length < 30)) {
+                        const r = el.getBoundingClientRect();
+                        if (r.width > 0 && r.height > 0) {
+                            return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+                        }
+                    }
+                }
+                return null;
+            }).catch(() => null);
+
+            if (clickPos) {
+                wlog.debug(`  Clicking "Use another account" at (${clickPos.x}, ${clickPos.y})`);
+                await authPage.mouse.click(clickPos.x, clickPos.y);
+                await authPage.waitForNavigation({ waitUntil: 'networkidle2', timeout: 10000 }).catch(() => {});
+                await sleep(2000);
+            } else {
+                wlog.warn('  "Use another account" element not found');
+                break;
+            }
         }
 
         // 使用 googleLogin 完成 Google 登录
         wlog.info('  Completing Google login...');
         await googleLogin(authPage, memberAccount, wlog);
-        await sleep(3000);
-        timer.step('Google login');
+        await sleep(2000);
 
-        // 登录完成后，页面可能变成 "无法访问此页面" (ERR_CONNECTION_REFUSED)
-        // 或者重定向到一个 callback URL
-        // 需要获取当前 URL 作为回调
-        const callbackUrl = authPage.url();
-        wlog.info(`  Callback URL: ${callbackUrl.substring(0, 100)}...`);
+        // googleLogin 到达 oauth_consent 就返回了，需要继续点击同意按钮
+        // 直到页面重定向到 localhost callback (会显示"无法访问此页面")
+        wlog.info('  Handling OAuth consent...');
+        let callbackUrl = '';
+
+        // 监听导航请求，捕获 localhost callback URL (Chrome 会因为连接失败变成 chrome-error)
+        const capturedUrls = [];
+        const requestHandler = (req) => {
+            const url = req.url();
+            if (url.includes('localhost') || url.includes('127.0.0.1')) {
+                capturedUrls.push(url);
+            }
+        };
+        authPage.on('request', requestHandler);
+
+        for (let step = 0; step < 10; step++) {
+            // 检查是否已经捕获到 callback URL
+            if (capturedUrls.length > 0) {
+                callbackUrl = capturedUrls[capturedUrls.length - 1];
+                break;
+            }
+
+            const currentUrl = authPage.url();
+            if (currentUrl.includes('localhost') || currentUrl.includes('127.0.0.1')) {
+                callbackUrl = currentUrl;
+                break;
+            }
+
+            // 点击同意/允许/继续/Sign in 按钮
+            const consentClicked = await authPage.evaluate(() => {
+                const keywords = [
+                    'continue', 'allow', 'accept', 'confirm', 'agree', 'sign in',
+                    'approve', 'grant', 'yes', 'ok',
+                    '继续', '允许', '接受', '确认', '同意', '登录', '授权', '是',
+                ];
+                for (const btn of document.querySelectorAll('button, [role="button"], input[type="submit"], a')) {
+                    const r = btn.getBoundingClientRect();
+                    if (r.width <= 0 || r.height <= 0) continue;
+                    if (btn.disabled) continue;
+                    const text = (btn.textContent || '').trim().toLowerCase();
+                    if (keywords.some(k => text.includes(k))) {
+                        btn.click();
+                        return text.substring(0, 40);
+                    }
+                }
+                return null;
+            }).catch(() => null);
+
+            if (consentClicked) {
+                wlog.debug(`  Clicked consent button: "${consentClicked}"`);
+                await sleep(5000);
+                // 再次检查捕获的URL
+                if (capturedUrls.length > 0) {
+                    callbackUrl = capturedUrls[capturedUrls.length - 1];
+                    break;
+                }
+            } else {
+                await sleep(3000);
+                if (capturedUrls.length > 0) {
+                    callbackUrl = capturedUrls[capturedUrls.length - 1];
+                    break;
+                }
+                // chrome-error 页面说明已经重定向过了
+                if (authPage.url().includes('chrome-error')) {
+                    wlog.warn('  Page shows chrome-error but callback URL was not captured');
+                    break;
+                }
+                if (step >= 3) break;
+            }
+        }
+
+        authPage.off('request', requestHandler);
+
+        wlog.info(`  Callback URL: ${callbackUrl.substring(0, 120)}...`);
+        timer.step('Google login + consent');
+
+        // 从 callback URL 中提取 code 参数
+        let authCode = '';
+        try {
+            const urlObj = new URL(callbackUrl);
+            authCode = urlObj.searchParams.get('code') || '';
+        } catch (_) {
+            // URL 解析失败，尝试正则提取
+            const m = callbackUrl.match(/[?&]code=([^&]+)/);
+            if (m) authCode = decodeURIComponent(m[1]);
+        }
+
+        if (!authCode) {
+            await takeScreenshot(authPage, `sub2api_no_code_${memberAccount.email}`, wlog);
+            await authPage.close().catch(() => {});
+            throw new Error(`Cannot extract code from callback URL: ${callbackUrl.substring(0, 100)}`);
+        }
+
+        wlog.info(`  Auth code: ${authCode.substring(0, 20)}...`);
 
         // 关闭授权标签页
         await authPage.close().catch(() => {});
-        timer.step('Got callback URL');
+        timer.step('Got auth code');
 
-        // 回到 sub2api 页面，粘贴回调 URL
-        wlog.info('  Pasting callback URL to sub2api...');
+        // 回到 sub2api 页面，粘贴 code 到 "输入授权链接或 Code" 输入框
+        wlog.info('  Pasting auth code to sub2api...');
 
-        // 找到 "输入授权链接或 Code" 输入框
-        const codeInput = await page.evaluate(() => {
+        // 找到 "输入授权链接或 Code" 输入框并填入 code
+        const codePasted = await page.evaluate((code) => {
             // 查找包含 "授权" 或 "code" 的输入框
             for (const input of document.querySelectorAll('input[type="text"], input:not([type]), textarea')) {
                 const r = input.getBoundingClientRect();
@@ -373,44 +527,33 @@ async function completeOAuthAuthorization(page, browser, memberAccount, wlog) {
                 if (placeholder.includes('code') || placeholder.includes('授权') ||
                     ariaLabel.includes('code') || ariaLabel.includes('授权') ||
                     nearby.includes('code') || nearby.includes('授权链接')) {
+                    input.focus();
+                    input.value = code;
+                    input.dispatchEvent(new Event('input', { bubbles: true }));
+                    input.dispatchEvent(new Event('change', { bubbles: true }));
                     return true;
                 }
             }
+            // Fallback: 找任何空的可见 text input (排除名称和搜索框)
+            for (const input of document.querySelectorAll('input[type="text"], input:not([type]), textarea')) {
+                const r = input.getBoundingClientRect();
+                if (r.width <= 0 || r.height <= 0) continue;
+                if (input.value) continue;
+                const placeholder = (input.placeholder || '').toLowerCase();
+                if (placeholder.includes('名称') || placeholder.includes('搜索')) continue;
+                input.focus();
+                input.value = code;
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+                input.dispatchEvent(new Event('change', { bubbles: true }));
+                return true;
+            }
             return false;
-        }).catch(() => false);
+        }, authCode).catch(() => false);
 
-        if (codeInput) {
-            // 使用精确选择器找到并填入
-            await page.evaluate((url) => {
-                for (const input of document.querySelectorAll('input[type="text"], input:not([type]), textarea')) {
-                    const r = input.getBoundingClientRect();
-                    if (r.width <= 0 || r.height <= 0) continue;
-                    const nearby = (input.closest('label, div')?.textContent || '').toLowerCase();
-                    if (nearby.includes('code') || nearby.includes('授权链接') || nearby.includes('授权')) {
-                        input.focus();
-                        input.value = url;
-                        input.dispatchEvent(new Event('input', { bubbles: true }));
-                        input.dispatchEvent(new Event('change', { bubbles: true }));
-                        return;
-                    }
-                }
-            }, callbackUrl).catch(() => {});
-        } else {
-            // Fallback: 找任何空的可见 text input
-            await page.evaluate((url) => {
-                for (const input of document.querySelectorAll('input[type="text"], input:not([type]), textarea')) {
-                    const r = input.getBoundingClientRect();
-                    if (r.width <= 0 || r.height <= 0) continue;
-                    if (input.value) continue; // 跳过已有值的
-                    const placeholder = (input.placeholder || '').toLowerCase();
-                    if (placeholder.includes('名称') || placeholder.includes('搜索')) continue; // 跳过名称和搜索框
-                    input.focus();
-                    input.value = url;
-                    input.dispatchEvent(new Event('input', { bubbles: true }));
-                    input.dispatchEvent(new Event('change', { bubbles: true }));
-                    return;
-                }
-            }, callbackUrl).catch(() => {});
+        if (!codePasted) {
+            wlog.warn('  Could not find code input, trying keyboard input...');
+            // 尝试键盘输入
+            await page.keyboard.type(authCode, { delay: 0 });
         }
         await sleep(1000);
 
@@ -418,30 +561,40 @@ async function completeOAuthAuthorization(page, browser, memberAccount, wlog) {
         wlog.info('  Clicking 完成授权...');
         const finishClicked = await clickButtonByText(page, '完成授权', false);
         if (!finishClicked) {
-            // 尝试其他文本
             await tryClickStrategies(page, ['完成', '提交', 'submit', 'finish', '确认'], wlog, 'finish_auth');
         }
-        await sleep(5000);
+        await sleep(8000);
 
-        // 验证授权结果
-        const resultText = await page.evaluate(() =>
-            document.body?.innerText?.substring(0, 2000).toLowerCase() || ''
-        ).catch(() => '');
+        // 验证授权结果 — 查找 toast/notification 或抽屉面板内的提示
+        const resultCheck = await page.evaluate(() => {
+            const text = document.body?.innerText || '';
+            // 查找 toast 消息或最近出现的提示
+            const toasts = document.querySelectorAll('[class*="toast"], [class*="notification"], [class*="alert"], [class*="message"], [role="alert"]');
+            for (const t of toasts) {
+                const r = t.getBoundingClientRect();
+                if (r.width <= 0 || r.height <= 0) continue;
+                const tText = t.textContent.toLowerCase();
+                if (tText.includes('成功') || tText.includes('success')) return 'success';
+                if (tText.includes('失败') || tText.includes('error') || tText.includes('错误')) return 'error: ' + t.textContent.trim().substring(0, 100);
+            }
+            // 检查授权成功的标志: 抽屉是否关闭了（回到了账号列表）
+            const hasDrawer = document.querySelector('[class*="drawer"], [class*="panel"], [class*="slide"]');
+            if (!hasDrawer) return 'success'; // 抽屉关闭了 = 成功
+            return 'unknown';
+        }).catch(() => 'unknown');
 
-        if (resultText.includes('成功') || resultText.includes('success') ||
-            resultText.includes('已添加') || resultText.includes('added')) {
+        if (resultCheck === 'success') {
             wlog.success(`  Authorization completed successfully`);
             return true;
         }
 
-        if (resultText.includes('错误') || resultText.includes('error') ||
-            resultText.includes('失败') || resultText.includes('fail')) {
+        if (resultCheck.startsWith('error')) {
             await takeScreenshot(page, `sub2api_auth_error_${memberAccount.email}`, wlog);
-            throw new Error('Authorization failed');
+            throw new Error(`Authorization failed: ${resultCheck}`);
         }
 
-        // 没有明确成功/失败，假设成功
-        wlog.info('  No explicit result message, assuming success');
+        // 结果不确定 — 截图后假设成功
+        wlog.info('  Authorization result unclear, assuming success');
         await takeScreenshot(page, `sub2api_auth_result_${memberAccount.email}`, wlog);
         return true;
 
