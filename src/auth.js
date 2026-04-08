@@ -219,10 +219,28 @@ class AsyncMutex {
 
 const fileMutex = new AsyncMutex();
 
-// ============ fetch 兼容层 ============
+// ============ fetch 兼容层（支持 HTTP 代理） ============
+function _getProxyAgent(url) {
+    const proxy = process.env.HTTPS_PROXY || process.env.HTTP_PROXY || process.env.https_proxy || process.env.http_proxy;
+    if (!proxy) return undefined;
+    try {
+        const parsedUrl = new URL(url);
+        if (parsedUrl.protocol === 'https:') {
+            const { HttpsProxyAgent } = require('https-proxy-agent');
+            return new HttpsProxyAgent(proxy);
+        } else {
+            const { HttpProxyAgent } = require('http-proxy-agent');
+            return new HttpProxyAgent(proxy);
+        }
+    } catch (_) { return undefined; }
+}
+
 async function httpFetch(url, options = {}) {
+    const agent = _getProxyAgent(url);
     if (typeof globalThis.fetch === 'function') {
-        return globalThis.fetch(url, options);
+        const fetchOpts = { ...options };
+        if (agent) fetchOpts.dispatcher = undefined; // fetch 不支持 agent，走下面的 http 方式
+        if (!agent) return globalThis.fetch(url, options);
     }
     return new Promise((resolve, reject) => {
         const parsedUrl = new URL(url);
@@ -234,6 +252,7 @@ async function httpFetch(url, options = {}) {
             method: options.method || 'GET',
             headers: options.headers || {},
         };
+        if (agent) reqOptions.agent = agent;
         const req = mod.request(reqOptions, (res) => {
             let data = '';
             res.on('data', chunk => (data += chunk));

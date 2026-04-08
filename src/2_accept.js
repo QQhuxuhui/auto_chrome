@@ -92,6 +92,25 @@ async function acceptInvite(memberAccount, browser, workerId) {
         await sleep(2000);
         timer.step('Gmail loaded');
 
+        // Click "Primary" tab if Gmail has category tabs (Primary/Promotions/Social)
+        await page.evaluate(() => {
+            const tabs = document.querySelectorAll('div[role="tab"], td[role="tab"], span[role="tab"]');
+            for (const tab of tabs) {
+                const text = (tab.textContent || '').toLowerCase();
+                if (text.includes('primary') || text.includes('主要')) {
+                    tab.click();
+                    return;
+                }
+            }
+            // Also try clicking by aria-label or data attributes
+            const primaryLink = document.querySelector(
+                'a[aria-label*="Primary"], a[aria-label*="主要"], ' +
+                'div[data-tooltip="Primary"], div[data-tooltip="主要"]'
+            );
+            if (primaryLink) primaryLink.click();
+        }).catch(() => { });
+        await sleep(1000);
+
         // 2. 搜索邀请邮件（轮询）
         const searchKeywords = ['Google One', 'family group', '家庭组', 'family plan'];
         const startTime = Date.now();
@@ -134,6 +153,25 @@ async function acceptInvite(memberAccount, browser, workerId) {
             }
 
             // 尝试在收件箱搜索邀请邮件
+            // 先确保在 Primary 标签页
+            await page.evaluate(() => {
+                // Click Primary tab if present
+                const tabs = document.querySelectorAll('div[role="tab"], td[role="tab"], span[role="tab"]');
+                for (const tab of tabs) {
+                    const text = (tab.textContent || '').trim().toLowerCase();
+                    if (text.startsWith('primary') || text.startsWith('主要')) {
+                        tab.click();
+                        return;
+                    }
+                }
+                // Try by aria-label
+                const el = document.querySelector(
+                    'div[data-tooltip="Primary"], div[data-tooltip="主要"]'
+                );
+                if (el) el.click();
+            }).catch(() => { });
+            await sleep(1500);
+
             // 方法1：使用 Gmail 搜索功能
             try {
                 const searchInput = await page.$('input[aria-label="Search mail"], input[aria-label="搜索邮件"], input[name="q"]');
@@ -149,7 +187,7 @@ async function acceptInvite(memberAccount, browser, workerId) {
                     await page.keyboard.press('Backspace');
                     await sleep(100);
 
-                    await searchInput.type('Google One family', { delay: 0 });
+                    await searchInput.type('in:anywhere Google One family', { delay: 0 });
                     await page.keyboard.press('Enter');
                     await sleep(3000);
                 }
@@ -157,11 +195,16 @@ async function acceptInvite(memberAccount, browser, workerId) {
                 wlog.debug(`  Search failed: ${e.message}`);
             }
 
-            // 方法2：直接在页面中查找邀请邮件
+            // 方法2：直接在页面中查找邀请邮件（排除标签栏等非邮件元素）
             const emailFound = await page.evaluate((keywords) => {
-                const rows = document.querySelectorAll('tr, div[role="row"], div[class*="zA"]');
+                // Gmail email rows have specific structure
+                const rows = document.querySelectorAll('tr.zA, tr.zE, div[role="row"], tr[draggable="true"]');
                 for (const row of rows) {
+                    const r = row.getBoundingClientRect();
+                    if (r.width < 200 || r.height < 20) continue;
                     const text = (row.textContent || '').toLowerCase();
+                    // Exclude tab bar text (contains "primary", "promotions", "social" together)
+                    if (text.includes('promotions') && text.includes('social')) continue;
                     if (keywords.some(k => text.includes(k.toLowerCase()))) {
                         return text.substring(0, 80);
                     }
@@ -172,34 +215,42 @@ async function acceptInvite(memberAccount, browser, workerId) {
             if (emailFound) {
                 wlog.success(`  Found invite email: "${emailFound}"`);
 
-                // 点击邮件行打开邮件 — Gmail 搜索结果的行需要精确点击
-                // 策略 1: 直接 evaluate 点击邮件行中间区域（最可靠）
+                // 点击邮件行打开邮件 — 使用 gjy 的精确选择器过滤 + dev 的多层 fallback
+                // 策略 1: evaluate 点击邮件行（带尺寸和标签栏过滤）
                 const openedByEval = await page.evaluate((keywords) => {
-                    const rows = document.querySelectorAll('tr, div[role="row"], div[class*="zA"]');
+                    const rows = document.querySelectorAll('tr.zA, tr.zE, div[role="row"], tr[draggable="true"]');
                     for (const row of rows) {
+                        const r = row.getBoundingClientRect();
+                        if (r.width < 200 || r.height < 20) continue;
                         const text = (row.textContent || '').toLowerCase();
+                        if (text.includes('promotions') && text.includes('social')) continue;
                         if (keywords.some(k => text.includes(k.toLowerCase()))) {
-                            // 在邮件行中寻找可点击的主体区域（邮件标题/摘要）
-                            // Gmail 的邮件标题通常在 td.xY 或 span.bog 或 span.bqe 内
+                            // 精确点击邮件标题/摘要区域
                             const targets = [
-                                ...row.querySelectorAll('td.xY, td.yX, span.bog, span.bqe'),
+                                ...row.querySelectorAll('span[data-thread-id], span.bog, span.bqe, td.xY a, td.yX'),
                                 ...row.querySelectorAll('span[id]:not([class*="checkbox"])'),
-                                ...row.querySelectorAll('td:nth-child(n+3)'), // 跳过 checkbox 和星标列
+                                ...row.querySelectorAll('td:nth-child(n+3)'),
                             ];
                             for (const target of targets) {
-                                const r = target.getBoundingClientRect();
-                                if (r.width > 50 && r.height > 10) {
+                                const tr = target.getBoundingClientRect();
+                                if (tr.width > 50 && tr.height > 10) {
                                     target.click();
                                     return 'clicked_target';
                                 }
                             }
-                            // 兜底：直接点击行
                             row.click();
                             return 'clicked_row';
                         }
                     }
                     return null;
                 }, searchKeywords).catch(() => null);
+
+                // 策略 1 失败时，使用 tryClickStrategies fallback
+                if (!openedByEval) {
+                    const emailKws = ['family group', 'google one', '家庭组', 'family plan',
+                        "join", 'family'];
+                    await tryClickStrategies(page, emailKws, wlog, 'open_email');
+                }
 
                 if (openedByEval) {
                     wlog.debug(`  Email open attempt: ${openedByEval}`);
