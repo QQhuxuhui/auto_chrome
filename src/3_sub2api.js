@@ -13,7 +13,7 @@ const path = require('path');
 const { log, createWorkerLogger, setVerbose, StepTimer } = require('./common/logger');
 const {
     sleep, rand, findChrome, launchRealChrome, restartChrome,
-    isChromeAlive, newPage, takeScreenshot, tryClickStrategies,
+    isChromeAlive, clearBrowserSession, newPage, takeScreenshot, tryClickStrategies,
 } = require('./common/chrome');
 const { parseAccounts, addFailedRecord } = require('./common/state');
 const { googleLogin } = require('./common/google-login');
@@ -367,9 +367,13 @@ async function processMember({ member, host, client, browser, workerId, opts }) 
     timer.step('getAuthUrl');
 
     // 3. Browser login as the member.
-    //    googleLogin drives an existing signin page — it does not navigate on
-    //    its own. We first open accounts.google.com/signin so googleLogin has
-    //    something to work with; otherwise it deadloops on about:blank.
+    //    Mirror stage 2's pattern: clear browser session first to wipe any
+    //    residual cookies/storage from a previous account, then navigate to
+    //    the Google signin page so googleLogin (which drives an existing
+    //    signin page, it does not navigate on its own) has something to act
+    //    on. The trailing clearBrowserSession in finally keeps successive
+    //    members from bleeding into each other.
+    await clearBrowserSession(browser, wlog);
     const page = await newPage(browser);
     try {
         await page.goto('https://accounts.google.com/signin', {
@@ -491,6 +495,7 @@ async function processMember({ member, host, client, browser, workerId, opts }) 
         };
     } finally {
         await page.close().catch(() => { });
+        await clearBrowserSession(browser, wlog).catch(() => { });
     }
 }
 
