@@ -83,6 +83,10 @@ run_stage() {
             echo " ---- Stage 2: Accept Family Invitations ----"
             node 2_accept.js "${EXTRA_ARGS[@]}"
             ;;
+        3)
+            echo " ---- Stage 3: Register Accounts in sub2api ----"
+            node 3_sub2api.js "${EXTRA_ARGS[@]}"
+            ;;
         *)
             echo " WARNING: unknown stage '$1'"
             return 1
