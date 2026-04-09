@@ -13,7 +13,7 @@ const path = require('path');
 const { log, createWorkerLogger, setVerbose, StepTimer } = require('./common/logger');
 const {
     sleep, rand, findChrome, launchRealChrome, restartChrome,
-    isChromeAlive, newPage, takeScreenshot,
+    isChromeAlive, newPage, takeScreenshot, tryClickStrategies,
 } = require('./common/chrome');
 const { parseAccounts, addFailedRecord } = require('./common/state');
 const { googleLogin } = require('./common/google-login');
@@ -388,13 +388,48 @@ async function processMember({ member, host, client, browser, workerId, opts }) 
             throw new Error(`sub2api session nearly expired (${Math.round((Date.now() - authStartedAt) / 1000)}s elapsed, limit ${SESSION_SAFETY_WINDOW_MS / 1000}s) — re-run stage 3 to restart`);
         }
 
-        // 5. Capture OAuth code via request interception
+        // 5. Capture OAuth code via request interception.
+        //    Google's consent flow frequently stops on an account-selection
+        //    page or a "Continue / Allow" confirm page. Run a background
+        //    poller that auto-clicks past those while captureOAuthCode waits
+        //    for the localhost:8085/callback redirect.
+        const consentKeywords = [
+            member.email,
+            // English
+            'continue', 'allow', 'accept', 'confirm', 'next', 'authorize',
+            // Chinese
+            '继续', '允许', '同意', '确认', '下一步', '授权',
+            // Vietnamese
+            'tiếp tục', 'cho phép', 'chấp nhận', 'xác nhận',
+            // Spanish / Portuguese
+            'continuar', 'permitir', 'aceptar', 'aceitar',
+            // French
+            'continuer', 'autoriser', 'accepter',
+            // Indonesian
+            'lanjutkan', 'izinkan', 'terima',
+            // German
+            'weiter', 'zulassen', 'bestätigen',
+        ];
+        let keepPolling = true;
+        const consentPoller = (async () => {
+            await sleep(2500); // let goto settle first
+            while (keepPolling) {
+                try {
+                    await tryClickStrategies(page, consentKeywords, wlog, 'oauth_consent');
+                } catch (_) { /* ignore click errors; we're just probing */ }
+                await sleep(2000);
+            }
+        })();
+
         let code;
         try {
             code = await captureOAuthCode(page, authUrl, wlog);
         } catch (e) {
             await takeScreenshot(page, `sub2api_oauth_fail_${member.email.replace(/[^a-z0-9]/gi, '_')}`, wlog);
             throw e;
+        } finally {
+            keepPolling = false;
+            await consentPoller.catch(() => { });
         }
         timer.step('captureOAuthCode');
 
