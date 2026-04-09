@@ -33,3 +33,11 @@ Desktop.ini
 *.swo
 .vscode/
 .idea/
+
+# Codex workspace
+.codex
+.codex/
+
+# Tools 构建产物（exe 嵌入了 API key，dist/ 为构建中间产物）
+tools/dist/
+tools/*.exe

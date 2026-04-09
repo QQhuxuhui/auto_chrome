@@ -1,0 +1,617 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Google 2FA + SMS 辅助工具</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    min-height: 100vh;
+    margin: 0;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 24px;
+  }
+  .wrap {
+    width: 100%;
+    max-width: 520px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+  .card {
+    background: #fff;
+    border-radius: 16px;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+    padding: 32px 36px;
+  }
+  h1 {
+    margin: 0 0 6px;
+    font-size: 20px;
+    color: #222;
+  }
+  .subtitle {
+    margin: 0 0 22px;
+    color: #888;
+    font-size: 12px;
+  }
+  label {
+    display: block;
+    font-size: 12px;
+    color: #555;
+    margin-bottom: 6px;
+  }
+  .row { display: flex; gap: 10px; }
+  .row > .field { flex: 1; }
+  .field { margin-bottom: 12px; }
+  input[type=text], input[type=password] {
+    width: 100%;
+    padding: 11px 13px;
+    font-size: 14px;
+    border: 2px solid #e4e6eb;
+    border-radius: 8px;
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    transition: border-color 0.2s;
+    outline: none;
+    background: #fff;
+  }
+  input:focus { border-color: #667eea; }
+
+  /* ---------- TOTP code display ---------- */
+  .code-display {
+    margin-top: 16px;
+    text-align: center;
+    padding: 22px;
+    background: #f7f8fa;
+    border-radius: 12px;
+  }
+  .code {
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    font-size: 42px;
+    font-weight: 600;
+    letter-spacing: 8px;
+    color: #333;
+    cursor: pointer;
+    user-select: all;
+    transition: color 0.2s;
+  }
+  .code.error { color: #e53e3e; font-size: 15px; letter-spacing: 0; word-break: break-all; }
+  .code:not(.error):hover { color: #667eea; }
+  .ttl {
+    margin-top: 12px;
+    height: 6px;
+    background: #e4e6eb;
+    border-radius: 3px;
+    overflow: hidden;
+  }
+  .ttl-bar {
+    height: 100%;
+    background: linear-gradient(90deg, #667eea, #764ba2);
+    transition: width 1s linear;
+  }
+  .ttl-text {
+    margin-top: 8px;
+    font-size: 11px;
+    color: #888;
+  }
+  .hint {
+    margin-top: 8px;
+    font-size: 11px;
+    color: #bbb;
+    text-align: center;
+  }
+
+  /* ---------- SMS panel ---------- */
+  .btn {
+    width: 100%;
+    padding: 12px 16px;
+    background: linear-gradient(90deg, #667eea, #764ba2);
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: opacity 0.2s, transform 0.1s;
+  }
+  .btn:hover:not(:disabled) { opacity: 0.9; }
+  .btn:active:not(:disabled) { transform: scale(0.99); }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn.secondary {
+    background: #f1f1f4;
+    color: #555;
+  }
+  .btn-row { display: flex; gap: 10px; }
+  .btn-row .btn { flex: 1; }
+
+  .sms-status {
+    margin-top: 16px;
+    padding: 16px;
+    background: #f7f8fa;
+    border-radius: 12px;
+    font-size: 13px;
+    color: #555;
+    display: none;
+  }
+  .sms-status.show { display: block; }
+  .sms-status .label { color: #888; font-size: 11px; margin-bottom: 2px; }
+  .sms-status .value {
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    font-size: 16px;
+    color: #222;
+    word-break: break-all;
+    margin-bottom: 10px;
+    user-select: all;
+    cursor: pointer;
+  }
+  .sms-status .value:hover { color: #667eea; }
+  .sms-status .code-value {
+    font-size: 28px;
+    font-weight: 600;
+    letter-spacing: 4px;
+    color: #48bb78;
+  }
+  .sms-status .waiting {
+    color: #888;
+    font-style: italic;
+    font-size: 12px;
+  }
+  .sms-status .err { color: #e53e3e; font-size: 12px; }
+
+  .log {
+    margin-top: 10px;
+    max-height: 120px;
+    overflow-y: auto;
+    background: #1a1a2e;
+    color: #a0a0c0;
+    padding: 10px 12px;
+    border-radius: 8px;
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    font-size: 11px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    display: none;
+  }
+  .log.show { display: block; }
+  .log .t { color: #667eea; }
+  .log .e { color: #f56565; }
+  .log .s { color: #68d391; }
+
+  /* ---------- toast ---------- */
+  .toast {
+    position: fixed;
+    left: 50%;
+    bottom: 40px;
+    transform: translateX(-50%) translateY(20px);
+    background: rgba(40, 44, 66, 0.95);
+    color: #fff;
+    padding: 10px 20px;
+    border-radius: 8px;
+    font-size: 13px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s, transform 0.2s;
+    z-index: 9999;
+  }
+  .toast.show {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+</style>
+</head>
+<body>
+  <div class="wrap">
+
+    <!-- ============ TOTP ============ -->
+    <div class="card">
+      <h1>Google 2FA 验证码生成器</h1>
+      <p class="subtitle">输入 Base32 密钥（fa 码），实时生成 6 位验证码</p>
+
+      <div class="field">
+        <label for="secret">Secret Key (Base32)</label>
+        <input id="secret" type="text" autocomplete="off" spellcheck="false"
+               placeholder="例如: JBSWY3DPEHPK3PXP">
+      </div>
+
+      <div class="code-display">
+        <div id="code" class="code">------</div>
+        <div class="ttl"><div id="ttlBar" class="ttl-bar" style="width:100%"></div></div>
+        <div id="ttlText" class="ttl-text">等待输入密钥...</div>
+      </div>
+      <div class="hint">点击验证码可复制 · 与 Google Authenticator 一致</div>
+    </div>
+
+    <!-- ============ SMS ============ -->
+    <div class="card">
+      <h1>Hero-SMS 手机号验证码</h1>
+      <p class="subtitle">调用 hero-sms API 获取一次性手机号并等待验证码</p>
+
+      <div class="field">
+        <label for="smsKey">API Key</label>
+        <input id="smsKey" type="password" autocomplete="off" spellcheck="false"
+               placeholder="HERO_SMS_API_KEY">
+      </div>
+
+      <div class="row">
+        <div class="field">
+          <label for="smsService">Service</label>
+          <input id="smsService" type="text" value="go" spellcheck="false">
+        </div>
+        <div class="field">
+          <label for="smsCountry">Country ID</label>
+          <input id="smsCountry" type="text" value="6" spellcheck="false"
+                 title="hero-sms 不支持 0。常用: 6=印尼$0.03  4=菲律宾$0.03  8=肯尼亚$0.02  31=南非$0.04">
+        </div>
+      </div>
+
+      <div style="font-size:11px;color:#888;margin:-4px 0 12px;line-height:1.6">
+        常用 Country ID：<b>8</b>肯尼亚 $0.02 · <b>4</b>菲律宾 $0.03 · <b>6</b>印尼 $0.03 · <b>31</b>南非 $0.04 · <b>2</b>哈萨克 $0.05
+        <br><span style="color:#e53e3e">⚠️ hero-sms 不支持 country=0 自动选号</span>
+      </div>
+
+      <div class="btn-row">
+        <button id="smsGetBtn" class="btn">获取手机号</button>
+        <button id="smsCancelBtn" class="btn secondary" disabled>取消</button>
+      </div>
+
+      <div id="smsStatus" class="sms-status">
+        <div class="label">手机号</div>
+        <div id="smsPhone" class="value">-</div>
+        <div class="label">验证码</div>
+        <div id="smsCode" class="value code-value">等待中...</div>
+        <div id="smsInfo" class="waiting"></div>
+      </div>
+
+      <div id="smsLog" class="log"></div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast">已复制</div>
+
+<script>
+// ================================================================
+// TOTP 部分（与 src/common/totp.js 等价）
+// ================================================================
+function base32Decode(encoded) {
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+  encoded = encoded.replace(/[\s-]/g, '').toUpperCase().replace(/=+$/, '');
+  let bits = '';
+  for (const ch of encoded) {
+    const val = alphabet.indexOf(ch);
+    if (val === -1) throw new Error('无效的 Base32 字符: ' + ch);
+    bits += val.toString(2).padStart(5, '0');
+  }
+  const bytes = [];
+  for (let i = 0; i + 8 <= bits.length; i += 8) {
+    bytes.push(parseInt(bits.substring(i, i + 8), 2));
+  }
+  return new Uint8Array(bytes);
+}
+
+async function hmacSha1(keyBytes, msgBytes) {
+  const key = await crypto.subtle.importKey(
+    'raw', keyBytes, { name: 'HMAC', hash: 'SHA-1' }, false, ['sign']
+  );
+  const sig = await crypto.subtle.sign('HMAC', key, msgBytes);
+  return new Uint8Array(sig);
+}
+
+async function generateTOTP(secretBase32, period = 30) {
+  const secret = base32Decode(secretBase32);
+  if (secret.length === 0) throw new Error('密钥为空');
+  const counter = Math.floor(Date.now() / 1000 / period);
+  const counterBuf = new Uint8Array(8);
+  let c = BigInt(counter);
+  for (let i = 7; i >= 0; i--) {
+    counterBuf[i] = Number(c & 0xffn);
+    c >>= 8n;
+  }
+  const digest = await hmacSha1(secret, counterBuf);
+  const offset = digest[digest.length - 1] & 0x0f;
+  const code = (
+    ((digest[offset] & 0x7f) << 24) |
+    ((digest[offset + 1] & 0xff) << 16) |
+    ((digest[offset + 2] & 0xff) << 8) |
+    (digest[offset + 3] & 0xff)
+  ) % 1000000;
+  return code.toString().padStart(6, '0');
+}
+
+const secretInput = document.getElementById('secret');
+const codeEl = document.getElementById('code');
+const ttlBar = document.getElementById('ttlBar');
+const ttlText = document.getElementById('ttlText');
+const PERIOD = 30;
+
+async function refreshTotp() {
+  const secret = secretInput.value.trim();
+  if (!secret) {
+    codeEl.textContent = '------';
+    codeEl.classList.remove('error');
+    ttlBar.style.width = '100%';
+    ttlText.textContent = '等待输入密钥...';
+    return;
+  }
+  try {
+    const code = await generateTOTP(secret, PERIOD);
+    codeEl.textContent = code.slice(0, 3) + ' ' + code.slice(3);
+    codeEl.classList.remove('error');
+  } catch (e) {
+    codeEl.textContent = e.message;
+    codeEl.classList.add('error');
+  }
+  const now = Math.floor(Date.now() / 1000);
+  const remaining = PERIOD - (now % PERIOD);
+  ttlBar.style.width = (remaining / PERIOD * 100) + '%';
+  ttlText.textContent = remaining + ' 秒后刷新';
+}
+
+secretInput.addEventListener('input', refreshTotp);
+
+// 持久化 secret（可选，方便重复使用）
+const savedSecret = localStorage.getItem('totp_secret');
+if (savedSecret) secretInput.value = savedSecret;
+secretInput.addEventListener('change', () => {
+  localStorage.setItem('totp_secret', secretInput.value.trim());
+});
+
+let lastCounter = -1;
+setInterval(() => {
+  const counter = Math.floor(Date.now() / 1000 / PERIOD);
+  if (counter !== lastCounter) {
+    lastCounter = counter;
+    refreshTotp();
+  } else {
+    const now = Math.floor(Date.now() / 1000);
+    const remaining = PERIOD - (now % PERIOD);
+    ttlBar.style.width = (remaining / PERIOD * 100) + '%';
+    if (secretInput.value.trim()) {
+      ttlText.textContent = remaining + ' 秒后刷新';
+    }
+  }
+}, 1000);
+refreshTotp();
+
+// ---------- toast 复制反馈 ----------
+const toastEl = document.getElementById('toast');
+let toastTimer = null;
+function showToast(msg = '已复制') {
+  toastEl.textContent = msg;
+  toastEl.classList.add('show');
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toastEl.classList.remove('show'), 1200);
+}
+function copyToClipboard(text, label = '已复制') {
+  navigator.clipboard.writeText(text).then(
+    () => showToast(label),
+    () => showToast('复制失败')
+  );
+}
+
+codeEl.addEventListener('click', () => {
+  if (codeEl.classList.contains('error')) return;
+  const text = codeEl.textContent.replace(/\s/g, '');
+  if (text === '------') return;
+  copyToClipboard(text, '验证码已复制');
+});
+
+
+// ================================================================
+// SMS 部分（与 src/common/sms.js 等价）
+// ================================================================
+// 若通过 http(s) 加载（经 tools/serve.js 启动），走同源代理 /api/sms 避开 CORS；
+// 若直接 file:// 打开，则尝试直连（大概率被浏览器拦截）
+const SMS_API_BASE = (location.protocol === 'http:' || location.protocol === 'https:')
+    ? '/api/sms'
+    : 'https://hero-sms.com/stubs/handler_api.php';
+
+const smsKeyInput = document.getElementById('smsKey');
+const smsServiceInput = document.getElementById('smsService');
+const smsCountryInput = document.getElementById('smsCountry');
+const smsGetBtn = document.getElementById('smsGetBtn');
+const smsCancelBtn = document.getElementById('smsCancelBtn');
+const smsStatus = document.getElementById('smsStatus');
+const smsPhone = document.getElementById('smsPhone');
+const smsCode = document.getElementById('smsCode');
+const smsInfo = document.getElementById('smsInfo');
+const smsLog = document.getElementById('smsLog');
+
+// 持久化设置
+['smsKey', 'smsService', 'smsCountry'].forEach(id => {
+  const el = document.getElementById(id);
+  const v = localStorage.getItem(id);
+  if (v) el.value = v;
+  el.addEventListener('change', () => localStorage.setItem(id, el.value.trim()));
+});
+
+function logSms(msg, cls = '') {
+  smsLog.classList.add('show');
+  const t = new Date().toLocaleTimeString();
+  const span = document.createElement('div');
+  if (cls) {
+    span.innerHTML = `<span class="t">[${t}]</span> <span class="${cls}">${escapeHtml(msg)}</span>`;
+  } else {
+    span.innerHTML = `<span class="t">[${t}]</span> ${escapeHtml(msg)}`;
+  }
+  smsLog.appendChild(span);
+  smsLog.scrollTop = smsLog.scrollHeight;
+}
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+async function smsRequest(params) {
+  const apiKey = smsKeyInput.value.trim();
+  if (!apiKey) throw new Error('API Key 为空');
+  const url = new URL(SMS_API_BASE, location.href);
+  url.searchParams.set('api_key', apiKey);
+  for (const [k, v] of Object.entries(params)) {
+    url.searchParams.set(k, v);
+  }
+  let res;
+  try {
+    res = await fetch(url.toString(), { method: 'GET' });
+  } catch (e) {
+    throw new Error('网络/CORS 错误: ' + e.message + '（浏览器可能拦截了跨域请求，见页面底部说明）');
+  }
+  const text = (await res.text()).trim();
+  if (!res.ok) {
+    throw new Error(`HTTP ${res.status}: ${text}`);
+  }
+  return text;
+}
+
+async function smsGetNumber(service, country) {
+  const result = await smsRequest({ action: 'getNumber', service, country: String(country) });
+  if (result.startsWith('ACCESS_NUMBER:')) {
+    const parts = result.split(':');
+    return { id: parts[1], phone: parts[2] };
+  }
+  if (result === 'NO_NUMBERS') throw new Error('当前无可用号码');
+  if (result === 'NO_BALANCE') throw new Error('hero-sms 余额不足');
+  if (result === 'BAD_KEY') throw new Error('API Key 无效');
+  throw new Error(`getNumber 失败: ${result}`);
+}
+
+async function smsGetStatus(id) {
+  const result = await smsRequest({ action: 'getStatus', id });
+  if (result === 'STATUS_WAIT_CODE' || result === 'STATUS_WAIT_RESEND') {
+    return { status: 'waiting' };
+  }
+  if (result.startsWith('STATUS_OK:')) {
+    return { status: 'ok', code: result.split(':')[1] };
+  }
+  if (result.startsWith('STATUS_WAIT_RETRY:')) {
+    return { status: 'retry', code: result.split(':')[1] };
+  }
+  if (result === 'STATUS_CANCEL') {
+    return { status: 'cancelled' };
+  }
+  return { status: 'unknown', raw: result };
+}
+
+async function smsSetStatus(id, status) {
+  return smsRequest({ action: 'setStatus', id, status: String(status) });
+}
+
+// ---- 交互流程 ----
+const SMS_TIMEOUT = 120;       // 秒
+const SMS_POLL_INTERVAL = 5;   // 秒
+let smsPollHandle = null;
+let smsCurrentId = null;
+
+function resetSmsUi() {
+  smsGetBtn.disabled = false;
+  smsCancelBtn.disabled = true;
+  smsCurrentId = null;
+  if (smsPollHandle) { clearTimeout(smsPollHandle); smsPollHandle = null; }
+}
+
+smsGetBtn.addEventListener('click', async () => {
+  const service = smsServiceInput.value.trim() || 'go';
+  const country = (smsCountryInput.value.trim() || '0');
+
+  smsStatus.classList.add('show');
+  smsPhone.textContent = '...';
+  smsCode.textContent = '等待中...';
+  smsCode.classList.remove('err');
+  smsInfo.textContent = '';
+  smsInfo.classList.remove('err');
+  smsGetBtn.disabled = true;
+  smsCancelBtn.disabled = true;
+
+  try {
+    logSms(`请求号码 service=${service} country=${country}...`);
+    const { id, phone } = await smsGetNumber(service, country);
+    smsCurrentId = id;
+    smsPhone.textContent = '+' + phone;
+    logSms(`获得号码: +${phone} (ID ${id})`, 's');
+
+    // 通知已准备接收
+    await smsSetStatus(id, 1).catch(e => logSms('setStatus(1) 失败: ' + e.message, 'e'));
+
+    smsCancelBtn.disabled = false;
+
+    // 轮询
+    const startTime = Date.now();
+    const poll = async () => {
+      if (!smsCurrentId) return; // 已取消
+      const elapsed = Math.round((Date.now() - startTime) / 1000);
+      if (elapsed > SMS_TIMEOUT) {
+        logSms(`超时 ${SMS_TIMEOUT}s，取消激活`, 'e');
+        await smsSetStatus(id, 8).catch(() => {});
+        smsCode.textContent = '超时未收到';
+        smsCode.classList.add('err');
+        resetSmsUi();
+        return;
+      }
+      try {
+        const r = await smsGetStatus(id);
+        if (r.status === 'ok') {
+          smsCode.textContent = r.code;
+          smsInfo.textContent = `耗时 ${elapsed}s · 点击复制`;
+          logSms(`收到验证码: ${r.code} (${elapsed}s)`, 's');
+          await smsSetStatus(id, 6).catch(() => {});
+          resetSmsUi();
+          return;
+        }
+        if (r.status === 'cancelled') {
+          logSms('激活已被取消', 'e');
+          smsCode.textContent = '已取消';
+          smsCode.classList.add('err');
+          resetSmsUi();
+          return;
+        }
+        smsInfo.textContent = `等待短信... (${elapsed}s / ${SMS_TIMEOUT}s)`;
+      } catch (e) {
+        logSms('轮询出错: ' + e.message, 'e');
+      }
+      smsPollHandle = setTimeout(poll, SMS_POLL_INTERVAL * 1000);
+    };
+    smsPollHandle = setTimeout(poll, SMS_POLL_INTERVAL * 1000);
+    smsInfo.textContent = `等待短信... (0s / ${SMS_TIMEOUT}s)`;
+  } catch (e) {
+    logSms(e.message, 'e');
+    smsPhone.textContent = '-';
+    smsCode.textContent = e.message;
+    smsCode.classList.add('err');
+    resetSmsUi();
+  }
+});
+
+smsCancelBtn.addEventListener('click', async () => {
+  if (!smsCurrentId) return;
+  const id = smsCurrentId;
+  smsCancelBtn.disabled = true;
+  logSms(`取消激活 ${id}...`);
+  try {
+    await smsSetStatus(id, 8);
+    logSms('已取消', 's');
+  } catch (e) {
+    logSms('取消失败: ' + e.message, 'e');
+  }
+  smsCode.textContent = '已取消';
+  smsCode.classList.add('err');
+  resetSmsUi();
+});
+
+// 点击手机号 / 验证码复制
+smsPhone.addEventListener('click', () => {
+  const txt = smsPhone.textContent.trim().replace(/^\+/, '');
+  if (!txt || txt === '-' || txt === '...') return;
+  copyToClipboard(txt, '手机号已复制');
+});
+smsCode.addEventListener('click', () => {
+  if (smsCode.classList.contains('err')) return;
+  const txt = smsCode.textContent.trim();
+  if (!txt || txt === '等待中...') return;
+  copyToClipboard(txt, '验证码已复制');
+});
+</script>
+</body>
+</html>
