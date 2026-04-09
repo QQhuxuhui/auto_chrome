@@ -43,11 +43,9 @@ function parseListArg(prefix) {
 }
 
 const CLI_OPTS = {
-    concurrency: parseIntArg(['-c', '--concurrency'], parseInt(process.env.CONCURRENCY, 10) || 1),
+    concurrency: parseIntArg(['-c', '--concurrency'], parseInt(process.env.CONCURRENCY, 10) || 3),
     reauthAll: args.includes('--reauth-all'),
     reauthList: parseListArg('--reauth='),
-    skipTest: args.includes('--skip-test'),
-    skipValidation: args.includes('--skip-validation'),
 };
 
 const HARD_TIMEOUT_MS = parseInt(process.env.SUB2API_HARD_TIMEOUT_MS, 10) || 300000;
@@ -830,41 +828,10 @@ async function processMember({ member, host, client, browser, workerId, opts }) 
             timer.step('updateAccountCredentials');
         }
 
-        // 9. Optional test (non-fatal). On VALIDATION_REQUIRED errors Google
-        //    hands us an account-verification URL; if --skip-validation
-        //    isn't set, we drive that URL through the browser (same TOTP +
-        //    consent clickers as the OAuth flow) and re-run the test once.
-        if (!opts.skipTest) {
-            let result = await client.testAccount(account.id);
-            timer.step('testAccount');
-
-            if (result.ok) {
-                wlog.success(`  test passed (id=${account.id})`);
-            } else if (result.validationUrl && !opts.skipValidation) {
-                wlog.warn(`  test failed (id=${account.id}) — validation required; running auto-verify`);
-                const verified = await completeValidationFlow(page, result.validationUrl, member, wlog);
-                timer.step('completeValidationFlow');
-                if (verified) {
-                    // Re-test to confirm the account is usable now
-                    result = await client.testAccount(account.id);
-                    timer.step('testAccount (retry)');
-                    if (result.ok) {
-                        wlog.success(`  test passed after validation (id=${account.id})`);
-                    } else {
-                        wlog.warn(`  test still failing after validation (id=${account.id}): ${(result.error || '').slice(0, 200)}`);
-                    }
-                } else {
-                    wlog.warn(`  validation flow did not complete (id=${account.id}) — non-fatal`);
-                }
-            } else if (result.validationUrl) {
-                wlog.warn(`  test failed (id=${account.id}) — validation URL present but --skip-validation set`);
-                wlog.info(`  validation_url: ${result.validationUrl}`);
-            } else {
-                const snippet = (result.error || '').slice(0, 300);
-                wlog.warn(`  test did not pass (id=${account.id}) — non-fatal. error: ${snippet}`);
-            }
-        }
-
+        // Account is registered; model testing + validation flow are the
+        // responsibility of stage 4 (src/4_verify.js). Keeping stage 3 as a
+        // pure register-only path lets concurrency stay high without the
+        // per-account verification back-and-forth.
         wlog.success(`  ${mode} done: id=${account.id}`);
         return {
             status: mode === 'create' ? 'created' : 'updated',
@@ -941,8 +908,6 @@ async function main() {
     log(`  Concurrency:  ${CLI_OPTS.concurrency}`);
     log(`  Reauth all:   ${CLI_OPTS.reauthAll}`);
     log(`  Reauth list:  ${CLI_OPTS.reauthList.length ? CLI_OPTS.reauthList.join(',') : '(none)'}`);
-    log(`  Skip test:    ${CLI_OPTS.skipTest}`);
-    log(`  Skip validate:${CLI_OPTS.skipValidation}`);
     log('='.repeat(60));
     log('');
 
@@ -1046,4 +1011,5 @@ module.exports = {
     Sub2apiClient,
     Sub2apiError,
     captureOAuthCode,
+    completeValidationFlow,
 };

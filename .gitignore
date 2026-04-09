@@ -7,6 +7,8 @@ src/failed.json
 src/enableAPI_failed.json
 failed.json
 state.json
+# Local backups of state/failed files (e.g. state.json.bak.20260409_xxx)
+*.bak.[0-9]*
 
 # Sensitive files
 src/.env

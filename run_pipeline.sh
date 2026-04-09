@@ -87,6 +87,10 @@ run_stage() {
             echo " ---- Stage 3: Register Accounts in sub2api ----"
             node 3_sub2api.js "${EXTRA_ARGS[@]}"
             ;;
+        4)
+            echo " ---- Stage 4: Verify Accounts on sub2api ----"
+            node 4_verify.js "${EXTRA_ARGS[@]}"
+            ;;
         *)
             echo " WARNING: unknown stage '$1'"
             return 1
