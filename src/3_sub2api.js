@@ -434,13 +434,24 @@ async function clickOAuthConsentTarget(page, email) {
     return page.evaluate((targetEmail) => {
         const lower = (s) => (s || '').toLowerCase();
         const KEYWORDS = [
-            'continue', 'allow', 'accept', 'confirm', 'next', 'authorize',
-            '继续', '允许', '同意', '确认', '下一步', '授权',
-            'tiếp tục', 'cho phép', 'chấp nhận', 'xác nhận',
-            'continuar', 'permitir', 'aceptar', 'aceitar',
-            'continuer', 'autoriser', 'accepter',
-            'lanjutkan', 'izinkan', 'terima',
-            'weiter', 'zulassen', 'bestätigen',
+            // Forward-style (continue, next, allow, authorize, sign in)
+            'continue', 'allow', 'accept', 'confirm', 'next', 'authorize', 'sign in', 'log in',
+            '继续', '允许', '同意', '确认', '下一步', '授权', '登录', '登入',
+            'tiếp tục', 'tiếp theo', 'cho phép', 'chấp nhận', 'xác nhận', 'đăng nhập',
+            'continuar', 'permitir', 'aceptar', 'aceitar', 'iniciar sesión', 'entrar',
+            'continuer', 'autoriser', 'accepter', 'se connecter',
+            'lanjutkan', 'izinkan', 'terima', 'masuk',
+            'weiter', 'zulassen', 'bestätigen', 'anmelden',
+        ];
+        // Deny-style: NEVER click these by accident
+        const NEGATIVE_KEYWORDS = [
+            'cancel', 'deny', 'no thanks', 'not now', 'back',
+            '取消', '拒绝', '返回',
+            'huỷ', 'hủy', 'từ chối', 'quay lại',
+            'cancelar', 'recusar', 'rechazar', 'volver', 'voltar',
+            'annuler', 'refuser', 'retour',
+            'batal', 'tolak', 'kembali',
+            'abbrechen', 'ablehnen', 'zurück',
         ];
         const emailLower = lower(targetEmail);
 
@@ -468,7 +479,26 @@ async function clickOAuthConsentTarget(page, email) {
             return el;
         }
 
-        // Priority 1: data-identifier attribute (Google's canonical account picker)
+        // Priority 1: explicit forward-style button/link labels. These are
+        // the most reliable — they exist on both intermediate consent pages
+        // and the final "confirm this is the right app" page.
+        {
+            const btns = document.querySelectorAll('button, [role="button"], a[role="link"], input[type="submit"]');
+            for (const el of btns) {
+                if (!isVisible(el)) continue;
+                const txt = lower((el.textContent || el.value || '').trim());
+                if (!txt) continue;
+                if (NEGATIVE_KEYWORDS.some(k => txt.includes(k))) continue;
+                if (KEYWORDS.some(k => txt.includes(k))) {
+                    el.click();
+                    return `keyword button: "${txt.substring(0, 40)}"`;
+                }
+            }
+        }
+
+        // Priority 2: data-identifier attribute (Google's canonical account
+        // picker — only fires on the account-chooser page, not the final
+        // confirm page).
         if (emailLower) {
             const byData = document.querySelector(`[data-identifier="${targetEmail}" i], [data-email="${targetEmail}" i]`);
             if (byData && isVisible(byData)) {
@@ -477,30 +507,16 @@ async function clickOAuthConsentTarget(page, email) {
             }
         }
 
-        // Priority 2: any visible element whose text contains the email
+        // Priority 3: any visible leaf-ish element whose text contains the
+        // email and is inside what looks like a clickable row. Fallback only.
         if (emailLower) {
-            const all = document.querySelectorAll('div, span, li, a, button');
+            const all = document.querySelectorAll('li a, li button, div[role="button"], div[role="link"]');
             for (const el of all) {
                 if (!isVisible(el)) continue;
                 const txt = lower(el.textContent || '');
                 if (!txt.includes(emailLower)) continue;
-                // Only consider "leaf-ish" elements so we don't click the body
-                if (el.children.length > 3) continue;
-                const tgt = clickableAncestor(el);
-                tgt.click();
-                return `email-text match: ${el.tagName.toLowerCase()} "${txt.substring(0, 50)}"`;
-            }
-        }
-
-        // Priority 3: consent buttons by label
-        const btns = document.querySelectorAll('button, [role="button"], a[role="link"], a');
-        for (const el of btns) {
-            if (!isVisible(el)) continue;
-            const txt = lower(el.textContent || '').trim();
-            if (!txt) continue;
-            if (KEYWORDS.some(k => txt.includes(k))) {
                 el.click();
-                return `keyword button: "${txt.substring(0, 40)}"`;
+                return `email-row match: ${el.tagName.toLowerCase()}`;
             }
         }
 
