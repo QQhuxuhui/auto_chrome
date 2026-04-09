@@ -17,6 +17,7 @@ const {
 } = require('./common/chrome');
 const { parseAccounts, addFailedRecord } = require('./common/state');
 const { googleLogin } = require('./common/google-login');
+const { generateTOTP } = require('./common/totp');
 
 // ============ CLI 参数 ============
 const args = process.argv.slice(2);
@@ -332,6 +333,181 @@ async function captureOAuthCode(page, authUrl, wlog, { timeoutMs = 60000 } = {})
     }
 }
 
+// ============ OAuth consent helpers ============
+
+/**
+ * Detect a Google 2FA/TOTP challenge that re-appears mid-OAuth flow and
+ * auto-fill the code using member.totp_secret. Returns true if a TOTP
+ * input was found and a code was entered (caller should wait for the
+ * page to settle afterwards). Returns false when no TOTP input is
+ * present on the current page.
+ */
+async function handleTotpChallenge(page, member, wlog) {
+    if (!member || !member.totp_secret) return false;
+    const hasInput = await page.evaluate(() => {
+        const sels = [
+            'input[type="tel"]', 'input[type="number"]',
+            'input[name*="totpPin" i]', 'input[name*="pin" i]', 'input[name*="code" i]',
+            'input[aria-label*="code" i]', 'input[aria-label*="验证码" i]', 'input[aria-label*="mã" i]',
+            '#totpPin', '#idvPin',
+        ];
+        for (const sel of sels) {
+            for (const inp of document.querySelectorAll(sel)) {
+                const r = inp.getBoundingClientRect();
+                if (r.width > 0 && r.height > 0 && !inp.disabled) return true;
+            }
+        }
+        return false;
+    }).catch(() => false);
+    if (!hasInput) return false;
+
+    let code;
+    try { code = generateTOTP(member.totp_secret); }
+    catch (e) { wlog.warn(`  [consent] TOTP generation failed: ${e.message}`); return false; }
+
+    wlog.info(`  [consent] TOTP challenge detected, filling code ${code}`);
+    // Focus + clear
+    await page.evaluate(() => {
+        const sels = [
+            'input[type="tel"]', 'input[type="number"]',
+            'input[name*="totpPin" i]', 'input[name*="pin" i]', 'input[name*="code" i]',
+            'input[aria-label*="code" i]', 'input[aria-label*="验证码" i]', 'input[aria-label*="mã" i]',
+            '#totpPin', '#idvPin',
+        ];
+        for (const sel of sels) {
+            for (const inp of document.querySelectorAll(sel)) {
+                const r = inp.getBoundingClientRect();
+                if (r.width > 0 && r.height > 0 && !inp.disabled) {
+                    inp.focus();
+                    inp.value = '';
+                    return;
+                }
+            }
+        }
+    }).catch(() => { });
+    await sleep(200);
+    await page.keyboard.type(code, { delay: 40 });
+    await sleep(500);
+
+    // Click the "Next / 下一步 / Tiếp theo / ..." button. Use a button-only
+    // click strategy — we explicitly do NOT match email text here because
+    // the account chip also shows the email.
+    const clicked = await page.evaluate(() => {
+        const keywords = [
+            'next', 'verify', 'continue', 'confirm', 'submit',
+            '下一步', '继续', '确认', '验证',
+            'tiếp theo', 'xác minh', 'tiếp tục',
+            'siguiente', 'verificar', 'continuar',
+            'suivant', 'vérifier', 'continuer',
+            'lanjut', 'verifikasi', 'weiter', 'bestätigen',
+        ];
+        function isVisible(el) {
+            if (!el || !el.getBoundingClientRect) return false;
+            const r = el.getBoundingClientRect();
+            if (r.width <= 0 || r.height <= 0) return false;
+            const cs = window.getComputedStyle(el);
+            return cs.display !== 'none' && cs.visibility !== 'hidden';
+        }
+        const btns = document.querySelectorAll('button, [role="button"], input[type="submit"]');
+        for (const el of btns) {
+            if (!isVisible(el)) continue;
+            const txt = (el.textContent || el.value || '').trim().toLowerCase();
+            if (keywords.some(k => txt.includes(k))) {
+                el.click();
+                return txt.substring(0, 40);
+            }
+        }
+        return null;
+    }).catch(() => null);
+    if (!clicked) await page.keyboard.press('Enter').catch(() => { });
+    return true;
+}
+
+/**
+ * Click past a Google OAuth consent / account-picker page. Scans for
+ * elements whose visible text contains the target email (account picker)
+ * or common "allow/continue/confirm" labels in multiple languages, and
+ * walks up to a clickable ancestor before clicking. Returns a short
+ * description on success, or null.
+ */
+async function clickOAuthConsentTarget(page, email) {
+    return page.evaluate((targetEmail) => {
+        const lower = (s) => (s || '').toLowerCase();
+        const KEYWORDS = [
+            'continue', 'allow', 'accept', 'confirm', 'next', 'authorize',
+            '继续', '允许', '同意', '确认', '下一步', '授权',
+            'tiếp tục', 'cho phép', 'chấp nhận', 'xác nhận',
+            'continuar', 'permitir', 'aceptar', 'aceitar',
+            'continuer', 'autoriser', 'accepter',
+            'lanjutkan', 'izinkan', 'terima',
+            'weiter', 'zulassen', 'bestätigen',
+        ];
+        const emailLower = lower(targetEmail);
+
+        function isVisible(el) {
+            if (!el || !el.getBoundingClientRect) return false;
+            const r = el.getBoundingClientRect();
+            if (r.width <= 0 || r.height <= 0) return false;
+            const cs = window.getComputedStyle(el);
+            return cs.display !== 'none' && cs.visibility !== 'hidden' && cs.opacity !== '0';
+        }
+
+        function clickableAncestor(el) {
+            let cur = el;
+            for (let i = 0; i < 6 && cur; i++) {
+                const tag = cur.tagName && cur.tagName.toLowerCase();
+                if (tag === 'a' || tag === 'button') return cur;
+                if (cur.getAttribute && (cur.getAttribute('role') === 'button' || cur.getAttribute('role') === 'link')) return cur;
+                if (cur.hasAttribute && (cur.hasAttribute('jsaction') || cur.hasAttribute('data-identifier'))) return cur;
+                try {
+                    const cs = window.getComputedStyle(cur);
+                    if (cs && cs.cursor === 'pointer') return cur;
+                } catch (_) { }
+                cur = cur.parentElement;
+            }
+            return el;
+        }
+
+        // Priority 1: data-identifier attribute (Google's canonical account picker)
+        if (emailLower) {
+            const byData = document.querySelector(`[data-identifier="${targetEmail}" i], [data-email="${targetEmail}" i]`);
+            if (byData && isVisible(byData)) {
+                byData.click();
+                return `data-identifier match: ${targetEmail}`;
+            }
+        }
+
+        // Priority 2: any visible element whose text contains the email
+        if (emailLower) {
+            const all = document.querySelectorAll('div, span, li, a, button');
+            for (const el of all) {
+                if (!isVisible(el)) continue;
+                const txt = lower(el.textContent || '');
+                if (!txt.includes(emailLower)) continue;
+                // Only consider "leaf-ish" elements so we don't click the body
+                if (el.children.length > 3) continue;
+                const tgt = clickableAncestor(el);
+                tgt.click();
+                return `email-text match: ${el.tagName.toLowerCase()} "${txt.substring(0, 50)}"`;
+            }
+        }
+
+        // Priority 3: consent buttons by label
+        const btns = document.querySelectorAll('button, [role="button"], a[role="link"], a');
+        for (const el of btns) {
+            if (!isVisible(el)) continue;
+            const txt = lower(el.textContent || '').trim();
+            if (!txt) continue;
+            if (KEYWORDS.some(k => txt.includes(k))) {
+                el.click();
+                return `keyword button: "${txt.substring(0, 40)}"`;
+            }
+        }
+
+        return null;
+    }, email).catch(() => null);
+}
+
 // ============ 单 member 编排 ============
 
 const SESSION_SAFETY_WINDOW_MS = 25 * 60 * 1000; // sub2api SessionTTL = 30min, keep 5min buffer
@@ -393,35 +569,33 @@ async function processMember({ member, host, client, browser, workerId, opts }) 
         }
 
         // 5. Capture OAuth code via request interception.
-        //    Google's consent flow frequently stops on an account-selection
-        //    page or a "Continue / Allow" confirm page. Run a background
-        //    poller that auto-clicks past those while captureOAuthCode waits
-        //    for the localhost:8085/callback redirect.
-        const consentKeywords = [
-            member.email,
-            // English
-            'continue', 'allow', 'accept', 'confirm', 'next', 'authorize',
-            // Chinese
-            '继续', '允许', '同意', '确认', '下一步', '授权',
-            // Vietnamese
-            'tiếp tục', 'cho phép', 'chấp nhận', 'xác nhận',
-            // Spanish / Portuguese
-            'continuar', 'permitir', 'aceptar', 'aceitar',
-            // French
-            'continuer', 'autoriser', 'accepter',
-            // Indonesian
-            'lanjutkan', 'izinkan', 'terima',
-            // German
-            'weiter', 'zulassen', 'bestätigen',
-        ];
+        //    Google's consent flow frequently stops on an account-picker page
+        //    or a "Continue / Allow" confirm page. Run a background poller
+        //    that auto-clicks past those while captureOAuthCode waits for the
+        //    localhost:8085/callback redirect.
         let keepPolling = true;
+        let clickAttempts = 0;
         const consentPoller = (async () => {
             await sleep(2500); // let goto settle first
             while (keepPolling) {
+                clickAttempts++;
                 try {
-                    await tryClickStrategies(page, consentKeywords, wlog, 'oauth_consent');
+                    // 1) TOTP re-challenge (OAuth re-verifies identity on risk triggers)
+                    const totpHandled = await handleTotpChallenge(page, member, wlog);
+                    if (totpHandled) {
+                        await sleep(4000); // wait for verify + nav
+                        continue;
+                    }
+                    // 2) account picker / continue-allow page
+                    const hit = await clickOAuthConsentTarget(page, member.email);
+                    if (hit) {
+                        wlog.info(`  [consent] click (attempt ${clickAttempts}): ${hit}`);
+                        await sleep(2500);
+                    } else if (clickAttempts === 1 || clickAttempts % 5 === 0) {
+                        wlog.debug(`  [consent] idle (attempt ${clickAttempts}, url=${page.url().slice(0, 80)})`);
+                    }
                 } catch (_) { /* ignore click errors; we're just probing */ }
-                await sleep(2000);
+                await sleep(1500);
             }
         })();
 
