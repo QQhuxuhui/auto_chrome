@@ -451,6 +451,166 @@ async function processMember({ member, host, client, browser, workerId, opts }) 
     }
 }
 
+// ============ main ============
+
+const keepBrowserOpen = (process.env.KEEP_BROWSER_OPEN || '').toLowerCase() === 'true';
+let _workers = [];
+
+function cleanupWorkers(workers) {
+    for (const w of workers) {
+        if (keepBrowserOpen) {
+            try { w.browser.disconnect(); } catch (_) { }
+        } else {
+            try { w.browser.close(); } catch (_) { }
+            try { w.proc.kill(); } catch (_) { }
+        }
+    }
+    if (keepBrowserOpen && workers.length > 0) log('Browsers kept open (KEEP_BROWSER_OPEN=true)');
+}
+
+process.on('SIGINT', () => {
+    log('\nInterrupted (Ctrl+C). Cleaning up...', 'WARN');
+    cleanupWorkers(_workers);
+    process.exit();
+});
+
+function pairMembersWithHosts(hosts, members) {
+    // Same convention as stage1 buildGroups: 5 members per host, by index.
+    const pairs = [];
+    for (let i = 0; i < members.length; i++) {
+        const hostIdx = Math.floor(i / 5);
+        if (hostIdx >= hosts.length) {
+            log(`  Dropping member[${i}] ${members[i].email}: no host (members > 5 * hosts.length)`, 'WARN');
+            continue;
+        }
+        pairs.push({ member: members[i], host: hosts[hostIdx] });
+    }
+    return pairs;
+}
+
+async function main() {
+    const repoRoot = path.resolve(__dirname, '..');
+    const sub2apiFile = path.join(repoRoot, 'sub2api.txt');
+    const hostsFile = path.join(repoRoot, 'hosts.txt');
+    const membersFile = path.join(repoRoot, 'members.txt');
+
+    const cfg = parseSub2apiConfig(sub2apiFile);
+    const client = new Sub2apiClient(cfg.url, cfg.apiKey);
+
+    const hosts = parseAccounts(hostsFile);
+    const members = parseAccounts(membersFile);
+    const pending = pairMembersWithHosts(hosts, members);
+
+    const chromePath = findChrome();
+    if (!chromePath) { console.error('Chrome not found'); process.exit(1); }
+
+    log('');
+    log('='.repeat(60));
+    log('  Stage 3: Register Accounts in sub2api');
+    log('='.repeat(60));
+    log(`  sub2api URL:  ${cfg.url}`);
+    log(`  Hosts:        ${hostsFile}`);
+    log(`  Members:      ${membersFile}`);
+    log(`  Pending:      ${pending.length}`);
+    log(`  Concurrency:  ${CLI_OPTS.concurrency}`);
+    log(`  Reauth all:   ${CLI_OPTS.reauthAll}`);
+    log(`  Reauth list:  ${CLI_OPTS.reauthList.length ? CLI_OPTS.reauthList.join(',') : '(none)'}`);
+    log(`  Skip test:    ${CLI_OPTS.skipTest}`);
+    log('='.repeat(60));
+    log('');
+
+    if (pending.length === 0) {
+        log('No members to process. Exiting.', 'SUCCESS');
+        return;
+    }
+
+    // Launch workers
+    const workers = _workers = [];
+    for (let w = 0; w < Math.min(CLI_OPTS.concurrency, pending.length); w++) {
+        try {
+            const chrome = await launchRealChrome(chromePath, w);
+            workers.push({ id: w, ...chrome });
+            if (w < CLI_OPTS.concurrency - 1) await sleep(rand(2000, 3000));
+        } catch (e) {
+            log(`Worker${w} launch failed: ${e.message}`, 'ERROR');
+        }
+    }
+    if (workers.length === 0) {
+        console.error('All Chrome instances failed to start');
+        process.exit(1);
+    }
+
+    let idx = 0;
+    const stats = { created: 0, updated: 0, skipped: 0, failed: 0 };
+
+    async function workerFn(worker) {
+        const wlog = createWorkerLogger(worker.id);
+        while (true) {
+            const myIdx = idx++;
+            if (myIdx >= pending.length) break;
+            const { member, host } = pending[myIdx];
+
+            try {
+                const alive = await isChromeAlive(worker);
+                if (!alive) await restartChrome(chromePath, worker);
+
+                const result = await Promise.race([
+                    processMember({
+                        member, host, client,
+                        browser: worker.browser,
+                        workerId: worker.id,
+                        opts: CLI_OPTS,
+                    }),
+                    new Promise((_, rej) => setTimeout(
+                        () => rej(new Error(`sub2api_hard_timeout: exceeded ${HARD_TIMEOUT_MS / 1000}s`)),
+                        HARD_TIMEOUT_MS
+                    )),
+                ]);
+
+                if (result.status === 'created') stats.created++;
+                else if (result.status === 'updated') stats.updated++;
+                else if (result.status === 'skipped') stats.skipped++;
+            } catch (e) {
+                wlog.error(`processMember failed [${member.email}]: ${e.message}`);
+                stats.failed++;
+                await addFailedRecord({
+                    stage: 3,
+                    memberEmail: member.email,
+                    hostEmail: host.email,
+                    reason: e.message,
+                });
+                if (/hard_timeout|Protocol error|Session closed|Target closed/i.test(e.message || '')) {
+                    wlog.warn('  Restarting Chrome after hard failure...');
+                    try { await restartChrome(chromePath, worker); } catch (re) {
+                        wlog.error(`  Chrome restart failed: ${re.message}`);
+                    }
+                }
+            }
+
+            await sleep(rand(1000, 2000));
+        }
+    }
+
+    await Promise.all(workers.map(w => workerFn(w)));
+    cleanupWorkers(workers);
+
+    log('');
+    log('='.repeat(60));
+    log('  Stage 3 Complete', 'SUCCESS');
+    log(`  Created: ${stats.created}  Updated: ${stats.updated}  Skipped: ${stats.skipped}  Failed: ${stats.failed}`);
+    log('='.repeat(60));
+    log('');
+}
+
+// Invoke main when this file is run directly (not when imported by the test file).
+if (require.main === module) {
+    main().catch(e => {
+        log(`Fatal: ${e.message}`, 'ERROR');
+        if (e.stack) console.error(e.stack);
+        process.exit(1);
+    });
+}
+
 module.exports = {
     accountName,
     parseSub2apiConfig,
