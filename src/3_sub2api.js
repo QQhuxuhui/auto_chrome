@@ -682,11 +682,22 @@ async function completeValidationFlow(page, validationUrl, member, wlog, { timeo
             } catch (_) { /* malformed url, skip */ }
         }
 
-        // Detect signin flow (NOT signin/continue which is the verify page)
+        // Detect signin flow by inspecting the PATHNAME only — not the full
+        // URL string. Google threads the original `continue=` parameter
+        // through every step of the flow, so a signin/identifier URL at
+        // tick 3 will include `gemini-code-assist` in its query string even
+        // though we are clearly on a login page. Matching the full string
+        // would make onSigninFlow falsely negative.
+        let parsedUrl = null;
+        try { parsedUrl = url ? new URL(url) : null; } catch (_) { /* ignore */ }
+        const path = parsedUrl ? parsedUrl.pathname : '';
         const onSigninFlow =
-            /accounts\.google\.com\/(v3\/)?signin/i.test(url) &&
-            !url.includes('/signin/continue') &&
-            !url.includes('gemini-code-assist');
+            parsedUrl &&
+            parsedUrl.host === 'accounts.google.com' &&
+            /^\/(v3\/)?signin\//.test(path) &&
+            // /signin/continue is the verify page itself — skip it
+            path !== '/signin/continue' &&
+            !path.startsWith('/signin/continue/');
 
         if (onSigninFlow && !loginAttempted) {
             loginAttempted = true;
