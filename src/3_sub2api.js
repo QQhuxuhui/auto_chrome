@@ -90,7 +90,11 @@ class Sub2apiClient {
     }
 
     async getAuthUrl(proxyId = null) {
-        const data = await this._request('POST', '/api/v1/admin/antigravity/oauth/auth-url', { proxy_id: proxyId });
+        const endpoint = '/api/v1/admin/antigravity/oauth/auth-url';
+        const data = await this._request('POST', endpoint, { proxy_id: proxyId });
+        if (!data || !data.session_id || !data.auth_url) {
+            throw new Sub2apiError(endpoint, 200, -1, 'empty or malformed data in response');
+        }
         return {
             sessionId: data.session_id,
             state: data.state,
@@ -110,14 +114,24 @@ class Sub2apiClient {
     /**
      * Exact-match lookup by account name. Server search is substring; we fetch
      * and filter client-side. Returns the account object or null.
+     *
+     * Only the first 50 results are inspected. If sub2api reports a larger total,
+     * we log a warning — with the `ultra_<host>_<member>` naming scheme, substring
+     * collisions beyond 50 are rare enough that we rely on the operator noticing
+     * the warning rather than paginating exhaustively.
      */
     async findAccountByName(name) {
-        const qs = new URLSearchParams({ search: name, page: '1', page_size: '50' }).toString();
+        const pageSize = 50;
+        const qs = new URLSearchParams({ search: name, page: '1', page_size: String(pageSize) }).toString();
         const data = await this._request('GET', `/api/v1/admin/accounts?${qs}`, undefined);
         const list = Array.isArray(data?.items) ? data.items
             : Array.isArray(data?.list) ? data.list
             : Array.isArray(data) ? data
             : [];
+        const total = typeof data?.total === 'number' ? data.total : null;
+        if (total !== null && total > pageSize) {
+            console.warn(`[sub2api] findAccountByName(${name}): total=${total} > page_size=${pageSize}; only the first page is searched. Manual verification recommended.`);
+        }
         return list.find(a => a && a.name === name) || null;
     }
 
@@ -159,7 +173,9 @@ class Sub2apiClient {
             while (true) {
                 const { done, value } = await reader.read();
                 if (done) break;
-                buf += decoder.decode(value, { stream: true });
+                buf += decoder.decode(value, { stream: true })
+                    .replace(/\r\n/g, '\n')
+                    .replace(/\r/g, '\n');
                 // Scan each SSE event (separated by blank line)
                 let idx;
                 while ((idx = buf.indexOf('\n\n')) >= 0) {
