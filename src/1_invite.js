@@ -26,6 +26,41 @@ for (let i = 0; i < args.length; i++) {
     }
 }
 
+// ============ 条件暂停（人工干预） ============
+// 用法：
+//   PAUSE_AT=before-send ./run_pipeline.sh --stage 1
+//   PAUSE_AT=before-fill,before-send ./run_pipeline.sh --stage 1
+//   PAUSE_AT=all ./run_pipeline.sh --stage 1
+// 触发后，在终端按回车继续。
+const PAUSE_POINTS = (process.env.PAUSE_AT || '')
+    .split(',').map(s => s.trim()).filter(Boolean);
+const _pauseLock = { busy: false };
+
+async function maybePause(label, wlog) {
+    if (!PAUSE_POINTS.includes('all') && !PAUSE_POINTS.includes(label)) return;
+    if (!process.stdin.isTTY) {
+        (wlog || console).warn && (wlog || console).warn(`[pause:${label}] stdin 非 TTY，跳过暂停`);
+        return;
+    }
+    // 并发模式下只允许一个 worker 进入暂停，避免 stdin 抢占
+    while (_pauseLock.busy) await sleep(500);
+    _pauseLock.busy = true;
+    try {
+        const msg = `\n>>> [pause:${label}] 已暂停，人工干预完成后按回车继续...\n`;
+        process.stdout.write(msg);
+        await new Promise(resolve => {
+            process.stdin.resume();
+            process.stdin.once('data', () => {
+                process.stdin.pause();
+                resolve();
+            });
+        });
+        (wlog || console).info && (wlog || console).info(`[pause:${label}] 继续执行`);
+    } finally {
+        _pauseLock.busy = false;
+    }
+}
+
 const GOOGLE_ONE_FAMILY_URL = 'https://myaccount.google.com/family/details?utm_source=g1web&utm_medium=default';
 const GOOGLE_ONE_SETTINGS_URL = 'https://one.google.com/settings?g1_landing_page=1';
 
@@ -881,6 +916,9 @@ async function inviteGroup(groupState, hostAccount, memberEmails, browser, worke
             throw new Error('Cannot find email input in invite dialog');
         }
 
+        // 【人工干预点 1】邀请页已打开、输入框就绪，填邮箱前
+        await maybePause('before-fill', wlog);
+
         // 逐个输入邮箱，每个输入后按 Enter 添加到列表
         for (let i = 0; i < memberEmails.length; i++) {
             const memberEmail = memberEmails[i];
@@ -894,6 +932,9 @@ async function inviteGroup(groupState, hostAccount, memberEmails, browser, worke
 
         wlog.info(`  All ${memberEmails.length} emails entered, sending invite...`);
         await sleep(1000);
+
+        // 【人工干预点 2】邮箱已全部填入，点"发送"前
+        await maybePause('before-send', wlog);
 
         // 点击发送按钮
         const sendClickedSafe = await clickInviteSendButton(page, wlog);

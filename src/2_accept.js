@@ -5,6 +5,7 @@
  */
 
 require('dotenv').config({ path: require('path').resolve(__dirname, '.env') });
+const fs = require('fs');
 const path = require('path');
 const { log, createWorkerLogger, setVerbose, LOG_COLORS, StepTimer } = require('./common/logger');
 const {
@@ -12,7 +13,7 @@ const {
     isChromeAlive, clearBrowserSession, newPage,
     tryClickStrategies, takeScreenshot, detectPageState,
 } = require('./common/chrome');
-const { parseAccounts, loadState, updateState, addFailedRecord } = require('./common/state');
+const { parseAccounts, buildGroups, loadState, initState, updateState, addFailedRecord } = require('./common/state');
 const { googleLogin } = require('./common/google-login');
 
 // ============ CLI 参数 ============
@@ -32,6 +33,38 @@ const INVITE_POLL_INTERVAL = parseInt(process.env.INVITE_POLL_INTERVAL, 10) || 3
 // 追加 ?hl=en 强制 Gmail UI 为英文（tabs、按钮等），
 // 但邮件正文仍是发送方原语言
 const GMAIL_URL = 'https://mail.google.com/mail/u/0/?hl=en';
+
+// ============ 条件暂停（人工干预） ============
+// 用法：
+//   PAUSE_AT=before-accept ./run_pipeline.sh --stage 2
+//   PAUSE_AT=all ./run_pipeline.sh --stage 2
+// 触发后，在终端按回车继续。
+const PAUSE_POINTS = (process.env.PAUSE_AT || '')
+    .split(',').map(s => s.trim()).filter(Boolean);
+const _pauseLock = { busy: false };
+
+async function maybePause(label, wlog) {
+    if (!PAUSE_POINTS.includes('all') && !PAUSE_POINTS.includes(label)) return;
+    if (!process.stdin.isTTY) {
+        (wlog || console).warn && (wlog || console).warn(`[pause:${label}] stdin 非 TTY，跳过暂停`);
+        return;
+    }
+    while (_pauseLock.busy) await sleep(500);
+    _pauseLock.busy = true;
+    try {
+        process.stdout.write(`\n>>> [pause:${label}] 已暂停，人工干预完成后按回车继续...\n`);
+        await new Promise(resolve => {
+            process.stdin.resume();
+            process.stdin.once('data', () => {
+                process.stdin.pause();
+                resolve();
+            });
+        });
+        (wlog || console).info && (wlog || console).info(`[pause:${label}] 继续执行`);
+    } finally {
+        _pauseLock.busy = false;
+    }
+}
 
 // ============ 严格的按钮点击器：只按 text+aria 精确匹配 ============
 async function clickByTextOrAria(page, keywords) {
@@ -349,6 +382,9 @@ async function acceptInvite(memberAccount, browser, workerId) {
 
         // 3. 在邮件中点击接受链接
         await sleep(2000);
+
+        // 【人工干预点】邮件已打开，脚本点接受链接前 —— 你可以自己点
+        await maybePause('before-accept', wlog);
 
         // Gmail 的邮件内容在 iframe 或特定 div 中，需要先尝试获取邮件正文区域
         // 查找接受邀请的链接/按钮
@@ -753,11 +789,36 @@ async function main() {
     log('');
 
     const allMembers = parseAccounts(membersFile);
-    const state = await loadState();
+    let state = await loadState();
 
+    // 如果没有状态文件，自动从 members.txt (+ 可选 hosts.txt) 初始化一份，
+    // 并把 stage1_invited 标记为 true —— 允许跳过阶段1 直接接受已存在的邀请。
     if (state.length === 0) {
-        log('No state found. Run stage 1 first.', 'ERROR');
-        process.exit(1);
+        log('No state found. Auto-initializing from members.txt (assumes invites already sent).', 'WARN');
+        const hostsFile = path.resolve(__dirname, '..', 'hosts.txt');
+        let groups;
+        if (fs.existsSync(hostsFile)) {
+            const hosts = parseAccounts(hostsFile);
+            if (hosts.length > 0) {
+                groups = buildGroups(hosts, allMembers);
+                log(`  Using hosts.txt: built ${groups.length} group(s)`);
+            }
+        }
+        if (!groups || groups.length === 0) {
+            // 无 hosts.txt 或为空 —— 所有成员放到一个合成组
+            groups = [{
+                groupId: 1,
+                host: { email: 'synthetic@local' },
+                members: allMembers,
+            }];
+            log(`  No hosts.txt: created 1 synthetic group with ${allMembers.length} members`);
+        }
+        await initState(groups);
+        await updateState(s => {
+            for (const g of s) g.stage1_invited = true;
+        });
+        state = await loadState();
+        log(`  State initialized: ${state.length} group(s) ready for stage 2`);
     }
 
     // 收集所有需要接受邀请的成员
