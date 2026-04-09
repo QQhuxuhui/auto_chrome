@@ -666,10 +666,20 @@ async function completeValidationFlow(page, validationUrl, member, wlog, { timeo
             idleRounds++;
         }
 
-        // Success detection first — if we already landed at auth_success, stop
-        if (url && /auth_success_gemini/i.test(url)) {
-            wlog.success(`  [validate] ✓ success landing reached at tick ${tick} (${elapsed}s)`);
-            return true;
+        // Success detection first — we must have navigated to the real
+        // landing URL at developers.google.com, NOT merely see the substring
+        // in a query parameter of the signin/continue URL (which contains
+        // `continue=https://developers.google.com/.../auth_success_gemini`
+        // as part of the OAuth state).
+        if (url) {
+            try {
+                const u = new URL(url);
+                if (u.host === 'developers.google.com' &&
+                    u.pathname.includes('/auth_success_gemini')) {
+                    wlog.success(`  [validate] ✓ success landing reached at tick ${tick} (${elapsed}s)`);
+                    return true;
+                }
+            } catch (_) { /* malformed url, skip */ }
         }
 
         // Detect signin flow (NOT signin/continue which is the verify page)
