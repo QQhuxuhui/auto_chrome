@@ -9,6 +9,74 @@
  */
 
 const fs = require('fs');
+const path = require('path');
+const { log, createWorkerLogger, setVerbose, StepTimer } = require('./common/logger');
+const {
+    sleep, rand, findChrome, launchRealChrome, restartChrome,
+    isChromeAlive, newPage, takeScreenshot,
+} = require('./common/chrome');
+const { parseAccounts, addFailedRecord } = require('./common/state');
+const { googleLogin } = require('./common/google-login');
+
+// ============ CLI 参数 ============
+const args = process.argv.slice(2);
+if (args.includes('--verbose') || args.includes('-v')) setVerbose(true);
+
+function parseIntArg(names, fallback) {
+    for (let i = 0; i < args.length; i++) {
+        if (names.includes(args[i]) && args[i + 1]) {
+            const n = parseInt(args[i + 1], 10);
+            if (!Number.isNaN(n)) return n;
+        }
+    }
+    return fallback;
+}
+
+function parseListArg(prefix) {
+    for (const a of args) {
+        if (a.startsWith(prefix)) {
+            return a.slice(prefix.length).split(',').map(s => s.trim()).filter(Boolean);
+        }
+    }
+    return [];
+}
+
+const CLI_OPTS = {
+    concurrency: parseIntArg(['-c', '--concurrency'], parseInt(process.env.CONCURRENCY, 10) || 1),
+    reauthAll: args.includes('--reauth-all'),
+    reauthList: parseListArg('--reauth='),
+    skipTest: args.includes('--skip-test'),
+};
+
+const HARD_TIMEOUT_MS = parseInt(process.env.SUB2API_HARD_TIMEOUT_MS, 10) || 300000;
+
+// ============ 条件暂停 ============
+const PAUSE_POINTS = (process.env.PAUSE_AT || '')
+    .split(',').map(s => s.trim()).filter(Boolean);
+const _pauseLock = { busy: false };
+
+async function maybePause(label, wlog) {
+    if (!PAUSE_POINTS.includes('all') && !PAUSE_POINTS.includes(label)) return;
+    if (!process.stdin.isTTY) {
+        (wlog || console).warn && (wlog || console).warn(`[pause:${label}] stdin 非 TTY，跳过暂停`);
+        return;
+    }
+    while (_pauseLock.busy) await sleep(500);
+    _pauseLock.busy = true;
+    try {
+        process.stdout.write(`\n>>> [pause:${label}] 已暂停，人工干预完成后按回车继续...\n`);
+        await new Promise(resolve => {
+            process.stdin.resume();
+            process.stdin.once('data', () => {
+                process.stdin.pause();
+                resolve();
+            });
+        });
+        (wlog || console).info && (wlog || console).info(`[pause:${label}] 继续执行`);
+    } finally {
+        _pauseLock.busy = false;
+    }
+}
 
 function accountName(hostEmail, memberEmail) {
     const localOf = (e) => String(e).split('@')[0];
@@ -261,6 +329,125 @@ async function captureOAuthCode(page, authUrl, wlog, { timeoutMs = 60000 } = {})
         clearTimeout(timeoutId);
         page.off('request', onRequest);
         await page.setRequestInterception(false).catch(() => { });
+    }
+}
+
+// ============ 单 member 编排 ============
+
+const SESSION_SAFETY_WINDOW_MS = 25 * 60 * 1000; // sub2api SessionTTL = 30min, keep 5min buffer
+
+async function processMember({ member, host, client, browser, workerId, opts }) {
+    const wlog = createWorkerLogger(workerId);
+    const timer = new StepTimer(wlog);
+    const name = accountName(host.email, member.email);
+    wlog.info(`>> processMember name=${name} email=${member.email}`);
+
+    // 1. Check existence + decide mode
+    const existing = await client.findAccountByName(name);
+    timer.step('findAccountByName');
+
+    const forceReauth = shouldForceReauth(member.email, opts);
+    let mode;
+    if (!existing) {
+        mode = 'create';
+    } else if (forceReauth) {
+        mode = 'reauth';
+        wlog.info(`  forced re-auth requested (id=${existing.id})`);
+    } else if (existing.status === 'active') {
+        wlog.success(`  [skip] already active (id=${existing.id})`);
+        return { status: 'skipped', accountId: existing.id, mode: 'skip' };
+    } else {
+        mode = 'reauth';
+        wlog.info(`  auto re-auth: status=${existing.status} (id=${existing.id})`);
+    }
+
+    // 2. Get auth url (starts sub2api session 30min countdown)
+    const authStartedAt = Date.now();
+    const { sessionId, state, authUrl } = await client.getAuthUrl();
+    timer.step('getAuthUrl');
+
+    // 3. Browser login as the member
+    const page = await newPage(browser);
+    try {
+        await googleLogin(page, member, wlog);
+        timer.step('googleLogin');
+
+        // 4. Manual intervention point
+        await maybePause('before-oauth', wlog);
+
+        // Session TTL safety check after (potentially long) pause
+        if (Date.now() - authStartedAt > SESSION_SAFETY_WINDOW_MS) {
+            throw new Error(`sub2api session nearly expired (${Math.round((Date.now() - authStartedAt) / 1000)}s elapsed, limit ${SESSION_SAFETY_WINDOW_MS / 1000}s) — re-run stage 3 to restart`);
+        }
+
+        // 5. Capture OAuth code via request interception
+        let code;
+        try {
+            code = await captureOAuthCode(page, authUrl, wlog);
+        } catch (e) {
+            await takeScreenshot(page, `sub2api_oauth_fail_${member.email.replace(/[^a-z0-9]/gi, '_')}`, wlog);
+            throw e;
+        }
+        timer.step('captureOAuthCode');
+
+        // 6. Exchange code -> tokens
+        const tokens = await client.exchangeCode({ sessionId, state, code });
+        timer.step('exchangeCode');
+
+        // 7. Build credentials (expires_at must be string per spec note)
+        const credentials = {
+            access_token: tokens.access_token,
+            refresh_token: tokens.refresh_token,
+            expires_at: String(tokens.expires_at),
+            token_type: tokens.token_type || 'Bearer',
+            email: tokens.email,
+            project_id: tokens.project_id,
+        };
+
+        // 8. Create or update
+        let account;
+        if (mode === 'create') {
+            try {
+                account = await client.createAccount({ name, credentials });
+            } catch (e) {
+                // Race fallback: maybe someone else created it between our lookup and now
+                if (e instanceof Sub2apiError) {
+                    const again = await client.findAccountByName(name);
+                    if (again) {
+                        wlog.warn(`  create collided, falling back to PUT id=${again.id}`);
+                        account = await client.updateAccountCredentials(again.id, credentials);
+                    } else {
+                        throw e;
+                    }
+                } else {
+                    throw e;
+                }
+            }
+            timer.step('createAccount');
+        } else {
+            account = await client.updateAccountCredentials(existing.id, credentials);
+            timer.step('updateAccountCredentials');
+        }
+
+        // 9. Optional test (non-fatal)
+        if (!opts.skipTest) {
+            const ok = await client.testAccount(account.id);
+            if (ok) {
+                wlog.success(`  test passed (id=${account.id})`);
+            } else {
+                wlog.warn(`  test did not pass (id=${account.id}) — non-fatal, account still counted as success`);
+            }
+            timer.step('testAccount');
+        }
+
+        wlog.success(`  ${mode} done: id=${account.id}`);
+        return {
+            status: mode === 'create' ? 'created' : 'updated',
+            accountId: account.id,
+            mode,
+        };
+    } finally {
+        await page.close().catch(() => { });
     }
 }
 
