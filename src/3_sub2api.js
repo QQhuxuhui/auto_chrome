@@ -614,24 +614,53 @@ async function clickOAuthConsentTarget(page, email) {
 }
 
 /**
- * Drive a Google account-verification URL to completion inside an
- * already-logged-in `page`. Used after a sub2api test fails with a
- * VALIDATION_REQUIRED error: Google sent us a signin/continue URL that,
- * once visited, shows a "verify your account" confirmation page. This
- * function navigates to that URL and then reuses the same TOTP +
- * consent-click pollers as the OAuth flow to click past the prompts,
- * waiting until Google redirects to a success page
- * (auth_success_gemini / myaccount / about:blank).
+ * Drive a Google account-verification URL to completion. The caller is
+ * expected to hand us a fresh, session-cleared `page` — we then:
+ *
+ *   1. page.goto(validationUrl)  (cold — Google typically redirects to
+ *      its signin page if no session cookie is present)
+ *   2. If we land on a signin/identifier/challenge page, run googleLogin
+ *      (email → password → TOTP). After login Google re-processes the
+ *      `continue` parameter and lands on the verify page.
+ *   3. Poll: auto-fill any extra TOTP re-challenge, click past
+ *      "Continue / Verify / Tiếp tục / ..." buttons, wait for the
+ *      auth_success_gemini landing (or a settled non-signin page).
  *
  * Returns true when the flow appears to have completed, false on timeout.
  */
-async function completeValidationFlow(page, validationUrl, member, wlog, { timeoutMs = 90000 } = {}) {
-    wlog.info(`  [validate] navigating to account-verification URL...`);
+async function completeValidationFlow(page, validationUrl, member, wlog, { timeoutMs = 120000 } = {}) {
+    wlog.info(`  [validate] navigating directly to validation URL...`);
     wlog.debug(`  [validate] url: ${validationUrl.slice(0, 120)}...`);
 
     await page.goto(validationUrl, { waitUntil: 'domcontentloaded', timeout: 30000 })
         .catch(e => wlog.warn(`  [validate] initial nav warning: ${e.message}`));
     await sleep(2000);
+
+    // If Google bounced us to its signin flow (identifier / pwd / challenge
+    // etc.), drive the login. NOTE: we must NOT match signin/continue —
+    // that's the validation page itself.
+    const urlAfterNav = page.url();
+    wlog.debug(`  [validate] landed at: ${urlAfterNav.slice(0, 120)}`);
+    const onSigninFlow =
+        /accounts\.google\.com\/(v3\/)?signin/i.test(urlAfterNav) &&
+        !urlAfterNav.includes('/signin/continue') &&
+        !urlAfterNav.includes('gemini-code-assist');
+    if (onSigninFlow) {
+        wlog.info(`  [validate] signin required — running googleLogin as ${member.email}`);
+        try {
+            await googleLogin(page, member, wlog);
+        } catch (e) {
+            wlog.warn(`  [validate] googleLogin failed: ${e.message}`);
+            return false;
+        }
+        // After login, make sure we're on the verify page by re-navigating
+        // to the validation URL. Google will fast-forward now that we have
+        // a session cookie.
+        await sleep(1500);
+        await page.goto(validationUrl, { waitUntil: 'domcontentloaded', timeout: 30000 })
+            .catch(e => wlog.warn(`  [validate] post-login nav warning: ${e.message}`));
+        await sleep(1500);
+    }
 
     const startedAt = Date.now();
     let lastUrl = '';

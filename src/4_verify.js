@@ -7,9 +7,10 @@
  * 如果测试失败且 error 里包含 Google 的 validation_url（Vertex API 返回
  * 403 VALIDATION_REQUIRED 时给的二次认证链接），自动：
  *   1. clearBrowserSession
- *   2. googleLogin 该成员
- *   3. 打开 validation_url 并用 consent/TOTP poller 点击走完
- *   4. 重新调用 test 端点
+ *   2. 直接打开 validation_url（Google 会把未登录会话跳转到 signin）
+ *   3. completeValidationFlow 内部在检测到 signin 页时自动调 googleLogin
+ *   4. 用 consent/TOTP poller 点击走完验证页
+ *   5. 重新调用 test 端点
  *
  * 阶段4 不创建账号 —— 跑之前需要先用阶段3 把账号注册好。
  *
@@ -26,7 +27,6 @@ const {
     isChromeAlive, clearBrowserSession, newPage,
 } = require('./common/chrome');
 const { parseAccounts, addFailedRecord } = require('./common/state');
-const { googleLogin } = require('./common/google-login');
 const {
     accountName,
     parseSub2apiConfig,
@@ -175,19 +175,15 @@ async function phase1TestAll(pending, client, opts, limit) {
 async function phase2VerifyOne(item, { client, browser, workerId, opts }) {
     const wlog = createWorkerLogger(workerId);
     const timer = new StepTimer(wlog);
-    wlog.info(`>> [phase2] ${item.name} (id=${item.account.id})`);
+    wlog.info(`>> [phase2] ${item.name} (id=${item.account.id}) <${item.member.email}>`);
 
+    // Clean browser state so Google starts from a logged-out session —
+    // completeValidationFlow will navigate directly to the validation URL
+    // and run googleLogin itself if/when Google redirects to its signin
+    // flow. No pre-login step here.
     await clearBrowserSession(browser, wlog);
     const page = await newPage(browser);
     try {
-        await page.goto('https://accounts.google.com/signin', {
-            waitUntil: 'domcontentloaded',
-            timeout: 30000,
-        }).catch(e => wlog.warn(`  [phase2] signin nav warning: ${e.message}`));
-        await sleep(1000);
-        await googleLogin(page, item.member, wlog);
-        timer.step('googleLogin');
-
         const verified = await completeValidationFlow(page, item.validationUrl, item.member, wlog);
         timer.step('completeValidationFlow');
         if (!verified) {
@@ -196,6 +192,7 @@ async function phase2VerifyOne(item, { client, browser, workerId, opts }) {
             return;
         }
 
+        wlog.info(`  [phase2] re-testing id=${item.account.id} after validation...`);
         const retry = await client.testAccount(item.account.id, { modelId: opts.modelId });
         timer.step('testAccount (retry)');
         if (retry.ok) {
