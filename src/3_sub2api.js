@@ -237,21 +237,28 @@ async function captureOAuthCode(page, authUrl, wlog, { timeoutMs = 60000 } = {})
 
     page.on('request', onRequest);
 
-    const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('oauth_capture_timeout')), timeoutMs)
-    );
+    let timeoutId;
+    const timeoutPromise = new Promise((_, reject) => {
+        timeoutId = setTimeout(() => reject(new Error('oauth_capture_timeout')), timeoutMs);
+    });
 
     try {
         // Kick off navigation but do not await it — the redirect to
         // localhost:8085 will fire request interception first and we resolve
-        // via the promise, not via goto's return value.
+        // via the promise, not via goto's return value. The expected failure
+        // here is net::ERR_ABORTED (from our own req.abort on the callback);
+        // anything else is a real navigation failure we should surface.
         page.goto(authUrl, { waitUntil: 'domcontentloaded', timeout: timeoutMs })
-            .catch(() => { /* navigation may error due to aborted request; ignore */ });
+            .catch((e) => {
+                if (e && /ERR_ABORTED/i.test(e.message || '')) return;
+                rejectCode(e);
+            });
 
         const code = await Promise.race([codePromise, timeoutPromise]);
         if (wlog) wlog.debug(`  OAuth code captured (${code.length} chars)`);
         return code;
     } finally {
+        clearTimeout(timeoutId);
         page.off('request', onRequest);
         await page.setRequestInterception(false).catch(() => { });
     }
