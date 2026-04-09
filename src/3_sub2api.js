@@ -366,9 +366,17 @@ async function processMember({ member, host, client, browser, workerId, opts }) 
     const { sessionId, state, authUrl } = await client.getAuthUrl();
     timer.step('getAuthUrl');
 
-    // 3. Browser login as the member
+    // 3. Browser login as the member.
+    //    googleLogin drives an existing signin page — it does not navigate on
+    //    its own. We first open accounts.google.com/signin so googleLogin has
+    //    something to work with; otherwise it deadloops on about:blank.
     const page = await newPage(browser);
     try {
+        await page.goto('https://accounts.google.com/signin', {
+            waitUntil: 'domcontentloaded',
+            timeout: 30000,
+        }).catch(e => wlog.warn(`  signin nav warning: ${e.message}`));
+        await sleep(1000);
         await googleLogin(page, member, wlog);
         timer.step('googleLogin');
 
