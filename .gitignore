@@ -12,6 +12,7 @@ state.json
 src/.env
 hosts.txt
 members.txt
+sub2api.txt
 
 # Chrome temp data
 src/chrome_data_temp_auth_*/
