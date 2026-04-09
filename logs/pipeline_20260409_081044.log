@@ -1,0 +1,38 @@
+
+ ===========================================================
+
+   Gemini Family Group Pipeline
+   2-Stage Automation (Invite + Accept)
+
+ ===========================================================
+
+ ---- Running Stage 2 ----
+ ---- Stage 2: Accept Family Invitations ----
+[0m[2026-04-09 00:10:44.308][INF] [0m
+[0m[2026-04-09 00:10:44.308][INF] ============================================================[0m
+[0m[2026-04-09 00:10:44.309][INF]   Stage 2: Accept Family Invitations[0m
+[0m[2026-04-09 00:10:44.309][INF] ============================================================[0m
+[0m[2026-04-09 00:10:44.309][INF]   Chrome:       /usr/bin/google-chrome[0m
+[0m[2026-04-09 00:10:44.309][INF]   Members:      /usr/src/workspace/github/QQhuxuhui/auto_chrome/members.txt[0m
+[0m[2026-04-09 00:10:44.309][INF]   Concurrency:  3[0m
+[0m[2026-04-09 00:10:44.309][INF]   Poll interval: 30s[0m
+[0m[2026-04-09 00:10:44.309][INF]   Poll timeout:  600s[0m
+[0m[2026-04-09 00:10:44.309][INF] ============================================================[0m
+[0m[2026-04-09 00:10:44.309][INF] [0m
+[0m[2026-04-09 00:10:44.310][INF] Pending members to accept: 2[0m
+[33m[2026-04-09 00:10:44.374][WRN] [36m[W0][0m [33mChrome process exit: code=0, signal=null[0m
+[0m[2026-04-09 00:10:44.570][INF] [36m[W0][0m Chrome started (port 9234, PID 35939)[0m
+[0m[2026-04-09 00:10:47.245][INF] [35m[W1][0m Chrome started (port 9235, PID 36004)[0m
+[33m[2026-04-09 00:10:47.257][WRN] [35m[W1][0m [33mChrome process exit: code=0, signal=null[0m
+[0m[2026-04-09 00:10:49.798][INF] [35m[W1][0m >> Accept invite: addilynsno310@gmail.com[0m
+[0m[2026-04-09 00:10:49.802][INF] [36m[W0][0m >> Accept invite: sarahjahir107@gmail.com[0m
+[0m[2026-04-09 00:10:49.990][INF] [36m[W0][0m   Navigating to Gmail...[0m
+[0m[2026-04-09 00:10:50.152][INF] [35m[W1][0m   Navigating to Gmail...[0m
+[33m[2026-04-09 00:10:55.455][WRN] [36m[W0][0m [33m  Gmail opened without login prompt, verifying account...[0m
+./run_pipeline.sh: line 77: 35931 Killed                  node 2_accept.js "${EXTRA_ARGS[@]}"
+
+
+ ===========================================================
+   Pipeline finished.
+ ===========================================================
+

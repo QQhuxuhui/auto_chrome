@@ -1,0 +1,55 @@
+
+ ===========================================================
+
+   Gemini Family Group Pipeline
+   2-Stage Automation (Invite + Accept)
+
+ ===========================================================
+
+ Running all 2 stages...
+
+ ---- Stage 1: Send Family Invitations ----
+[0m[2026-04-08 22:59:09.154][INF] [0m
+[0m[2026-04-08 22:59:09.154][INF] ============================================================[0m
+[0m[2026-04-08 22:59:09.154][INF]   Stage 1: Send Family Invitations[0m
+[0m[2026-04-08 22:59:09.155][INF] ============================================================[0m
+[0m[2026-04-08 22:59:09.155][INF]   Chrome:      /usr/bin/google-chrome[0m
+[0m[2026-04-08 22:59:09.155][INF]   Hosts:       /usr/src/workspace/github/QQhuxuhui/auto_chrome/hosts.txt[0m
+[0m[2026-04-08 22:59:09.155][INF]   Members:     /usr/src/workspace/github/QQhuxuhui/auto_chrome/members.txt[0m
+[0m[2026-04-08 22:59:09.155][INF]   Concurrency: 1[0m
+[0m[2026-04-08 22:59:09.155][INF] ============================================================[0m
+[0m[2026-04-08 22:59:09.155][INF] [0m
+[0m[2026-04-08 22:59:09.156][INF] Parsed: 1 hosts, 2 members[0m
+[0m[2026-04-08 22:59:09.156][INF] Built 1 groups[0m
+[0m[2026-04-08 22:59:09.157][INF] Pending groups: 1[0m
+[33m[2026-04-08 22:59:09.228][WRN] [36m[W0][0m [33mChrome process exit: code=0, signal=null[0m
+[0m[2026-04-08 22:59:09.415][INF] [36m[W0][0m Chrome started (port 9234, PID 6729)[0m
+[0m[2026-04-08 22:59:09.420][INF] [36m[W0][0m >> Inviting group 1: host=hersalanllely@gmail.com, members=2[0m
+[0m[2026-04-08 22:59:09.601][INF] [36m[W0][0m   Navigating to Google One family settings...[0m
+[0m[2026-04-08 22:59:14.658][INF] [36m[W0][0m   Current URL after navigation: https://accounts.google.com/v3/signin/identifier?continue=https%3A%2F%2Fmyaccount.google.com%2Ffamily%2Fdetails%3Futm_source%3Dg1web%26utm_medium%3Ddefault&dsh=S1714257413%3A1775689152587992&followup=https%3A%2F%2Fmyaccount.google.com%2Ffamily%2Fdetails%3Futm_source%3Dg1web%26utm_medium%3Ddefault&osid=1&passive=1209600&service=accountsettings&flowName=GlifWebSignIn&flowEntry=ServiceLogin&ifkv=AT1y2_VV8ddPXUnPU7ncFuZhzaHj3Qdn-wSubb_n0AhKVVdqnu0rEkfJHJ_lJ8N9xWa4JNPzba5LQA[0m
+[0m[2026-04-08 22:59:14.664][INF] [36m[W0][0m   Login required, logging in as host...[0m
+[0m[2026-04-08 22:59:14.673][INF] [36m[W0][0m   [Login Step 01] State: [1memail[0m[0m
+[0m[2026-04-08 22:59:15.832][INF] [36m[W0][0m   [Login Step 02] State: [1mpassword[0m[0m
+[0m[2026-04-08 22:59:33.951][INF] [36m[W0][0m   [Login Step 03] State: [1mpassword[0m[0m
+./run_pipeline.sh: line 77:  6721 Killed                  node 1_invite.js "${EXTRA_ARGS[@]}"
+ WARNING: Stage 1 had errors
+
+ ---- Stage 2: Accept Family Invitations ----
+[0m[2026-04-08 22:59:36.553][INF] [0m
+[0m[2026-04-08 22:59:36.554][INF] ============================================================[0m
+[0m[2026-04-08 22:59:36.554][INF]   Stage 2: Accept Family Invitations[0m
+[0m[2026-04-08 22:59:36.555][INF] ============================================================[0m
+[0m[2026-04-08 22:59:36.555][INF]   Chrome:       /usr/bin/google-chrome[0m
+[0m[2026-04-08 22:59:36.555][INF]   Members:      /usr/src/workspace/github/QQhuxuhui/auto_chrome/members.txt[0m
+[0m[2026-04-08 22:59:36.555][INF]   Concurrency:  3[0m
+[0m[2026-04-08 22:59:36.555][INF]   Poll interval: 30s[0m
+[0m[2026-04-08 22:59:36.555][INF]   Poll timeout:  600s[0m
+[0m[2026-04-08 22:59:36.555][INF] ============================================================[0m
+[0m[2026-04-08 22:59:36.555][INF] [0m
+[0m[2026-04-08 22:59:36.556][INF] Pending members to accept: 0[0m
+[32m[2026-04-08 22:59:36.556][ OK] All invitations already accepted. Exiting.[0m
+
+ ===========================================================
+   Pipeline finished.
+ ===========================================================
+

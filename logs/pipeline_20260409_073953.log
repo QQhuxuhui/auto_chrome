@@ -1,0 +1,30 @@
+
+ ===========================================================
+
+   Gemini Family Group Pipeline
+   2-Stage Automation (Invite + Accept)
+
+ ===========================================================
+
+ ---- Running Stage 2 ----
+ ---- Stage 2: Accept Family Invitations ----
+[0m[2026-04-08 23:39:53.211][INF] [0m
+[0m[2026-04-08 23:39:53.211][INF] ============================================================[0m
+[0m[2026-04-08 23:39:53.211][INF]   Stage 2: Accept Family Invitations[0m
+[0m[2026-04-08 23:39:53.211][INF] ============================================================[0m
+[0m[2026-04-08 23:39:53.211][INF]   Chrome:       /usr/bin/google-chrome[0m
+[0m[2026-04-08 23:39:53.211][INF]   Members:      /usr/src/workspace/github/QQhuxuhui/auto_chrome/members.txt[0m
+[0m[2026-04-08 23:39:53.211][INF]   Concurrency:  3[0m
+[0m[2026-04-08 23:39:53.211][INF]   Poll interval: 30s[0m
+[0m[2026-04-08 23:39:53.212][INF]   Poll timeout:  600s[0m
+[0m[2026-04-08 23:39:53.212][INF] ============================================================[0m
+[0m[2026-04-08 23:39:53.212][INF] [0m
+[33m[2026-04-08 23:39:53.214][WRN] Member account not found in file: AlahmdeShadiq@gmail.com[0m
+[0m[2026-04-08 23:39:53.214][INF] Pending members to accept: 0[0m
+[32m[2026-04-08 23:39:53.214][ OK] All invitations already accepted. Exiting.[0m
+
+
+ ===========================================================
+   Pipeline finished.
+ ===========================================================
+

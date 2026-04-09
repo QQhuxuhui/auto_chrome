@@ -1,0 +1,117 @@
+
+ ===========================================================
+
+   Gemini Family Group Pipeline
+   2-Stage Automation (Invite + Accept)
+
+ ===========================================================
+
+ Running all 2 stages...
+
+ ---- Stage 1: Send Family Invitations ----
+[0m[2026-04-09 00:25:27.673][INF] [0m
+[0m[2026-04-09 00:25:27.674][INF] ============================================================[0m
+[0m[2026-04-09 00:25:27.674][INF]   Stage 1: Send Family Invitations[0m
+[0m[2026-04-09 00:25:27.674][INF] ============================================================[0m
+[0m[2026-04-09 00:25:27.674][INF]   Chrome:      /usr/bin/google-chrome[0m
+[0m[2026-04-09 00:25:27.674][INF]   Hosts:       /usr/src/workspace/github/QQhuxuhui/auto_chrome/hosts.txt[0m
+[0m[2026-04-09 00:25:27.674][INF]   Members:     /usr/src/workspace/github/QQhuxuhui/auto_chrome/members.txt[0m
+[0m[2026-04-09 00:25:27.674][INF]   Concurrency: 1[0m
+[0m[2026-04-09 00:25:27.674][INF] ============================================================[0m
+[0m[2026-04-09 00:25:27.675][INF] [0m
+[0m[2026-04-09 00:25:27.675][INF] Parsed: 1 hosts, 2 members[0m
+[0m[2026-04-09 00:25:27.675][INF] Built 1 groups[0m
+[0m[2026-04-09 00:25:27.676][INF] Pending groups: 1[0m
+[0m[2026-04-09 00:25:28.820][INF] [36m[W0][0m Chrome started (port 9234, PID 43973)[0m
+[0m[2026-04-09 00:25:28.839][INF] [36m[W0][0m >> Inviting group 1: host=hersalanllely@gmail.com, members=2[0m
+[0m[2026-04-09 00:25:28.960][INF] [36m[W0][0m   Navigating to Google One family settings...[0m
+[0m[2026-04-09 00:25:34.966][INF] [36m[W0][0m   Current URL after navigation: https://accounts.google.com/v3/signin/identifier?continue=https%3A%2F%2Fmyaccount.google.com%2Ffamily%2Fdetails%3Futm_source%3Dg1web%26utm_medium%3Ddefault&dsh=S706488054%3A1775694332479139&followup=https%3A%2F%2Fmyaccount.google.com%2Ffamily%2Fdetails%3Futm_source%3Dg1web%26utm_medium%3Ddefault&osid=1&passive=1209600&service=accountsettings&flowName=GlifWebSignIn&flowEntry=ServiceLogin&ifkv=AT1y2_U79KUARcHedt4z2WJ5SFrSZ_2Pwp03Dsw42j4B-TA5vDCemNLHKg-91nc6qCgD6z4TSMTD5Q[0m
+[0m[2026-04-09 00:25:34.969][INF] [36m[W0][0m   Login required, logging in as host...[0m
+[0m[2026-04-09 00:25:34.973][INF] [36m[W0][0m   [Login Step 01] State: [1memail[0m[0m
+[0m[2026-04-09 00:25:36.069][INF] [36m[W0][0m   [Login Step 02] State: [1mpassword[0m[0m
+[0m[2026-04-09 00:25:54.191][INF] [36m[W0][0m   [Login Step 03] State: [1mpassword[0m[0m
+[0m[2026-04-09 00:25:57.967][INF] [36m[W0][0m   [Login Step 04] State: [1mverify_authenticator[0m[0m
+[0m[2026-04-09 00:25:57.968][INF] [36m[W0][0m   ============================================[0m
+[0m[2026-04-09 00:25:57.968][INF] [36m[W0][0m   Auto-generating TOTP code from fa_secret[0m
+[0m[2026-04-09 00:25:57.968][INF] [36m[W0][0m   Account: hersalanllely@gmail.com[0m
+[0m[2026-04-09 00:25:57.968][INF] [36m[W0][0m   Code: 137554 (valid for 3s)[0m
+[0m[2026-04-09 00:25:57.968][INF] [36m[W0][0m   ============================================[0m
+[0m[2026-04-09 00:25:57.968][INF] [36m[W0][0m   Code expiring soon, waiting 4s for new code...[0m
+[0m[2026-04-09 00:26:01.973][INF] [36m[W0][0m   New code: 418162 (valid for 29s)[0m
+[32m[2026-04-09 00:26:13.064][ OK] [36m[W0][0m [32m  TOTP verification completed automatically![0m
+[0m[2026-04-09 00:26:13.065][INF] [36m[W0][0m   Login complete (reached authenticated URL: https://myaccount.google.com/family/details?utm_source=g1web&utm_medium=default)[0m
+[0m[2026-04-09 00:26:24.045][INF] [36m[W0][0m   Inviting 2 members in batch...[0m
+[0m[2026-04-09 00:26:24.045][INF] [36m[W0][0m   Navigating directly to invite page...[0m
+[33m[2026-04-09 00:26:32.015][WRN] [36m[W0][0m [33m  Direct nav did not land on invitemembers (url=https://myaccount.google.com/family/member/i/7926356509861087264?utm_source=g1web&utm_medium=default), falling back to button click[0m
+[0m[2026-04-09 00:26:39.468][INF] [36m[W0][0m   Waiting for email input on invite page...[0m
+[0m[2026-04-09 00:26:47.889][INF] [36m[W0][0m   All 2 emails entered, sending invite...[0m
+[32m[2026-04-09 00:26:54.578][ OK] [36m[W0][0m [32m  Invited: sarahjahir107@gmail.com[0m
+[32m[2026-04-09 00:26:54.578][ OK] [36m[W0][0m [32m  Invited: addilynsno310@gmail.com[0m
+[32m[2026-04-09 00:26:54.578][ OK] [36m[W0][0m [32m>> Group 1 all invites sent (85.7s)[0m
+[0m[2026-04-09 00:26:56.539][INF] Browsers kept open (KEEP_BROWSER_OPEN=true)[0m
+[0m[2026-04-09 00:26:56.539][INF] [0m
+[0m[2026-04-09 00:26:56.539][INF] ============================================================[0m
+[32m[2026-04-09 00:26:56.539][ OK]   Stage 1 Complete[0m
+[0m[2026-04-09 00:26:56.539][INF]   OK: 1  FAIL: 0[0m
+[0m[2026-04-09 00:26:56.539][INF] ============================================================[0m
+[0m[2026-04-09 00:26:56.539][INF] [0m
+
+ ---- Stage 2: Accept Family Invitations ----
+[0m[2026-04-09 00:26:56.735][INF] [0m
+[0m[2026-04-09 00:26:56.736][INF] ============================================================[0m
+[0m[2026-04-09 00:26:56.736][INF]   Stage 2: Accept Family Invitations[0m
+[0m[2026-04-09 00:26:56.736][INF] ============================================================[0m
+[0m[2026-04-09 00:26:56.736][INF]   Chrome:       /usr/bin/google-chrome[0m
+[0m[2026-04-09 00:26:56.736][INF]   Members:      /usr/src/workspace/github/QQhuxuhui/auto_chrome/members.txt[0m
+[0m[2026-04-09 00:26:56.736][INF]   Concurrency:  3[0m
+[0m[2026-04-09 00:26:56.736][INF]   Poll interval: 30s[0m
+[0m[2026-04-09 00:26:56.737][INF]   Poll timeout:  600s[0m
+[0m[2026-04-09 00:26:56.737][INF] ============================================================[0m
+[0m[2026-04-09 00:26:56.737][INF] [0m
+[0m[2026-04-09 00:26:56.738][INF] Pending members to accept: 2[0m
+[33m[2026-04-09 00:26:56.812][WRN] [36m[W0][0m [33mChrome process exit: code=0, signal=null[0m
+[0m[2026-04-09 00:26:56.881][INF] [36m[W0][0m Chrome started (port 9234, PID 44809)[0m
+[0m[2026-04-09 00:27:00.648][INF] [35m[W1][0m Chrome started (port 9235, PID 44850)[0m
+[0m[2026-04-09 00:27:03.537][INF] [35m[W1][0m >> Accept invite: addilynsno310@gmail.com[0m
+[0m[2026-04-09 00:27:03.541][INF] [36m[W0][0m >> Accept invite: sarahjahir107@gmail.com[0m
+[0m[2026-04-09 00:27:03.984][INF] [36m[W0][0m   Navigating to Gmail...[0m
+[0m[2026-04-09 00:27:04.061][INF] [35m[W1][0m   Navigating to Gmail...[0m
+[0m[2026-04-09 00:27:09.275][INF] [36m[W0][0m   Logging in...[0m
+[0m[2026-04-09 00:27:09.285][INF] [36m[W0][0m   [Login Step 01] State: [1memail[0m[0m
+[0m[2026-04-09 00:27:10.192][INF] [35m[W1][0m   Logging in...[0m
+[0m[2026-04-09 00:27:10.197][INF] [35m[W1][0m   [Login Step 01] State: [1memail[0m[0m
+[0m[2026-04-09 00:27:10.448][INF] [36m[W0][0m   [Login Step 02] State: [1mpassword[0m[0m
+[0m[2026-04-09 00:27:11.481][INF] [35m[W1][0m   [Login Step 02] State: [1mpassword[0m[0m
+[33m[2026-04-09 00:27:13.380][WRN] [35m[W1][0m [33mChrome process exit: code=0, signal=null[0m
+[0m[2026-04-09 00:27:16.353][INF] [35m[W1][0m   [Login Step 03] State: [1mpassword[0m[0m
+[33m[2026-04-09 00:27:16.353][WRN] [35m[W1][0m [33mAll input methods failed for input[type="password"]: Attempted to use detached Frame '82BE5D7F43F42F01983F17AC4C935581'.[0m
+[33m[2026-04-09 00:27:16.455][WRN] [35m[W1][0m [33mSession clear failed: Connection closed.[0m
+[31m[2026-04-09 00:27:16.455][ERR] [35m[W1][0m [31mAccept failed [addilynsno310@gmail.com]: Protocol error (Input.dispatchKeyEvent): Session closed. Most likely the page has been closed.[0m
+[33m[2026-04-09 00:27:16.458][WRN] [35m[W1][0m [33m  Restarting Chrome after hard failure...[0m
+[33m[2026-04-09 00:27:16.458][WRN] [35m[W1][0m [33mChrome seems crashed, restarting...[0m
+[0m[2026-04-09 00:27:16.990][INF] [36m[W0][0m   [Login Step 03] State: [1mpassword[0m[0m
+[33m[2026-04-09 00:27:16.990][WRN] [36m[W0][0m [33mAll input methods failed for input[type="password"]: Attempted to use detached Frame '16BABBFD1492A8A5CD45F3E8BE896FED'.[0m
+[33m[2026-04-09 00:27:17.091][WRN] [36m[W0][0m [33mSession clear failed: Connection closed.[0m
+[31m[2026-04-09 00:27:17.091][ERR] [36m[W0][0m [31mAccept failed [sarahjahir107@gmail.com]: Protocol error (Input.dispatchKeyEvent): Session closed. Most likely the page has been closed.[0m
+[33m[2026-04-09 00:27:17.092][WRN] [36m[W0][0m [33m  Restarting Chrome after hard failure...[0m
+[33m[2026-04-09 00:27:17.092][WRN] [36m[W0][0m [33mChrome seems crashed, restarting...[0m
+[0m[2026-04-09 00:27:20.566][INF] [35m[W1][0m Chrome started (port 9235, PID 45284)[0m
+[32m[2026-04-09 00:27:20.566][ OK] [35m[W1][0m [32mChrome restarted[0m
+[0m[2026-04-09 00:27:21.193][INF] [36m[W0][0m Chrome started (port 9234, PID 45400)[0m
+[32m[2026-04-09 00:27:21.193][ OK] [36m[W0][0m [32mChrome restarted[0m
+[33m[2026-04-09 00:27:22.251][WRN] [36m[W0][0m [33mChrome process exit: code=0, signal=null[0m
+[0m[2026-04-09 00:27:22.559][INF] Browsers kept open (KEEP_BROWSER_OPEN=true)[0m
+[0m[2026-04-09 00:27:22.559][INF] [0m
+[0m[2026-04-09 00:27:22.559][INF] ============================================================[0m
+[32m[2026-04-09 00:27:22.559][ OK]   Stage 2 Complete[0m
+[0m[2026-04-09 00:27:22.559][INF]   OK: 0  FAIL: 2[0m
+[0m[2026-04-09 00:27:22.559][INF] ============================================================[0m
+[0m[2026-04-09 00:27:22.559][INF] [0m
+[33m[2026-04-09 00:27:23.186][WRN] [35m[W1][0m [33mChrome process exit: code=0, signal=null[0m
+./run_pipeline.sh: line 77: 44802 Killed                  node 2_accept.js "${EXTRA_ARGS[@]}"
+ WARNING: Stage 2 had errors
+
+ ===========================================================
+   Pipeline finished.
+ ===========================================================
+

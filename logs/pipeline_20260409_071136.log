@@ -1,0 +1,156 @@
+
+ ===========================================================
+
+   Gemini Family Group Pipeline
+   2-Stage Automation (Invite + Accept)
+
+ ===========================================================
+
+ ---- Running Stage 1 ----
+ ---- Stage 1: Send Family Invitations ----
+[0m[2026-04-08 23:11:36.959][INF] [0m
+[0m[2026-04-08 23:11:36.960][INF] ============================================================[0m
+[0m[2026-04-08 23:11:36.960][INF]   Stage 1: Send Family Invitations[0m
+[0m[2026-04-08 23:11:36.960][INF] ============================================================[0m
+[0m[2026-04-08 23:11:36.960][INF]   Chrome:      /usr/bin/google-chrome[0m
+[0m[2026-04-08 23:11:36.960][INF]   Hosts:       /usr/src/workspace/github/QQhuxuhui/auto_chrome/hosts.txt[0m
+[0m[2026-04-08 23:11:36.960][INF]   Members:     /usr/src/workspace/github/QQhuxuhui/auto_chrome/members.txt[0m
+[0m[2026-04-08 23:11:36.960][INF]   Concurrency: 1[0m
+[0m[2026-04-08 23:11:36.960][INF] ============================================================[0m
+[0m[2026-04-08 23:11:36.960][INF] [0m
+[0m[2026-04-08 23:11:36.961][INF] Parsed: 1 hosts, 2 members[0m
+[0m[2026-04-08 23:11:36.961][INF] Built 1 groups[0m
+[0m[2026-04-08 23:11:36.961][INF] Pending groups: 1[0m
+[33m[2026-04-08 23:11:37.018][WRN] [36m[W0][0m [33mChrome process exit: code=0, signal=null[0m
+[0m[2026-04-08 23:11:37.067][INF] [36m[W0][0m Chrome started (port 9234, PID 11703)[0m
+[0m[2026-04-08 23:11:37.071][INF] [36m[W0][0m >> Inviting group 1: host=hersalanllely@gmail.com, members=2[0m
+[0m[2026-04-08 23:11:37.121][INF] [36m[W0][0m   Navigating to Google One family settings...[0m
+[0m[2026-04-08 23:11:41.581][INF] [36m[W0][0m   Current URL after navigation: https://accounts.google.com/v3/signin/identifier?continue=https%3A%2F%2Fmyaccount.google.com%2Ffamily%2Fdetails%3Futm_source%3Dg1web%26utm_medium%3Ddefault&dsh=S86746732%3A1775689900113868&followup=https%3A%2F%2Fmyaccount.google.com%2Ffamily%2Fdetails%3Futm_source%3Dg1web%26utm_medium%3Ddefault&osid=1&passive=1209600&service=accountsettings&flowName=GlifWebSignIn&flowEntry=ServiceLogin&ifkv=AT1y2_W-AM7h-skjVJWtlJZA0afgX2fMeLyGbvIEJpyUc8nl5B6PFxdQzVUVPhP7JTkQzv8u7XpDrA[0m
+[0m[2026-04-08 23:11:41.585][INF] [36m[W0][0m   Login required, logging in as host...[0m
+[0m[2026-04-08 23:11:41.590][INF] [36m[W0][0m   [Login Step 01] State: [1memail[0m[0m
+[0m[2026-04-08 23:11:42.770][INF] [36m[W0][0m   [Login Step 02] State: [1mpassword[0m[0m
+[0m[2026-04-08 23:12:00.892][INF] [36m[W0][0m   [Login Step 03] State: [1mpassword[0m[0m
+[0m[2026-04-08 23:12:04.711][INF] [36m[W0][0m   [Login Step 04] State: [1mverify_authenticator[0m[0m
+[0m[2026-04-08 23:12:04.712][INF] [36m[W0][0m   ============================================[0m
+[0m[2026-04-08 23:12:04.712][INF] [36m[W0][0m   Auto-generating TOTP code from fa_secret[0m
+[0m[2026-04-08 23:12:04.712][INF] [36m[W0][0m   Account: hersalanllely@gmail.com[0m
+[0m[2026-04-08 23:12:04.712][INF] [36m[W0][0m   Code: 669209 (valid for 26s)[0m
+[0m[2026-04-08 23:12:04.712][INF] [36m[W0][0m   ============================================[0m
+[32m[2026-04-08 23:12:14.744][ OK] [36m[W0][0m [32m  TOTP verification completed automatically![0m
+[0m[2026-04-08 23:12:14.746][INF] [36m[W0][0m   [Login Step 05] State: [1munknown[0m[0m
+[0m[2026-04-08 23:12:14.746][INF] [36m[W0][0m   Login appears complete (URL: https://myaccount.google.com/family/details?utm_source=g1web&utm_medium=default)[0m
+[0m[2026-04-08 23:12:25.675][INF] [36m[W0][0m   No family group detected — creating one...[0m
+[0m[2026-04-08 23:12:25.685][INF] [36m[W0][0m   [DUMP before_create] url=https://myaccount.google.com/family/details?utm_source=g1web&utm_medium=default[0m
+[0m[2026-04-08 23:12:25.685][INF] [36m[W0][0m   [DUMP before_create] title=Your family on Google[0m
+[0m[2026-04-08 23:12:25.685][INF] [36m[W0][0m   [DUMP before_create] body="Skip to main content Account Help Home Home Personal info Personal info Security & sign-in Security & sign-in Google password Google password Third-party apps & services Third-party apps & services Data & privacy Data & privacy People & sharing People & sharing Wallet & subscriptions Wallet & subscriptions Google One storage Google One storage Your family on Google Your family on Google You can cr"[0m
+[0m[2026-04-08 23:12:25.685][INF] [36m[W0][0m   [DUMP before_create]   [BUTTON] "Skip to main content"[0m
+[0m[2026-04-08 23:12:25.685][INF] [36m[W0][0m   [DUMP before_create]   [A] "Account" aria="Google Account settings"[0m
+[0m[2026-04-08 23:12:25.685][INF] [36m[W0][0m   [DUMP before_create]   [BUTTON] "" aria="Search"[0m
+[0m[2026-04-08 23:12:25.685][INF] [36m[W0][0m   [DUMP before_create]   [BUTTON] "" aria="Help"[0m
+[0m[2026-04-08 23:12:25.685][INF] [36m[W0][0m   [DUMP before_create]   [A] "" aria="Google apps"[0m
+[0m[2026-04-08 23:12:25.686][INF] [36m[W0][0m   [DUMP before_create]   [A] "" aria="Google Account: Anllely Hersal  
+(hersalanllely@gmail.com), Important account al"[0m
+[0m[2026-04-08 23:12:25.686][INF] [36m[W0][0m   [DUMP before_create]   [A] "HomeHome"[0m
+[0m[2026-04-08 23:12:25.686][INF] [36m[W0][0m   [DUMP before_create]   [A] "Personal infoPersonal info"[0m
+[0m[2026-04-08 23:12:25.686][INF] [36m[W0][0m   [DUMP before_create]   [A] "Security & sign-inSecurity & sign-in"[0m
+[0m[2026-04-08 23:12:25.686][INF] [36m[W0][0m   [DUMP before_create]   [A] "Google passwordGoogle password"[0m
+[0m[2026-04-08 23:12:25.686][INF] [36m[W0][0m   [DUMP before_create]   [A] "Third-party apps & servicesThird-party apps & services"[0m
+[0m[2026-04-08 23:12:25.686][INF] [36m[W0][0m   [DUMP before_create]   [A] "Data & privacyData & privacy"[0m
+[0m[2026-04-08 23:12:25.686][INF] [36m[W0][0m   [DUMP before_create]   [A] "People & sharingPeople & sharing"[0m
+[0m[2026-04-08 23:12:25.686][INF] [36m[W0][0m   [DUMP before_create]   [A] "Wallet & subscriptionsWallet & subscriptions"[0m
+[0m[2026-04-08 23:12:25.686][INF] [36m[W0][0m   [DUMP before_create]   [A] "Google One storageGoogle One storage"[0m
+[0m[2026-04-08 23:12:25.686][INF] [36m[W0][0m   [DUMP before_create]   [A] "Get started"[0m
+[0m[2026-04-08 23:12:25.686][INF] [36m[W0][0m   [DUMP before_create]   [A] "Privacy" aria="View Google's Privacy Policy "[0m
+[0m[2026-04-08 23:12:25.686][INF] [36m[W0][0m   [DUMP before_create]   [A] "Terms" aria="View Google's Terms of Service "[0m
+[0m[2026-04-08 23:12:25.686][INF] [36m[W0][0m   [DUMP before_create]   [A] "Help"[0m
+[0m[2026-04-08 23:12:25.686][INF] [36m[W0][0m   [DUMP before_create]   [A] "About" aria="Learn more about Google Account "[0m
+[0m[2026-04-08 23:12:25.726][INF] [36m[W0][0m   Clicked entry button: "Get started"[0m
+[0m[2026-04-08 23:12:28.230][INF] [36m[W0][0m   [DUMP after_entry_click] url=https://myaccount.google.com/family/create?continue=https%3A%2F%2Fmyaccount.google.com%2Ffamily%2Fdetails%3Futm_source%3Dg1web%26utm_medium%3Ddefault&utm_source=g1web&utm_medium=default[0m
+[0m[2026-04-08 23:12:28.230][INF] [36m[W0][0m   [DUMP after_entry_click] title=Your family on Google[0m
+[0m[2026-04-08 23:12:28.230][INF] [36m[W0][0m   [DUMP after_entry_click] body="Skip to main content Account Help Back to previous page Your family on Google Bring your family together on Google Create a Family Group with up to 6 people and access easy-to-use features, designed for families, across your favorite Google products family_group Create a Family Group Get more with a Family Group Connect with your family on Google and share the apps and services that are right for "[0m
+[0m[2026-04-08 23:12:28.230][INF] [36m[W0][0m   [DUMP after_entry_click]   [BUTTON] "Skip to main content"[0m
+[0m[2026-04-08 23:12:28.230][INF] [36m[W0][0m   [DUMP after_entry_click]   [A] "Account" aria="Google Account settings"[0m
+[0m[2026-04-08 23:12:28.230][INF] [36m[W0][0m   [DUMP after_entry_click]   [BUTTON] "" aria="Help"[0m
+[0m[2026-04-08 23:12:28.230][INF] [36m[W0][0m   [DUMP after_entry_click]   [A] "" aria="Google apps"[0m
+[0m[2026-04-08 23:12:28.230][INF] [36m[W0][0m   [DUMP after_entry_click]   [A] "" aria="Google Account: Anllely Hersal  
+(hersalanllely@gmail.com), Important account al"[0m
+[0m[2026-04-08 23:12:28.230][INF] [36m[W0][0m   [DUMP after_entry_click]   [BUTTON] "" aria="Back to previous page"[0m
+[0m[2026-04-08 23:12:28.230][INF] [36m[W0][0m   [DUMP after_entry_click]   [A] "" aria="Create a Family Group"[0m
+[0m[2026-04-08 23:12:28.230][INF] [36m[W0][0m   [DUMP after_entry_click]   [A] "" aria="Learn more"[0m
+[0m[2026-04-08 23:12:28.230][INF] [36m[W0][0m   [DUMP after_entry_click]   [A] "Privacy" aria="View Google's Privacy Policy "[0m
+[0m[2026-04-08 23:12:28.230][INF] [36m[W0][0m   [DUMP after_entry_click]   [A] "Terms" aria="View Google's Terms of Service "[0m
+[0m[2026-04-08 23:12:28.230][INF] [36m[W0][0m   [DUMP after_entry_click]   [A] "Help"[0m
+[0m[2026-04-08 23:12:28.230][INF] [36m[W0][0m   [DUMP after_entry_click]   [A] "About" aria="Learn more about Google Account "[0m
+[0m[2026-04-08 23:12:28.243][INF] [36m[W0][0m   Clicked create action: "Create a Family Group"[0m
+[0m[2026-04-08 23:12:31.750][INF] [36m[W0][0m   [DUMP after_create_action] url=https://myaccount.google.com/family/createconfirmation?utm_source=g1web&utm_medium=default[0m
+[0m[2026-04-08 23:12:31.750][INF] [36m[W0][0m   [DUMP after_create_action] title=Create a Family Group[0m
+[0m[2026-04-08 23:12:31.750][INF] [36m[W0][0m   [DUMP after_create_action] body="Skip to main content Account Help Back to previous page Create a Family Group Ready to be a family manager? hersalanllely@gmail.com If you create a Family Group, you'll become the family manager. You'll be able to manage your family members and the services you share. Learn more Cancel Confirm PrivacyTermsHelpAbout Create a Family Group"[0m
+[0m[2026-04-08 23:12:31.750][INF] [36m[W0][0m   [DUMP after_create_action]   [BUTTON] "Skip to main content"[0m
+[0m[2026-04-08 23:12:31.750][INF] [36m[W0][0m   [DUMP after_create_action]   [A] "Account" aria="Google Account settings"[0m
+[0m[2026-04-08 23:12:31.750][INF] [36m[W0][0m   [DUMP after_create_action]   [BUTTON] "" aria="Help"[0m
+[0m[2026-04-08 23:12:31.750][INF] [36m[W0][0m   [DUMP after_create_action]   [A] "" aria="Google apps"[0m
+[0m[2026-04-08 23:12:31.750][INF] [36m[W0][0m   [DUMP after_create_action]   [A] "" aria="Google Account: Anllely Hersal  
+(hersalanllely@gmail.com), Important account al"[0m
+[0m[2026-04-08 23:12:31.750][INF] [36m[W0][0m   [DUMP after_create_action]   [BUTTON] "" aria="Back to previous page"[0m
+[0m[2026-04-08 23:12:31.750][INF] [36m[W0][0m   [DUMP after_create_action]   [A] "Learn more" aria="Learn more about this in Google Support."[0m
+[0m[2026-04-08 23:12:31.750][INF] [36m[W0][0m   [DUMP after_create_action]   [BUTTON] "Cancel"[0m
+[0m[2026-04-08 23:12:31.750][INF] [36m[W0][0m   [DUMP after_create_action]   [BUTTON] "Confirm"[0m
+[0m[2026-04-08 23:12:31.750][INF] [36m[W0][0m   [DUMP after_create_action]   [A] "Privacy" aria="View Google's Privacy Policy "[0m
+[0m[2026-04-08 23:12:31.750][INF] [36m[W0][0m   [DUMP after_create_action]   [A] "Terms" aria="View Google's Terms of Service "[0m
+[0m[2026-04-08 23:12:31.750][INF] [36m[W0][0m   [DUMP after_create_action]   [A] "Help"[0m
+[0m[2026-04-08 23:12:31.750][INF] [36m[W0][0m   [DUMP after_create_action]   [A] "About" aria="Learn more about Google Account "[0m
+[0m[2026-04-08 23:12:31.752][INF] [36m[W0][0m   [DUMP confirm_step_1] url=https://myaccount.google.com/family/createconfirmation?utm_source=g1web&utm_medium=default[0m
+[0m[2026-04-08 23:12:31.752][INF] [36m[W0][0m   [DUMP confirm_step_1] title=Create a Family Group[0m
+[0m[2026-04-08 23:12:31.752][INF] [36m[W0][0m   [DUMP confirm_step_1] body="Skip to main content Account Help Back to previous page Create a Family Group Ready to be a family manager? hersalanllely@gmail.com If you create a Family Group, you'll become the family manager. You'll be able to manage your family members and the services you share. Learn more Cancel Confirm PrivacyTermsHelpAbout Create a Family Group"[0m
+[0m[2026-04-08 23:12:31.752][INF] [36m[W0][0m   [DUMP confirm_step_1]   [BUTTON] "Skip to main content"[0m
+[0m[2026-04-08 23:12:31.752][INF] [36m[W0][0m   [DUMP confirm_step_1]   [A] "Account" aria="Google Account settings"[0m
+[0m[2026-04-08 23:12:31.752][INF] [36m[W0][0m   [DUMP confirm_step_1]   [BUTTON] "" aria="Help"[0m
+[0m[2026-04-08 23:12:31.752][INF] [36m[W0][0m   [DUMP confirm_step_1]   [A] "" aria="Google apps"[0m
+[0m[2026-04-08 23:12:31.752][INF] [36m[W0][0m   [DUMP confirm_step_1]   [A] "" aria="Google Account: Anllely Hersal  
+(hersalanllely@gmail.com), Important account al"[0m
+[0m[2026-04-08 23:12:31.753][INF] [36m[W0][0m   [DUMP confirm_step_1]   [BUTTON] "" aria="Back to previous page"[0m
+[0m[2026-04-08 23:12:31.753][INF] [36m[W0][0m   [DUMP confirm_step_1]   [A] "Learn more" aria="Learn more about this in Google Support."[0m
+[0m[2026-04-08 23:12:31.753][INF] [36m[W0][0m   [DUMP confirm_step_1]   [BUTTON] "Cancel"[0m
+[0m[2026-04-08 23:12:31.753][INF] [36m[W0][0m   [DUMP confirm_step_1]   [BUTTON] "Confirm"[0m
+[0m[2026-04-08 23:12:31.753][INF] [36m[W0][0m   [DUMP confirm_step_1]   [A] "Privacy" aria="View Google's Privacy Policy "[0m
+[0m[2026-04-08 23:12:31.753][INF] [36m[W0][0m   [DUMP confirm_step_1]   [A] "Terms" aria="View Google's Terms of Service "[0m
+[0m[2026-04-08 23:12:31.753][INF] [36m[W0][0m   [DUMP confirm_step_1]   [A] "Help"[0m
+[0m[2026-04-08 23:12:31.753][INF] [36m[W0][0m   [DUMP confirm_step_1]   [A] "About" aria="Learn more about Google Account "[0m
+[0m[2026-04-08 23:12:31.759][INF] [36m[W0][0m   Clicked confirm: "Confirm"[0m
+[0m[2026-04-08 23:12:35.262][INF] [36m[W0][0m   [DUMP confirm_step_2] url=https://myaccount.google.com/family/invitemembers?referrer_flow=create_family&app_id=1&utm_source=g1web&utm_medium=default[0m
+[0m[2026-04-08 23:12:35.262][INF] [36m[W0][0m   [DUMP confirm_step_2] title=Invite your family[0m
+[0m[2026-04-08 23:12:35.262][INF] [36m[W0][0m   [DUMP confirm_step_2] body="Skip to main content Account Help Back to previous page Invite your family You can invite up to 5 people to join your Family Group if they are 13 years or older. Children can be added via Google Family Link. Learn more Anyone who joins can see the name, email, and profile picture of current group members. Loading... Skip Send PrivacyTermsHelpAbout Invite your family"[0m
+[0m[2026-04-08 23:12:35.262][INF] [36m[W0][0m   [DUMP confirm_step_2]   [BUTTON] "Skip to main content"[0m
+[0m[2026-04-08 23:12:35.262][INF] [36m[W0][0m   [DUMP confirm_step_2]   [A] "Account" aria="Google Account settings"[0m
+[0m[2026-04-08 23:12:35.262][INF] [36m[W0][0m   [DUMP confirm_step_2]   [BUTTON] "" aria="Help"[0m
+[0m[2026-04-08 23:12:35.262][INF] [36m[W0][0m   [DUMP confirm_step_2]   [A] "" aria="Google apps"[0m
+[0m[2026-04-08 23:12:35.262][INF] [36m[W0][0m   [DUMP confirm_step_2]   [A] "" aria="Google Account: Anllely Hersal  
+(hersalanllely@gmail.com), Important account al"[0m
+[0m[2026-04-08 23:12:35.262][INF] [36m[W0][0m   [DUMP confirm_step_2]   [BUTTON] "" aria="Back to previous page"[0m
+[0m[2026-04-08 23:12:35.262][INF] [36m[W0][0m   [DUMP confirm_step_2]   [A] "Learn more" aria="Learn more about this in Google Support."[0m
+[0m[2026-04-08 23:12:35.262][INF] [36m[W0][0m   [DUMP confirm_step_2]   [BUTTON] "Skip"[0m
+[0m[2026-04-08 23:12:35.262][INF] [36m[W0][0m   [DUMP confirm_step_2]   [BUTTON] "Send"[0m
+[0m[2026-04-08 23:12:35.262][INF] [36m[W0][0m   [DUMP confirm_step_2]   [A] "Privacy" aria="View Google's Privacy Policy "[0m
+[0m[2026-04-08 23:12:35.262][INF] [36m[W0][0m   [DUMP confirm_step_2]   [A] "Terms" aria="View Google's Terms of Service "[0m
+[0m[2026-04-08 23:12:35.262][INF] [36m[W0][0m   [DUMP confirm_step_2]   [A] "Help"[0m
+[0m[2026-04-08 23:12:35.262][INF] [36m[W0][0m   [DUMP confirm_step_2]   [A] "About" aria="Learn more about Google Account "[0m
+[32m[2026-04-08 23:12:44.482][ OK] [36m[W0][0m [32m  Family group created[0m
+[0m[2026-04-08 23:12:44.483][INF] [36m[W0][0m   Enabling "Share Google One with family"...[0m
+[32m[2026-04-08 23:13:00.062][ OK] [36m[W0][0m [32m  Share Google One with family: toggled ON[0m
+[0m[2026-04-08 23:13:07.405][INF] [36m[W0][0m   Inviting 2 members in batch...[0m
+[0m[2026-04-08 23:13:07.795][INF] [36m[W0][0m   Waiting for invite page to load...[0m
+[0m[2026-04-08 23:13:24.800][INF] [36m[W0][0m   Waiting for email input on invite page...[0m
+[31m[2026-04-08 23:13:55.497][ERR] [36m[W0][0m [31mGroup 1 failed: Cannot find email input in invite dialog[0m
+[0m[2026-04-08 23:13:56.535][INF] Browsers kept open (KEEP_BROWSER_OPEN=true)[0m
+[0m[2026-04-08 23:13:56.535][INF] [0m
+[0m[2026-04-08 23:13:56.535][INF] ============================================================[0m
+[32m[2026-04-08 23:13:56.536][ OK]   Stage 1 Complete[0m
+[0m[2026-04-08 23:13:56.536][INF]   OK: 0  FAIL: 1[0m
+[0m[2026-04-08 23:13:56.536][INF] ============================================================[0m
+[0m[2026-04-08 23:13:56.536][INF] [0m
+
+
+ ===========================================================
+   Pipeline finished.
+ ===========================================================
+

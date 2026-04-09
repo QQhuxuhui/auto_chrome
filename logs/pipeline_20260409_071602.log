@@ -1,0 +1,116 @@
+
+ ===========================================================
+
+   Gemini Family Group Pipeline
+   2-Stage Automation (Invite + Accept)
+
+ ===========================================================
+
+ Running all 2 stages...
+
+ ---- Stage 1: Send Family Invitations ----
+[0m[2026-04-08 23:16:02.962][INF] [0m
+[0m[2026-04-08 23:16:02.963][INF] ============================================================[0m
+[0m[2026-04-08 23:16:02.963][INF]   Stage 1: Send Family Invitations[0m
+[0m[2026-04-08 23:16:02.963][INF] ============================================================[0m
+[0m[2026-04-08 23:16:02.963][INF]   Chrome:      /usr/bin/google-chrome[0m
+[0m[2026-04-08 23:16:02.963][INF]   Hosts:       /usr/src/workspace/github/QQhuxuhui/auto_chrome/hosts.txt[0m
+[0m[2026-04-08 23:16:02.963][INF]   Members:     /usr/src/workspace/github/QQhuxuhui/auto_chrome/members.txt[0m
+[0m[2026-04-08 23:16:02.963][INF]   Concurrency: 1[0m
+[0m[2026-04-08 23:16:02.963][INF] ============================================================[0m
+[0m[2026-04-08 23:16:02.964][INF] [0m
+[0m[2026-04-08 23:16:02.964][INF] Parsed: 1 hosts, 2 members[0m
+[0m[2026-04-08 23:16:02.964][INF] Built 1 groups[0m
+[0m[2026-04-08 23:16:02.965][INF] Pending groups: 1[0m
+[33m[2026-04-08 23:16:03.024][WRN] [36m[W0][0m [33mChrome process exit: code=0, signal=null[0m
+[0m[2026-04-08 23:16:03.072][INF] [36m[W0][0m Chrome started (port 9234, PID 13219)[0m
+[0m[2026-04-08 23:16:03.075][INF] [36m[W0][0m >> Inviting group 1: host=hersalanllely@gmail.com, members=2[0m
+[0m[2026-04-08 23:16:03.131][INF] [36m[W0][0m   Navigating to Google One family settings...[0m
+[0m[2026-04-08 23:16:09.001][INF] [36m[W0][0m   Current URL after navigation: https://accounts.google.com/v3/signin/identifier?continue=https%3A%2F%2Fmyaccount.google.com%2Ffamily%2Fdetails%3Futm_source%3Dg1web%26utm_medium%3Ddefault&dsh=S1714257413%3A1775690166778334&followup=https%3A%2F%2Fmyaccount.google.com%2Ffamily%2Fdetails%3Futm_source%3Dg1web%26utm_medium%3Ddefault&osid=1&passive=1209600&service=accountsettings&flowName=GlifWebSignIn&flowEntry=ServiceLogin&ifkv=AT1y2_USft_D1GScOaixk3DSabbzJwxhKJQwsv2ymvM5BpetHBtOYLQDlQkP72EDvThRdPEAhRbQ[0m
+[0m[2026-04-08 23:16:09.005][INF] [36m[W0][0m   Login required, logging in as host...[0m
+[0m[2026-04-08 23:16:09.010][INF] [36m[W0][0m   [Login Step 01] State: [1memail[0m[0m
+[0m[2026-04-08 23:16:10.221][INF] [36m[W0][0m   [Login Step 02] State: [1mpassword[0m[0m
+[0m[2026-04-08 23:16:28.344][INF] [36m[W0][0m   [Login Step 03] State: [1mpassword[0m[0m
+[0m[2026-04-08 23:16:32.242][INF] [36m[W0][0m   [Login Step 04] State: [1mverify_authenticator[0m[0m
+[0m[2026-04-08 23:16:32.242][INF] [36m[W0][0m   ============================================[0m
+[0m[2026-04-08 23:16:32.242][INF] [36m[W0][0m   Auto-generating TOTP code from fa_secret[0m
+[0m[2026-04-08 23:16:32.242][INF] [36m[W0][0m   Account: hersalanllely@gmail.com[0m
+[0m[2026-04-08 23:16:32.242][INF] [36m[W0][0m   Code: 210116 (valid for 28s)[0m
+[0m[2026-04-08 23:16:32.242][INF] [36m[W0][0m   ============================================[0m
+[32m[2026-04-08 23:16:43.549][ OK] [36m[W0][0m [32m  TOTP verification completed automatically![0m
+[0m[2026-04-08 23:16:43.557][INF] [36m[W0][0m   [Login Step 05] State: [1munknown[0m[0m
+[0m[2026-04-08 23:16:43.557][INF] [36m[W0][0m   Login appears complete (URL: https://myaccount.google.com/family/details?utm_source=g1web&utm_medium=default)[0m
+[0m[2026-04-08 23:16:54.266][INF] [36m[W0][0m   Inviting 2 members in batch...[0m
+[0m[2026-04-08 23:16:54.266][INF] [36m[W0][0m   Navigating directly to invite page...[0m
+[0m[2026-04-08 23:17:02.098][INF] [36m[W0][0m   Waiting for email input on invite page...[0m
+[0m[2026-04-08 23:17:10.599][INF] [36m[W0][0m   All 2 emails entered, sending invite...[0m
+[32m[2026-04-08 23:17:16.783][ OK] [36m[W0][0m [32m  Invited: bosmaswestkask2172@gmail.com[0m
+[32m[2026-04-08 23:17:16.783][ OK] [36m[W0][0m [32m  Invited: AlahmdeShadiq@gmail.com[0m
+[32m[2026-04-08 23:17:16.783][ OK] [36m[W0][0m [32m>> Group 1 all invites sent (73.7s)[0m
+[0m[2026-04-08 23:17:19.037][INF] Browsers kept open (KEEP_BROWSER_OPEN=true)[0m
+[0m[2026-04-08 23:17:19.037][INF] [0m
+[0m[2026-04-08 23:17:19.038][INF] ============================================================[0m
+[32m[2026-04-08 23:17:19.038][ OK]   Stage 1 Complete[0m
+[0m[2026-04-08 23:17:19.038][INF]   OK: 1  FAIL: 0[0m
+[0m[2026-04-08 23:17:19.038][INF] ============================================================[0m
+[0m[2026-04-08 23:17:19.038][INF] [0m
+
+ ---- Stage 2: Accept Family Invitations ----
+[0m[2026-04-08 23:17:19.197][INF] [0m
+[0m[2026-04-08 23:17:19.197][INF] ============================================================[0m
+[0m[2026-04-08 23:17:19.197][INF]   Stage 2: Accept Family Invitations[0m
+[0m[2026-04-08 23:17:19.198][INF] ============================================================[0m
+[0m[2026-04-08 23:17:19.198][INF]   Chrome:       /usr/bin/google-chrome[0m
+[0m[2026-04-08 23:17:19.198][INF]   Members:      /usr/src/workspace/github/QQhuxuhui/auto_chrome/members.txt[0m
+[0m[2026-04-08 23:17:19.198][INF]   Concurrency:  3[0m
+[0m[2026-04-08 23:17:19.198][INF]   Poll interval: 30s[0m
+[0m[2026-04-08 23:17:19.198][INF]   Poll timeout:  600s[0m
+[0m[2026-04-08 23:17:19.198][INF] ============================================================[0m
+[0m[2026-04-08 23:17:19.198][INF] [0m
+[0m[2026-04-08 23:17:19.199][INF] Pending members to accept: 2[0m
+[33m[2026-04-08 23:17:19.263][WRN] [36m[W0][0m [33mChrome process exit: code=0, signal=null[0m
+[0m[2026-04-08 23:17:19.337][INF] [36m[W0][0m Chrome started (port 9234, PID 13723)[0m
+[0m[2026-04-08 23:17:22.615][INF] [35m[W1][0m Chrome started (port 9235, PID 13761)[0m
+[0m[2026-04-08 23:17:24.896][INF] [35m[W1][0m >> Accept invite: AlahmdeShadiq@gmail.com[0m
+[0m[2026-04-08 23:17:24.905][INF] [36m[W0][0m >> Accept invite: bosmaswestkask2172@gmail.com[0m
+[0m[2026-04-08 23:17:25.258][INF] [35m[W1][0m   Navigating to Gmail...[0m
+[0m[2026-04-08 23:17:25.279][INF] [36m[W0][0m   Navigating to Gmail...[0m
+[0m[2026-04-08 23:17:30.502][INF] [36m[W0][0m   Logging in...[0m
+[0m[2026-04-08 23:17:30.516][INF] [36m[W0][0m   [Login Step 01] State: [1memail[0m[0m
+[0m[2026-04-08 23:17:31.402][INF] [35m[W1][0m   Logging in...[0m
+[0m[2026-04-08 23:17:31.408][INF] [35m[W1][0m   [Login Step 01] State: [1memail[0m[0m
+[0m[2026-04-08 23:17:31.777][INF] [36m[W0][0m   [Login Step 02] State: [1mpassword[0m[0m
+[0m[2026-04-08 23:17:32.726][INF] [35m[W1][0m   [Login Step 02] State: [1mpassword[0m[0m
+[0m[2026-04-08 23:17:49.888][INF] [36m[W0][0m   [Login Step 03] State: [1mpassword[0m[0m
+[0m[2026-04-08 23:17:50.836][INF] [35m[W1][0m   [Login Step 03] State: [1mpassword[0m[0m
+[0m[2026-04-08 23:17:53.798][INF] [36m[W0][0m   [Login Step 04] State: [1mverify_authenticator[0m[0m
+[0m[2026-04-08 23:17:53.800][INF] [36m[W0][0m   ============================================[0m
+[0m[2026-04-08 23:17:53.800][INF] [36m[W0][0m   Auto-generating TOTP code from fa_secret[0m
+[0m[2026-04-08 23:17:53.800][INF] [36m[W0][0m   Account: bosmaswestkask2172@gmail.com[0m
+[0m[2026-04-08 23:17:53.800][INF] [36m[W0][0m   Code: 046445 (valid for 7s)[0m
+[0m[2026-04-08 23:17:53.800][INF] [36m[W0][0m   ============================================[0m
+[0m[2026-04-08 23:17:54.832][INF] [35m[W1][0m   [Login Step 04] State: [1mverify_authenticator[0m[0m
+[0m[2026-04-08 23:17:54.832][INF] [35m[W1][0m   ============================================[0m
+[0m[2026-04-08 23:17:54.832][INF] [35m[W1][0m   Auto-generating TOTP code from fa_secret[0m
+[0m[2026-04-08 23:17:54.832][INF] [35m[W1][0m   Account: AlahmdeShadiq@gmail.com[0m
+[0m[2026-04-08 23:17:54.832][INF] [35m[W1][0m   Code: 129691 (valid for 6s)[0m
+[0m[2026-04-08 23:17:54.833][INF] [35m[W1][0m   ============================================[0m
+[32m[2026-04-08 23:18:13.331][ OK] [36m[W0][0m [32m  TOTP verification completed automatically![0m
+[0m[2026-04-08 23:18:13.334][INF] [36m[W0][0m   [Login Step 05] State: [1moauth_consent[0m[0m
+[0m[2026-04-08 23:18:13.334][INF] [36m[W0][0m   Login complete (reached OAuth consent)[0m
+[32m[2026-04-08 23:18:13.341][ OK] [35m[W1][0m [32m  TOTP verification completed automatically![0m
+[0m[2026-04-08 23:18:13.343][INF] [35m[W1][0m   [Login Step 05] State: [1munknown[0m[0m
+[0m[2026-04-08 23:18:13.343][INF] [35m[W1][0m   Login appears complete (URL: https://mail.google.com/mail/u/0/#inbox)[0m
+[32m[2026-04-08 23:18:23.586][ OK] [35m[W1][0m [32m  Found invite email: "unread, google, join anllely's family group?, 7:17 am, you can join anllely's (h"[0m
+[32m[2026-04-08 23:18:23.588][ OK] [36m[W0][0m [32m  Found invite email: "unread, google one, welcome to google one, alcivar, apr 8, lan chau's family gro"[0m
+[0m[2026-04-08 23:18:28.609][INF] [36m[W0][0m   Found accept link: https://c.gle/ADMV5J_tpbvtAgQWDXHoYaBwDeu2dCUaz5ZYAjiFIL2MPUlTA_23VauRhZVc4WpxbAYhOY2TsaVJ4QQWeLKzI1[0m
+[0m[2026-04-08 23:18:28.629][INF] [35m[W1][0m   Found accept link: https://notifications.googleapis.com/email/redirect?t=AFG8qyUs0werwbWg54o6n2EAxLLmIZS6IvMoaW78IZcIge[0m
+[33m[2026-04-08 23:18:58.630][WRN] [35m[W1][0m [33mAccept link navigation timeout: Navigation timeout of 30000 ms exceeded[0m
+[32m[2026-04-08 23:20:55.429][ OK] [36m[W0][0m [32m>> Invite accepted: bosmaswestkask2172@gmail.com (210.5s)[0m
+Terminated
+ WARNING: Stage 2 had errors
+
+ ===========================================================
+   Pipeline finished.
+ ===========================================================
+

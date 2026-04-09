@@ -1,0 +1,99 @@
+
+ ===========================================================
+
+   Gemini Family Group Pipeline
+   2-Stage Automation (Invite + Accept)
+
+ ===========================================================
+
+ ---- Running Stage 2 ----
+ ---- Stage 2: Accept Family Invitations ----
+[0m[2026-04-08 23:49:48.779][INF] [0m
+[0m[2026-04-08 23:49:48.779][INF] ============================================================[0m
+[0m[2026-04-08 23:49:48.779][INF]   Stage 2: Accept Family Invitations[0m
+[0m[2026-04-08 23:49:48.780][INF] ============================================================[0m
+[0m[2026-04-08 23:49:48.780][INF]   Chrome:       /usr/bin/google-chrome[0m
+[0m[2026-04-08 23:49:48.780][INF]   Members:      /usr/src/workspace/github/QQhuxuhui/auto_chrome/members.txt[0m
+[0m[2026-04-08 23:49:48.780][INF]   Concurrency:  3[0m
+[0m[2026-04-08 23:49:48.780][INF]   Poll interval: 30s[0m
+[0m[2026-04-08 23:49:48.780][INF]   Poll timeout:  600s[0m
+[0m[2026-04-08 23:49:48.780][INF] ============================================================[0m
+[0m[2026-04-08 23:49:48.780][INF] [0m
+[0m[2026-04-08 23:49:48.781][INF] Pending members to accept: 2[0m
+[0m[2026-04-08 23:49:48.911][INF] [36m[W0][0m Chrome started (port 9234, PID 26317)[0m
+[0m[2026-04-08 23:49:51.852][INF] [35m[W1][0m Chrome started (port 9235, PID 26489)[0m
+[0m[2026-04-08 23:49:54.853][INF] [35m[W1][0m >> Accept invite: addilynsno310@gmail.com[0m
+[0m[2026-04-08 23:49:54.861][INF] [36m[W0][0m >> Accept invite: sarahjahir107@gmail.com[0m
+[0m[2026-04-08 23:49:55.263][INF] [36m[W0][0m   Navigating to Gmail...[0m
+[0m[2026-04-08 23:49:55.270][INF] [35m[W1][0m   Navigating to Gmail...[0m
+[0m[2026-04-08 23:50:01.311][INF] [35m[W1][0m   Logging in...[0m
+[0m[2026-04-08 23:50:01.318][INF] [35m[W1][0m   [Login Step 01] State: [1memail[0m[0m
+[0m[2026-04-08 23:50:02.401][INF] [35m[W1][0m   [Login Step 02] State: [1mpassword[0m[0m
+[0m[2026-04-08 23:50:02.534][INF] [36m[W0][0m   Logging in...[0m
+[0m[2026-04-08 23:50:02.545][INF] [36m[W0][0m   [Login Step 01] State: [1memail[0m[0m
+[0m[2026-04-08 23:50:03.795][INF] [36m[W0][0m   [Login Step 02] State: [1mpassword[0m[0m
+[0m[2026-04-08 23:50:20.519][INF] [35m[W1][0m   [Login Step 03] State: [1mpassword[0m[0m
+[0m[2026-04-08 23:50:21.908][INF] [36m[W0][0m   [Login Step 03] State: [1mpassword[0m[0m
+[0m[2026-04-08 23:50:24.358][INF] [35m[W1][0m   [Login Step 04] State: [1mverify_authenticator[0m[0m
+[0m[2026-04-08 23:50:24.359][INF] [35m[W1][0m   ============================================[0m
+[0m[2026-04-08 23:50:24.359][INF] [35m[W1][0m   Auto-generating TOTP code from fa_secret[0m
+[0m[2026-04-08 23:50:24.359][INF] [35m[W1][0m   Account: addilynsno310@gmail.com[0m
+[0m[2026-04-08 23:50:24.359][INF] [35m[W1][0m   Code: 766572 (valid for 6s)[0m
+[0m[2026-04-08 23:50:24.359][INF] [35m[W1][0m   ============================================[0m
+[0m[2026-04-08 23:50:25.822][INF] [36m[W0][0m   [Login Step 04] State: [1mverify_authenticator[0m[0m
+[0m[2026-04-08 23:50:25.822][INF] [36m[W0][0m   ============================================[0m
+[0m[2026-04-08 23:50:25.822][INF] [36m[W0][0m   Auto-generating TOTP code from fa_secret[0m
+[0m[2026-04-08 23:50:25.822][INF] [36m[W0][0m   Account: sarahjahir107@gmail.com[0m
+[0m[2026-04-08 23:50:25.822][INF] [36m[W0][0m   Code: 051246 (valid for 5s)[0m
+[0m[2026-04-08 23:50:25.822][INF] [36m[W0][0m   ============================================[0m
+[32m[2026-04-08 23:50:41.844][ OK] [36m[W0][0m [32m  TOTP verification completed automatically![0m
+[0m[2026-04-08 23:50:41.846][INF] [36m[W0][0m   [Login Step 05] State: [1mconfirm_signin[0m[0m
+[0m[2026-04-08 23:50:41.846][INF] [36m[W0][0m   Handling sign-in confirm...[0m
+[32m[2026-04-08 23:50:42.696][ OK] [35m[W1][0m [32m  TOTP verification completed automatically![0m
+[0m[2026-04-08 23:50:42.708][INF] [35m[W1][0m   [Login Step 05] State: [1mconfirm_signin[0m[0m
+[0m[2026-04-08 23:50:42.709][INF] [35m[W1][0m   Handling sign-in confirm...[0m
+[0m[2026-04-08 23:50:43.003][INF] [36m[W0][0m   [Login Step 06] State: [1mconfirm_signin[0m[0m
+[0m[2026-04-08 23:50:43.003][INF] [36m[W0][0m   Handling sign-in confirm...[0m
+[0m[2026-04-08 23:50:48.947][INF] [35m[W1][0m   [Login Step 06] State: [1mconfirm_signin[0m[0m
+[0m[2026-04-08 23:50:48.947][INF] [35m[W1][0m   Handling sign-in confirm...[0m
+[0m[2026-04-08 23:50:49.159][INF] [36m[W0][0m   [Login Step 07] State: [1mconfirm_signin[0m[0m
+[0m[2026-04-08 23:50:49.159][INF] [36m[W0][0m   Handling sign-in confirm...[0m
+[0m[2026-04-08 23:50:55.193][INF] [36m[W0][0m   [Login Step 08] State: [1mconfirm_signin[0m[0m
+[0m[2026-04-08 23:50:55.193][INF] [36m[W0][0m   Handling sign-in confirm...[0m
+[0m[2026-04-08 23:50:55.320][INF] [35m[W1][0m   [Login Step 07] State: [1mconfirm_signin[0m[0m
+[0m[2026-04-08 23:50:55.320][INF] [35m[W1][0m   Handling sign-in confirm...[0m
+[0m[2026-04-08 23:51:02.148][INF] [36m[W0][0m   [Login Step 09] State: [1mconfirm_signin[0m[0m
+[0m[2026-04-08 23:51:02.148][INF] [36m[W0][0m   Handling sign-in confirm...[0m
+[0m[2026-04-08 23:51:02.443][INF] [35m[W1][0m   [Login Step 08] State: [1mconfirm_signin[0m[0m
+[0m[2026-04-08 23:51:02.443][INF] [35m[W1][0m   Handling sign-in confirm...[0m
+[0m[2026-04-08 23:51:08.404][INF] [36m[W0][0m   [Login Step 10] State: [1mconfirm_signin[0m[0m
+[0m[2026-04-08 23:51:08.404][INF] [36m[W0][0m   Handling sign-in confirm...[0m
+[0m[2026-04-08 23:51:08.679][INF] [35m[W1][0m   [Login Step 09] State: [1mconfirm_signin[0m[0m
+[0m[2026-04-08 23:51:08.680][INF] [35m[W1][0m   Handling sign-in confirm...[0m
+[0m[2026-04-08 23:51:14.426][INF] [36m[W0][0m   [Login Step 11] State: [1mconfirm_signin[0m[0m
+[0m[2026-04-08 23:51:14.426][INF] [36m[W0][0m   Handling sign-in confirm...[0m
+[0m[2026-04-08 23:51:14.875][INF] [35m[W1][0m   [Login Step 10] State: [1mconfirm_signin[0m[0m
+[0m[2026-04-08 23:51:14.875][INF] [35m[W1][0m   Handling sign-in confirm...[0m
+[0m[2026-04-08 23:51:20.414][INF] [36m[W0][0m   [Login Step 12] State: [1mconfirm_signin[0m[0m
+[33m[2026-04-08 23:51:20.814][WRN] [36m[W0][0m [33mSession clear failed: Protocol error (Target.createTarget): Failed to open a new tab[0m
+[31m[2026-04-08 23:51:20.815][ERR] [36m[W0][0m [31mAccept failed [sarahjahir107@gmail.com]: Login deadloop: 8x confirm_signin[0m
+[0m[2026-04-08 23:51:20.899][INF] [35m[W1][0m   [Login Step 11] State: [1mconfirm_signin[0m[0m
+[0m[2026-04-08 23:51:20.899][INF] [35m[W1][0m   Handling sign-in confirm...[0m
+[0m[2026-04-08 23:51:27.283][INF] [35m[W1][0m   [Login Step 12] State: [1mconfirm_signin[0m[0m
+[31m[2026-04-08 23:51:27.878][ERR] [35m[W1][0m [31mAccept failed [addilynsno310@gmail.com]: Login deadloop: 8x confirm_signin[0m
+[0m[2026-04-08 23:51:29.831][INF] Browsers kept open (KEEP_BROWSER_OPEN=true)[0m
+[0m[2026-04-08 23:51:29.831][INF] [0m
+[0m[2026-04-08 23:51:29.831][INF] ============================================================[0m
+[32m[2026-04-08 23:51:29.831][ OK]   Stage 2 Complete[0m
+[0m[2026-04-08 23:51:29.831][INF]   OK: 0  FAIL: 2[0m
+[0m[2026-04-08 23:51:29.831][INF] ============================================================[0m
+[0m[2026-04-08 23:51:29.832][INF] [0m
+[33m[2026-04-08 23:53:08.947][WRN] [36m[W0][0m [33mChrome process exit: code=null, signal=SIGKILL[0m
+[33m[2026-04-08 23:53:08.986][WRN] [35m[W1][0m [33mChrome process exit: code=null, signal=SIGKILL[0m
+./run_pipeline.sh: line 77: 26309 Killed                  node 2_accept.js "${EXTRA_ARGS[@]}"
+
+
+ ===========================================================
+   Pipeline finished.
+ ===========================================================
+

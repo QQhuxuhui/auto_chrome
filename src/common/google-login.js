@@ -26,6 +26,19 @@ async function googleLogin(page, account, wlog) {
     const stateHistory = [];
 
     for (let step = 0; step < MAX_LOGIN_STEPS; step++) {
+        // URL 优先判断登录成功：到达任何已认证目的页即立即返回，
+        // 避免页面内 "Sign in" 文本触发 confirm_signin 误判死循环。
+        // 必须同时满足：
+        //   1. 在一个已认证域（mail/myaccount/one/drive/calendar/photos）
+        //   2. 路径不包含任何"验证/挑战/登录"段（signin/challenge/verification/identity/...）
+        const curUrl = page.url();
+        const authDomainRe = /^https:\/\/(mail\.google\.com\/mail\/|myaccount\.google\.com\/|one\.google\.com\/|drive\.google\.com\/drive\/|calendar\.google\.com\/calendar\/|photos\.google\.com\/)/;
+        const challengePathRe = /\/(signin|challenge|verification|identity|selectaccount|identifier|interstitial|pwd)(\/|\?|$)/i;
+        if (authDomainRe.test(curUrl) && !challengePathRe.test(curUrl)) {
+            wlog.info(`  Login complete (reached authenticated URL: ${curUrl.substring(0, 100)})`);
+            return;
+        }
+
         const stateInfo = await detectPageState(page, wlog);
         const state = stateInfo.state;
 
@@ -316,11 +329,65 @@ async function googleLogin(page, account, wlog) {
 
             case 'confirm_signin': {
                 wlog.info('  Handling sign-in confirm...');
-                const kws = ['sign in', 'signin', 'confirm', 'continue', '登录', '确认', '继续'];
-                const clicked = await tryClickStrategies(page, kws, wlog, 'confirm_signin');
-                if (!clicked) await page.keyboard.press('Enter');
-                await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 5000 }).catch(() => { });
-                await sleep(500);
+                // Dump visible buttons on the first pass to diagnose the page
+                if (step <= 6) {
+                    try {
+                        const info = await page.evaluate(() => {
+                            function isVisible(el) {
+                                const r = el.getBoundingClientRect();
+                                const s = window.getComputedStyle(el);
+                                return r.width > 0 && r.height > 0 && s.display !== 'none' && s.visibility !== 'hidden';
+                            }
+                            const out = [];
+                            for (const el of document.querySelectorAll('button, a, [role="button"], input[type="submit"]')) {
+                                if (!isVisible(el)) continue;
+                                const t = (el.textContent || '').trim().substring(0, 60);
+                                const a = (el.getAttribute('aria-label') || '').substring(0, 60);
+                                if (!t && !a) continue;
+                                out.push(`[${el.tagName}] "${t}" aria="${a}"`);
+                            }
+                            return { url: location.href, title: document.title.substring(0, 100), buttons: out.slice(0, 15) };
+                        });
+                        wlog.info(`  [confirm_signin DUMP] url=${info.url}`);
+                        wlog.info(`  [confirm_signin DUMP] title=${info.title}`);
+                        for (const b of info.buttons) wlog.info(`  [confirm_signin DUMP]   ${b}`);
+                    } catch (_) { }
+                }
+                // Strict click: match only by explicit keywords on text/aria (avoid fuzzy false positives)
+                const kws = ['continue', 'sign in', 'yes', 'allow', 'accept', 'confirm',
+                    '继续', '登录', '是', '允许', '确认'];
+                const clicked = await page.evaluate((keywords) => {
+                    function isVisible(el) {
+                        const r = el.getBoundingClientRect();
+                        const s = window.getComputedStyle(el);
+                        return r.width > 0 && r.height > 0 && s.display !== 'none' && s.visibility !== 'hidden';
+                    }
+                    const lc = keywords.map(k => k.toLowerCase());
+                    const cands = [];
+                    const sel = 'button, a, [role="button"], input[type="submit"], input[type="button"]';
+                    for (const el of document.querySelectorAll(sel)) {
+                        if (!isVisible(el)) continue;
+                        if (el.disabled || el.getAttribute('aria-disabled') === 'true') continue;
+                        const text = (el.textContent || '').trim().toLowerCase();
+                        const aria = (el.getAttribute('aria-label') || '').toLowerCase();
+                        const hay = (text + ' ' + aria).trim();
+                        if (!hay) continue;
+                        for (const k of lc) {
+                            if (hay.includes(k)) { cands.push({ el, hay, kwLen: k.length }); break; }
+                        }
+                    }
+                    if (!cands.length) return null;
+                    cands.sort((a, b) => (b.kwLen - a.kwLen) || (a.hay.length - b.hay.length));
+                    cands[0].el.click();
+                    return (cands[0].el.textContent || cands[0].el.getAttribute('aria-label') || '').trim().substring(0, 60);
+                }, kws).catch(() => null);
+                if (clicked) wlog.info(`  confirm_signin clicked: "${clicked}"`);
+                else {
+                    wlog.debug('  No confirm button found, pressing Enter as fallback');
+                    await page.keyboard.press('Enter');
+                }
+                await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 8000 }).catch(() => { });
+                await sleep(1500);
                 break;
             }
 

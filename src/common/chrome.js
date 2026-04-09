@@ -91,6 +91,10 @@ async function launchRealChrome(chromePath, workerId = 0) {
         '--no-default-browser-check',
         '--disable-sync',
         '--disable-features=InProductHelp',
+        // 强制 UI 语言为英文，避免不同国家账号返回不同语言的 Google 页面
+        // （Google 服务器根据 Accept-Language 决定 UI 语言）
+        '--lang=en-US',
+        '--accept-lang=en-US,en',
         '--window-size=1280,800',
         '--disable-gpu',
         '--disable-dev-shm-usage',
@@ -325,6 +329,9 @@ async function detectPageState(page, wlog) {
     // URL-based detection takes priority for certain patterns
     if (u.includes('challenge/pwd')) {
         state = 'password';
+    } else if (u.includes('challenge/totp') || u.includes('challenge/ipp')) {
+        // Authenticator (TOTP) challenge URL is unambiguous — route to auto-TOTP flow
+        state = 'verify_authenticator';
     } else if (t.includes('verificer, at det er dig') || t.includes('验证身份') ||
         t.includes("verify it's you") || t.includes('verify your identity') ||
         t.includes('验证您的身份') || t.includes('verify your info') ||
@@ -675,6 +682,13 @@ async function newPage(browser) {
     const vpWidth = rand(1200, 1400);
     const vpHeight = rand(700, 900);
     await page.setViewport({ width: vpWidth, height: vpHeight }).catch(() => { });
+    // 强制英文 UI：设置 Accept-Language HTTP 头 + JS navigator.language
+    // 这样 Google 服务器统一返回英文页面，文本匹配只需维护英文关键词
+    await page.setExtraHTTPHeaders({ 'Accept-Language': 'en-US,en;q=0.9' }).catch(() => { });
+    await page.evaluateOnNewDocument(() => {
+        Object.defineProperty(navigator, 'language', { get: () => 'en-US' });
+        Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+    }).catch(() => { });
 
     // 新页面创建成功后，再关闭之前的空白页
     for (const bp of blankPages) {

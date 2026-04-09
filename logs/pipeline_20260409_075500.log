@@ -1,0 +1,112 @@
+
+ ===========================================================
+
+   Gemini Family Group Pipeline
+   2-Stage Automation (Invite + Accept)
+
+ ===========================================================
+
+ ---- Running Stage 2 ----
+ ---- Stage 2: Accept Family Invitations ----
+[0m[2026-04-08 23:55:00.556][INF] [0m
+[0m[2026-04-08 23:55:00.557][INF] ============================================================[0m
+[0m[2026-04-08 23:55:00.557][INF]   Stage 2: Accept Family Invitations[0m
+[0m[2026-04-08 23:55:00.557][INF] ============================================================[0m
+[0m[2026-04-08 23:55:00.557][INF]   Chrome:       /usr/bin/google-chrome[0m
+[0m[2026-04-08 23:55:00.557][INF]   Members:      /usr/src/workspace/github/QQhuxuhui/auto_chrome/members.txt[0m
+[0m[2026-04-08 23:55:00.557][INF]   Concurrency:  3[0m
+[0m[2026-04-08 23:55:00.557][INF]   Poll interval: 30s[0m
+[0m[2026-04-08 23:55:00.557][INF]   Poll timeout:  600s[0m
+[0m[2026-04-08 23:55:00.557][INF] ============================================================[0m
+[0m[2026-04-08 23:55:00.558][INF] [0m
+[0m[2026-04-08 23:55:00.558][INF] Pending members to accept: 2[0m
+[0m[2026-04-08 23:55:02.105][INF] [36m[W0][0m Chrome started (port 9234, PID 28705)[0m
+[0m[2026-04-08 23:55:05.604][INF] [35m[W1][0m Chrome started (port 9235, PID 28853)[0m
+[0m[2026-04-08 23:55:08.226][INF] [35m[W1][0m >> Accept invite: addilynsno310@gmail.com[0m
+[0m[2026-04-08 23:55:08.230][INF] [36m[W0][0m >> Accept invite: sarahjahir107@gmail.com[0m
+[0m[2026-04-08 23:55:08.788][INF] [35m[W1][0m   Navigating to Gmail...[0m
+[0m[2026-04-08 23:55:08.839][INF] [36m[W0][0m   Navigating to Gmail...[0m
+[33m[2026-04-08 23:55:13.841][WRN] [36m[W0][0m [33m  Gmail opened without login prompt, verifying account...[0m
+[33m[2026-04-08 23:55:13.861][WRN] [36m[W0][0m [33m  Wrong account logged in (got: ), forcing re-login...[0m
+[0m[2026-04-08 23:55:15.289][INF] [35m[W1][0m   Logging in...[0m
+[0m[2026-04-08 23:55:15.304][INF] [35m[W1][0m   [Login Step 01] State: [1memail[0m[0m
+[0m[2026-04-08 23:55:16.439][INF] [35m[W1][0m   [Login Step 02] State: [1mpassword[0m[0m
+[0m[2026-04-08 23:55:24.713][INF] [36m[W0][0m   Logging in...[0m
+[0m[2026-04-08 23:55:24.723][INF] [36m[W0][0m   [Login Step 01] State: [1memail[0m[0m
+[0m[2026-04-08 23:55:25.963][INF] [36m[W0][0m   [Login Step 02] State: [1mpassword[0m[0m
+[0m[2026-04-08 23:55:34.552][INF] [35m[W1][0m   [Login Step 03] State: [1mpassword[0m[0m
+[0m[2026-04-08 23:55:38.360][INF] [35m[W1][0m   [Login Step 04] State: [1mverify_authenticator[0m[0m
+[0m[2026-04-08 23:55:38.361][INF] [35m[W1][0m   ============================================[0m
+[0m[2026-04-08 23:55:38.361][INF] [35m[W1][0m   Auto-generating TOTP code from fa_secret[0m
+[0m[2026-04-08 23:55:38.361][INF] [35m[W1][0m   Account: addilynsno310@gmail.com[0m
+[0m[2026-04-08 23:55:38.361][INF] [35m[W1][0m   Code: 065024 (valid for 22s)[0m
+[0m[2026-04-08 23:55:38.361][INF] [35m[W1][0m   ============================================[0m
+[0m[2026-04-08 23:55:44.073][INF] [36m[W0][0m   [Login Step 03] State: [1mpassword[0m[0m
+[0m[2026-04-08 23:55:47.918][INF] [36m[W0][0m   [Login Step 04] State: [1mverify_authenticator[0m[0m
+[0m[2026-04-08 23:55:47.918][INF] [36m[W0][0m   ============================================[0m
+[0m[2026-04-08 23:55:47.918][INF] [36m[W0][0m   Auto-generating TOTP code from fa_secret[0m
+[0m[2026-04-08 23:55:47.918][INF] [36m[W0][0m   Account: sarahjahir107@gmail.com[0m
+[0m[2026-04-08 23:55:47.918][INF] [36m[W0][0m   Code: 059444 (valid for 13s)[0m
+[0m[2026-04-08 23:55:47.918][INF] [36m[W0][0m   ============================================[0m
+[32m[2026-04-08 23:55:56.455][ OK] [35m[W1][0m [32m  TOTP verification completed automatically![0m
+[0m[2026-04-08 23:55:56.457][INF] [35m[W1][0m   [Login Step 05] State: [1mconfirm_signin[0m[0m
+[0m[2026-04-08 23:55:56.458][INF] [35m[W1][0m   Handling sign-in confirm...[0m
+[0m[2026-04-08 23:55:56.460][INF] [35m[W1][0m   [confirm_signin DUMP] url=https://mail.google.com/mail/u/0/#inbox[0m
+[0m[2026-04-08 23:55:56.460][INF] [35m[W1][0m   [confirm_signin DUMP] title=Inbox - addilynsno310@gmail.com - Gmail[0m
+[0m[2026-04-08 23:55:56.460][INF] [35m[W1][0m   [confirm_signin DUMP]   [A] "Skip to content" aria=""[0m
+[0m[2026-04-08 23:55:56.460][INF] [35m[W1][0m   [confirm_signin DUMP]   [A] "Using Gmail with screen readers" aria=""[0m
+[0m[2026-04-08 23:55:56.460][INF] [35m[W1][0m   [confirm_signin DUMP]   [DIV] "" aria="Main menu"[0m
+[0m[2026-04-08 23:55:56.460][INF] [35m[W1][0m   [confirm_signin DUMP]   [A] "" aria="Gmail"[0m
+[0m[2026-04-08 23:55:56.460][INF] [35m[W1][0m   [confirm_signin DUMP]   [BUTTON] "" aria="Advanced search options"[0m
+[0m[2026-04-08 23:55:56.460][INF] [35m[W1][0m   [confirm_signin DUMP]   [BUTTON] "" aria="Search mail"[0m
+[0m[2026-04-08 23:55:56.460][INF] [35m[W1][0m   [confirm_signin DUMP]   [A] "" aria="Settings"[0m
+[0m[2026-04-08 23:55:56.460][INF] [35m[W1][0m   [confirm_signin DUMP]   [A] "" aria="Google apps"[0m
+[0m[2026-04-08 23:55:56.460][INF] [35m[W1][0m   [confirm_signin DUMP]   [A] "" aria="Google Account: Addilyn Snow  
+(addilynsno310@gmail.com), Im"[0m
+[0m[2026-04-08 23:55:56.460][INF] [35m[W1][0m   [confirm_signin DUMP]   [DIV] "" aria="Close"[0m
+[0m[2026-04-08 23:55:56.460][INF] [35m[W1][0m   [confirm_signin DUMP]   [DIV] "Compose" aria=""[0m
+[0m[2026-04-08 23:55:56.460][INF] [35m[W1][0m   [confirm_signin DUMP]   [A] "Inbox" aria="Inbox"[0m
+[0m[2026-04-08 23:55:56.460][INF] [35m[W1][0m   [confirm_signin DUMP]   [A] "Starred" aria="Starred"[0m
+[0m[2026-04-08 23:55:56.460][INF] [35m[W1][0m   [confirm_signin DUMP]   [A] "Snoozed" aria="Snoozed"[0m
+[0m[2026-04-08 23:55:56.460][INF] [35m[W1][0m   [confirm_signin DUMP]   [A] "Sent" aria="Sent"[0m
+[32m[2026-04-08 23:56:00.801][ OK] [36m[W0][0m [32m  TOTP verification completed automatically![0m
+[0m[2026-04-08 23:56:00.806][INF] [36m[W0][0m   [Login Step 05] State: [1munknown[0m[0m
+[0m[2026-04-08 23:56:00.806][INF] [36m[W0][0m   Login appears complete (URL: https://myaccount.google.com/?utm_source=sign_in_no_continue)[0m
+[0m[2026-04-08 23:56:05.984][INF] [35m[W1][0m   [Login Step 06] State: [1mconfirm_signin[0m[0m
+[0m[2026-04-08 23:56:05.984][INF] [35m[W1][0m   Handling sign-in confirm...[0m
+[0m[2026-04-08 23:56:05.990][INF] [35m[W1][0m   [confirm_signin DUMP] url=https://mail.google.com/mail/u/0/#inbox[0m
+[0m[2026-04-08 23:56:05.990][INF] [35m[W1][0m   [confirm_signin DUMP] title=Inbox - addilynsno310@gmail.com - Gmail[0m
+[0m[2026-04-08 23:56:05.990][INF] [35m[W1][0m   [confirm_signin DUMP]   [A] "Skip to content" aria=""[0m
+[0m[2026-04-08 23:56:05.990][INF] [35m[W1][0m   [confirm_signin DUMP]   [A] "Using Gmail with screen readers" aria=""[0m
+[0m[2026-04-08 23:56:05.990][INF] [35m[W1][0m   [confirm_signin DUMP]   [DIV] "" aria="Main menu"[0m
+[0m[2026-04-08 23:56:05.990][INF] [35m[W1][0m   [confirm_signin DUMP]   [A] "" aria="Gmail"[0m
+[0m[2026-04-08 23:56:05.990][INF] [35m[W1][0m   [confirm_signin DUMP]   [BUTTON] "" aria="Advanced search options"[0m
+[0m[2026-04-08 23:56:05.990][INF] [35m[W1][0m   [confirm_signin DUMP]   [BUTTON] "" aria="Search mail"[0m
+[0m[2026-04-08 23:56:05.990][INF] [35m[W1][0m   [confirm_signin DUMP]   [A] "" aria="Support"[0m
+[0m[2026-04-08 23:56:05.990][INF] [35m[W1][0m   [confirm_signin DUMP]   [A] "" aria="Settings"[0m
+[0m[2026-04-08 23:56:05.990][INF] [35m[W1][0m   [confirm_signin DUMP]   [A] "" aria="Google apps"[0m
+[0m[2026-04-08 23:56:05.990][INF] [35m[W1][0m   [confirm_signin DUMP]   [A] "" aria="Google Account: Addilyn Snow  
+(addilynsno310@gmail.com), Im"[0m
+[0m[2026-04-08 23:56:05.990][INF] [35m[W1][0m   [confirm_signin DUMP]   [DIV] "" aria="Close"[0m
+[0m[2026-04-08 23:56:05.990][INF] [35m[W1][0m   [confirm_signin DUMP]   [DIV] "Compose" aria=""[0m
+[0m[2026-04-08 23:56:05.990][INF] [35m[W1][0m   [confirm_signin DUMP]   [A] "Inbox" aria="Inbox"[0m
+[0m[2026-04-08 23:56:05.991][INF] [35m[W1][0m   [confirm_signin DUMP]   [A] "Starred" aria="Starred"[0m
+[0m[2026-04-08 23:56:05.991][INF] [35m[W1][0m   [confirm_signin DUMP]   [A] "Snoozed" aria="Snoozed"[0m
+[0m[2026-04-08 23:56:15.509][INF] [35m[W1][0m   [Login Step 07] State: [1munknown[0m[0m
+[0m[2026-04-08 23:56:15.510][INF] [35m[W1][0m   Login appears complete (URL: https://mail.google.com/mail/u/0/#inbox/FMfcgzQgLFsLCJdCpttjqqVPXfZPdcpk)[0m
+[0m[2026-04-08 23:56:21.930][INF] [36m[W0][0m   Invite email not found yet, polling every 30s...[0m
+[0m[2026-04-08 23:56:46.192][INF] [35m[W1][0m   Invite email not found yet, polling every 30s...[0m
+[0m[2026-04-08 23:56:51.931][INF] [36m[W0][0m   Poll 1: refreshing inbox (35s elapsed)...[0m
+[0m[2026-04-08 23:57:16.193][INF] [35m[W1][0m   Poll 1: refreshing inbox (56s elapsed)...[0m
+[0m[2026-04-08 23:57:35.971][INF] [36m[W0][0m   Poll 2: refreshing inbox (79s elapsed)...[0m
+[0m[2026-04-08 23:58:20.478][INF] [36m[W0][0m   Poll 3: refreshing inbox (124s elapsed)...[0m
+[0m[2026-04-08 23:59:04.752][INF] [36m[W0][0m   Poll 4: refreshing inbox (168s elapsed)...[0m
+[0m[2026-04-08 23:59:47.606][INF] [36m[W0][0m   Poll 5: refreshing inbox (211s elapsed)...[0m
+[0m[2026-04-09 00:00:30.031][INF] [36m[W0][0m   Poll 6: refreshing inbox (253s elapsed)...[0m
+./run_pipeline.sh: line 77: 28697 Killed                  node 2_accept.js "${EXTRA_ARGS[@]}"
+
+
+ ===========================================================
+   Pipeline finished.
+ ===========================================================
+

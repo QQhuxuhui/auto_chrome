@@ -1,0 +1,69 @@
+
+ ===========================================================
+
+   Gemini Family Group Pipeline
+   2-Stage Automation (Invite + Accept)
+
+ ===========================================================
+
+ ---- Running Stage 2 ----
+ ---- Stage 2: Accept Family Invitations ----
+[0m[2026-04-09 00:18:57.910][INF] [0m
+[0m[2026-04-09 00:18:57.912][INF] ============================================================[0m
+[0m[2026-04-09 00:18:57.912][INF]   Stage 2: Accept Family Invitations[0m
+[0m[2026-04-09 00:18:57.913][INF] ============================================================[0m
+[0m[2026-04-09 00:18:57.913][INF]   Chrome:       /usr/bin/google-chrome[0m
+[0m[2026-04-09 00:18:57.913][INF]   Members:      /usr/src/workspace/github/QQhuxuhui/auto_chrome/members.txt[0m
+[0m[2026-04-09 00:18:57.913][INF]   Concurrency:  3[0m
+[0m[2026-04-09 00:18:57.913][INF]   Poll interval: 30s[0m
+[0m[2026-04-09 00:18:57.913][INF]   Poll timeout:  600s[0m
+[0m[2026-04-09 00:18:57.913][INF] ============================================================[0m
+[0m[2026-04-09 00:18:57.913][INF] [0m
+[0m[2026-04-09 00:18:57.915][INF] Pending members to accept: 2[0m
+[0m[2026-04-09 00:18:59.090][INF] [36m[W0][0m Chrome started (port 9234, PID 40535)[0m
+[0m[2026-04-09 00:19:02.543][INF] [35m[W1][0m Chrome started (port 9235, PID 40785)[0m
+[0m[2026-04-09 00:19:04.641][INF] [35m[W1][0m >> Accept invite: addilynsno310@gmail.com[0m
+[0m[2026-04-09 00:19:04.658][INF] [36m[W0][0m >> Accept invite: sarahjahir107@gmail.com[0m
+[0m[2026-04-09 00:19:05.092][INF] [36m[W0][0m   Navigating to Gmail...[0m
+[0m[2026-04-09 00:19:05.127][INF] [35m[W1][0m   Navigating to Gmail...[0m
+[0m[2026-04-09 00:19:11.416][INF] [35m[W1][0m   Logging in...[0m
+[0m[2026-04-09 00:19:11.470][INF] [35m[W1][0m   [Login Step 01] State: [1memail[0m[0m
+[0m[2026-04-09 00:19:12.556][INF] [35m[W1][0m   [Login Step 02] State: [1mpassword[0m[0m
+[33m[2026-04-09 00:19:14.221][WRN] [36m[W0][0m [33m  Gmail opened without login prompt, verifying account...[0m
+[33m[2026-04-09 00:19:14.238][WRN] [36m[W0][0m [33m  Wrong account logged in (got: ), forcing re-login...[0m
+[0m[2026-04-09 00:19:24.085][INF] [36m[W0][0m   Logging in...[0m
+[0m[2026-04-09 00:19:24.089][INF] [36m[W0][0m   [Login Step 01] State: [1memail[0m[0m
+[0m[2026-04-09 00:19:25.151][INF] [36m[W0][0m   [Login Step 02] State: [1mpassword[0m[0m
+[0m[2026-04-09 00:19:30.672][INF] [35m[W1][0m   [Login Step 03] State: [1mpassword[0m[0m
+[0m[2026-04-09 00:19:34.613][INF] [35m[W1][0m   [Login Step 04] State: [1mverify_authenticator[0m[0m
+[0m[2026-04-09 00:19:34.614][INF] [35m[W1][0m   ============================================[0m
+[0m[2026-04-09 00:19:34.615][INF] [35m[W1][0m   Auto-generating TOTP code from fa_secret[0m
+[0m[2026-04-09 00:19:34.615][INF] [35m[W1][0m   Account: addilynsno310@gmail.com[0m
+[0m[2026-04-09 00:19:34.615][INF] [35m[W1][0m   Code: 043919 (valid for 26s)[0m
+[0m[2026-04-09 00:19:34.615][INF] [35m[W1][0m   ============================================[0m
+[0m[2026-04-09 00:19:43.266][INF] [36m[W0][0m   [Login Step 03] State: [1mpassword[0m[0m
+[0m[2026-04-09 00:19:47.829][INF] [36m[W0][0m   [Login Step 04] State: [1mverify_authenticator[0m[0m
+[0m[2026-04-09 00:19:47.830][INF] [36m[W0][0m   ============================================[0m
+[0m[2026-04-09 00:19:47.830][INF] [36m[W0][0m   Auto-generating TOTP code from fa_secret[0m
+[0m[2026-04-09 00:19:47.830][INF] [36m[W0][0m   Account: sarahjahir107@gmail.com[0m
+[0m[2026-04-09 00:19:47.830][INF] [36m[W0][0m   Code: 529221 (valid for 13s)[0m
+[0m[2026-04-09 00:19:47.830][INF] [36m[W0][0m   ============================================[0m
+[32m[2026-04-09 00:19:53.625][ OK] [35m[W1][0m [32m  TOTP verification completed automatically![0m
+[0m[2026-04-09 00:19:53.625][INF] [35m[W1][0m   Login complete (reached authenticated URL: https://mail.google.com/mail/u/0/?hl=en#inbox)[0m
+[32m[2026-04-09 00:20:00.135][ OK] [35m[W1][0m [32m  Found invite email: "google, tham gia nhóm gia đình của anllely?, 7:42 am, anllely hersal muốn bạn th"[0m
+[32m[2026-04-09 00:20:02.001][ OK] [36m[W0][0m [32m  TOTP verification completed automatically![0m
+[0m[2026-04-09 00:20:02.001][INF] [36m[W0][0m   Login complete (reached authenticated URL: https://myaccount.google.com/?utm_source=sign_in_no_continue)[0m
+[0m[2026-04-09 00:20:05.166][INF] [35m[W1][0m   Found accept link: https://www.google.com/url?q=https://notifications.googleapis.com/email/redirect?t%3DAFG8qyUJ81JL8lw[0m
+[0m[2026-04-09 00:20:05.170][INF] [35m[W1][0m   Resolving tracker URL via in-page fetch...[0m
+[33m[2026-04-09 00:20:07.092][WRN] [35m[W1][0m [33mAccept link navigation: net::ERR_INVALID_REDIRECT at https://notifications.googleapis.com/email/redirect?t=AFG8qyUJ81JL8lwbIDT9j2MC-oraDaBzHCaAMw4MU6SjSwrdnG5cMPXIqWwh1yvfNCNdRtGGmo9Rdgp-a6Ogx-Rk0zHvAaIH_Q7jyfjlVwCSai86DUIrS1iNV2EV9xQ2SNuaYjs8zE6AUlH4s9pgleKyLciFjjvvubmv7VNMqRLCFz3wI34m1UjUYkGaTOqazf3pgAwLjT_lIdFLmA_Jh0FzDSxwq0lQNNT4Wrd3ulyo_5e2G4FFPzwYiGMwuqPJZZ3nxUBU3U8BL4O26Fs3gAjV7EMAKoWUGIOLtePiog7tQrm0QRQeQJAR4KgpAU0t&r=eJxTBgAAJAAk&s=ALHZ2r6k2XB16wiqe6zW454zx2Qx[0m
+[0m[2026-04-09 00:20:19.108][INF] [36m[W0][0m   Invite email not found yet, polling every 30s...[0m
+[31m[2026-04-09 00:20:19.664][ERR] [35m[W1][0m [31mAccept failed [addilynsno310@gmail.com]: accept_navigation_failed: chrome-error://chromewebdata/[0m
+[0m[2026-04-09 00:20:49.108][INF] [36m[W0][0m   Poll 1: refreshing inbox (32s elapsed)...[0m
+[0m[2026-04-09 00:21:29.340][INF] [36m[W0][0m   Poll 2: refreshing inbox (72s elapsed)...[0m
+./run_pipeline.sh: line 77: 40527 Killed                  node 2_accept.js "${EXTRA_ARGS[@]}"
+
+
+ ===========================================================
+   Pipeline finished.
+ ===========================================================
+

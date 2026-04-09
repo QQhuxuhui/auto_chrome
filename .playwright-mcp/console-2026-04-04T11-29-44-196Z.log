@@ -1,0 +1,28 @@
+[    5966ms] SyntaxError: 26
+    at vi (https://hero-sms.com/_nuxt/CbjxYdcM.js:37:590)
+    at Ft (https://hero-sms.com/_nuxt/CbjxYdcM.js:47:229)
+    at ql (https://hero-sms.com/_nuxt/CbjxYdcM.js:47:11580)
+    at n (https://hero-sms.com/_nuxt/DIBWRAXM.js:1:72)
+    at O (https://hero-sms.com/_nuxt/CmTay1mn.js:1:1781)
+    at https://hero-sms.com/_nuxt/CmTay1mn.js:2:325
+    at Mf.run (https://hero-sms.com/_nuxt/CbjxYdcM.js:10:710)
+    at https://hero-sms.com/_nuxt/CbjxYdcM.js:51:2747
+    at runWithContext (https://hero-sms.com/_nuxt/CbjxYdcM.js:16:15577)
+    at https://hero-sms.com/_nuxt/CbjxYdcM.js:51:2739
+[    8201ms] [WARNING] [DEPRECATED] You're using the deprecated 'spec.url' attribute. Remove the spec prefix and move the 'url' attribute to the top level. @ https://hero-sms.com/_nuxt/sDeIb99p.js:2215
+[    8336ms] [INFO] loadDocument: 127 ms @ https://hero-sms.com/_nuxt/sDeIb99p.js:2215
+[    8342ms] [INFO] deepClone: 1 ms @ https://hero-sms.com/_nuxt/sDeIb99p.js:2215
+[    8345ms] [INFO] initialize: 2 ms @ https://hero-sms.com/_nuxt/sDeIb99p.js:2215
+[    8357ms] [INFO] upgrade: 12 ms @ https://hero-sms.com/_nuxt/sDeIb99p.js:2215
+[    8428ms] [INFO] bundle: 65 ms @ https://hero-sms.com/_nuxt/sDeIb99p.js:2215
+[    8477ms] [INFO] coerceValue: 49 ms @ https://hero-sms.com/_nuxt/sDeIb99p.js:2215
+[    8488ms] [INFO] mergeObjects: 4 ms @ https://hero-sms.com/_nuxt/sDeIb99p.js:2215
+[    8519ms] [WARNING] document validation errors:  @ https://hero-sms.com/_nuxt/sDeIb99p.js:2215
+[    8520ms] [WARNING] [Object, Object, Object, Object] @ https://hero-sms.com/_nuxt/sDeIb99p.js:2215
+[    8880ms] [INFO] addDocument: 542 ms @ https://hero-sms.com/_nuxt/sDeIb99p.js:2215
+[    9002ms] [INFO] Slow network is detected. See https://www.chromestatus.com/feature/5636954674692096 for more details. Fallback font will be used while loading: https://fonts.scalar.com/mono-latin.woff2 @ https://hero-sms.com/_nuxt/Dc0BlcaW.js:0
+[   13074ms] [INFO] Slow network is detected. See https://www.chromestatus.com/feature/5636954674692096 for more details. Fallback font will be used while loading: https://fonts.scalar.com/mono-cyrillic.woff2 @ https://hero-sms.com/_nuxt/Dc0BlcaW.js:0
+[  128780ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://hero-sms.com/api/openapi.json:0
+[  129430ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://hero-sms.com/api/openapi.yaml:0
+[  130026ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://hero-sms.com/openapi.json:0
+[  130799ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://hero-sms.com/cn/api/openapi.json:0

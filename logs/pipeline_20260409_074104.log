@@ -1,0 +1,127 @@
+
+ ===========================================================
+
+   Gemini Family Group Pipeline
+   2-Stage Automation (Invite + Accept)
+
+ ===========================================================
+
+ Running all 2 stages...
+
+ ---- Stage 1: Send Family Invitations ----
+[0m[2026-04-08 23:41:04.316][INF] [0m
+[0m[2026-04-08 23:41:04.316][INF] ============================================================[0m
+[0m[2026-04-08 23:41:04.316][INF]   Stage 1: Send Family Invitations[0m
+[0m[2026-04-08 23:41:04.316][INF] ============================================================[0m
+[0m[2026-04-08 23:41:04.316][INF]   Chrome:      /usr/bin/google-chrome[0m
+[0m[2026-04-08 23:41:04.316][INF]   Hosts:       /usr/src/workspace/github/QQhuxuhui/auto_chrome/hosts.txt[0m
+[0m[2026-04-08 23:41:04.316][INF]   Members:     /usr/src/workspace/github/QQhuxuhui/auto_chrome/members.txt[0m
+[0m[2026-04-08 23:41:04.317][INF]   Concurrency: 1[0m
+[0m[2026-04-08 23:41:04.317][INF] ============================================================[0m
+[0m[2026-04-08 23:41:04.317][INF] [0m
+[0m[2026-04-08 23:41:04.318][INF] Parsed: 1 hosts, 2 members[0m
+[0m[2026-04-08 23:41:04.318][INF] Built 1 groups[0m
+[0m[2026-04-08 23:41:04.318][INF] Pending groups: 1[0m
+[0m[2026-04-08 23:41:05.505][INF] [36m[W0][0m Chrome started (port 9234, PID 22395)[0m
+[0m[2026-04-08 23:41:05.516][INF] [36m[W0][0m >> Inviting group 1: host=hersalanllely@gmail.com, members=2[0m
+[0m[2026-04-08 23:41:05.593][INF] [36m[W0][0m   Navigating to Google One family settings...[0m
+[0m[2026-04-08 23:41:11.599][INF] [36m[W0][0m   Current URL after navigation: https://accounts.google.com/v3/signin/identifier?continue=https%3A%2F%2Fmyaccount.google.com%2Ffamily%2Fdetails%3Futm_source%3Dg1web%26utm_medium%3Ddefault&dsh=S84710722%3A1775691669197808&followup=https%3A%2F%2Fmyaccount.google.com%2Ffamily%2Fdetails%3Futm_source%3Dg1web%26utm_medium%3Ddefault&osid=1&passive=1209600&service=accountsettings&flowName=GlifWebSignIn&flowEntry=ServiceLogin&ifkv=AT1y2_VaxS7W4ZA0If5h7IEL9IuynAXHQ61jbqmHUPRVt7w6QYTYVYrq0xqsDpx73UUmTuTVXDJnxw[0m
+[0m[2026-04-08 23:41:11.603][INF] [36m[W0][0m   Login required, logging in as host...[0m
+[0m[2026-04-08 23:41:11.607][INF] [36m[W0][0m   [Login Step 01] State: [1memail[0m[0m
+[0m[2026-04-08 23:41:12.803][INF] [36m[W0][0m   [Login Step 02] State: [1mpassword[0m[0m
+[0m[2026-04-08 23:41:30.921][INF] [36m[W0][0m   [Login Step 03] State: [1mpassword[0m[0m
+[0m[2026-04-08 23:41:34.653][INF] [36m[W0][0m   [Login Step 04] State: [1mverify_authenticator[0m[0m
+[0m[2026-04-08 23:41:34.654][INF] [36m[W0][0m   ============================================[0m
+[0m[2026-04-08 23:41:34.654][INF] [36m[W0][0m   Auto-generating TOTP code from fa_secret[0m
+[0m[2026-04-08 23:41:34.655][INF] [36m[W0][0m   Account: hersalanllely@gmail.com[0m
+[0m[2026-04-08 23:41:34.655][INF] [36m[W0][0m   Code: 918393 (valid for 26s)[0m
+[0m[2026-04-08 23:41:34.655][INF] [36m[W0][0m   ============================================[0m
+[32m[2026-04-08 23:41:45.754][ OK] [36m[W0][0m [32m  TOTP verification completed automatically![0m
+[0m[2026-04-08 23:41:45.756][INF] [36m[W0][0m   [Login Step 05] State: [1munknown[0m[0m
+[0m[2026-04-08 23:41:45.756][INF] [36m[W0][0m   Login appears complete (URL: https://myaccount.google.com/family/details?utm_source=g1web&utm_medium=default)[0m
+[0m[2026-04-08 23:41:56.296][INF] [36m[W0][0m   Inviting 2 members in batch...[0m
+[0m[2026-04-08 23:41:56.296][INF] [36m[W0][0m   Navigating directly to invite page...[0m
+[0m[2026-04-08 23:42:03.944][INF] [36m[W0][0m   Waiting for email input on invite page...[0m
+[0m[2026-04-08 23:42:12.260][INF] [36m[W0][0m   All 2 emails entered, sending invite...[0m
+[32m[2026-04-08 23:42:18.460][ OK] [36m[W0][0m [32m  Invited: sarahjahir107@gmail.com[0m
+[32m[2026-04-08 23:42:18.460][ OK] [36m[W0][0m [32m  Invited: addilynsno310@gmail.com[0m
+[32m[2026-04-08 23:42:18.460][ OK] [36m[W0][0m [32m>> Group 1 all invites sent (72.9s)[0m
+[0m[2026-04-08 23:42:20.482][INF] Browsers kept open (KEEP_BROWSER_OPEN=true)[0m
+[0m[2026-04-08 23:42:20.482][INF] [0m
+[0m[2026-04-08 23:42:20.482][INF] ============================================================[0m
+[32m[2026-04-08 23:42:20.482][ OK]   Stage 1 Complete[0m
+[0m[2026-04-08 23:42:20.482][INF]   OK: 1  FAIL: 0[0m
+[0m[2026-04-08 23:42:20.482][INF] ============================================================[0m
+[0m[2026-04-08 23:42:20.482][INF] [0m
+
+ ---- Stage 2: Accept Family Invitations ----
+[0m[2026-04-08 23:42:20.648][INF] [0m
+[0m[2026-04-08 23:42:20.648][INF] ============================================================[0m
+[0m[2026-04-08 23:42:20.648][INF]   Stage 2: Accept Family Invitations[0m
+[0m[2026-04-08 23:42:20.648][INF] ============================================================[0m
+[0m[2026-04-08 23:42:20.648][INF]   Chrome:       /usr/bin/google-chrome[0m
+[0m[2026-04-08 23:42:20.649][INF]   Members:      /usr/src/workspace/github/QQhuxuhui/auto_chrome/members.txt[0m
+[0m[2026-04-08 23:42:20.649][INF]   Concurrency:  3[0m
+[0m[2026-04-08 23:42:20.649][INF]   Poll interval: 30s[0m
+[0m[2026-04-08 23:42:20.649][INF]   Poll timeout:  600s[0m
+[0m[2026-04-08 23:42:20.649][INF] ============================================================[0m
+[0m[2026-04-08 23:42:20.649][INF] [0m
+[0m[2026-04-08 23:42:20.650][INF] Pending members to accept: 2[0m
+[33m[2026-04-08 23:42:20.710][WRN] [36m[W0][0m [33mChrome process exit: code=0, signal=null[0m
+[0m[2026-04-08 23:42:20.761][INF] [36m[W0][0m Chrome started (port 9234, PID 23175)[0m
+[0m[2026-04-08 23:42:24.199][INF] [35m[W1][0m Chrome started (port 9235, PID 23213)[0m
+[0m[2026-04-08 23:42:27.176][INF] [35m[W1][0m >> Accept invite: addilynsno310@gmail.com[0m
+[0m[2026-04-08 23:42:27.183][INF] [36m[W0][0m >> Accept invite: sarahjahir107@gmail.com[0m
+[0m[2026-04-08 23:42:27.576][INF] [35m[W1][0m   Navigating to Gmail...[0m
+[0m[2026-04-08 23:42:27.577][INF] [36m[W0][0m   Navigating to Gmail...[0m
+[0m[2026-04-08 23:42:32.638][INF] [36m[W0][0m   Logging in...[0m
+[0m[2026-04-08 23:42:32.647][INF] [36m[W0][0m   [Login Step 01] State: [1memail[0m[0m
+[0m[2026-04-08 23:42:33.625][INF] [35m[W1][0m   Logging in...[0m
+[0m[2026-04-08 23:42:33.643][INF] [35m[W1][0m   [Login Step 01] State: [1memail[0m[0m
+[0m[2026-04-08 23:42:33.932][INF] [36m[W0][0m   [Login Step 02] State: [1mpassword[0m[0m
+[0m[2026-04-08 23:42:34.943][INF] [35m[W1][0m   [Login Step 02] State: [1mpassword[0m[0m
+[0m[2026-04-08 23:42:52.045][INF] [36m[W0][0m   [Login Step 03] State: [1mpassword[0m[0m
+[0m[2026-04-08 23:42:53.054][INF] [35m[W1][0m   [Login Step 03] State: [1mpassword[0m[0m
+[0m[2026-04-08 23:42:55.872][INF] [36m[W0][0m   [Login Step 04] State: [1mverify_authenticator[0m[0m
+[31m[2026-04-08 23:42:56.124][ERR] [36m[W0][0m [31mAccept failed [sarahjahir107@gmail.com]: Invalid base32 character: |[0m
+[0m[2026-04-08 23:42:56.890][INF] [35m[W1][0m   [Login Step 04] State: [1mverify_authenticator[0m[0m
+[0m[2026-04-08 23:42:56.891][INF] [35m[W1][0m   ============================================[0m
+[0m[2026-04-08 23:42:56.891][INF] [35m[W1][0m   Auto-generating TOTP code from fa_secret[0m
+[0m[2026-04-08 23:42:56.891][INF] [35m[W1][0m   Account: addilynsno310@gmail.com[0m
+[0m[2026-04-08 23:42:56.891][INF] [35m[W1][0m   Code: 021102 (valid for 4s)[0m
+[0m[2026-04-08 23:42:56.891][INF] [35m[W1][0m   ============================================[0m
+[0m[2026-04-08 23:42:56.891][INF] [35m[W1][0m   Code expiring soon, waiting 5s for new code...[0m
+[0m[2026-04-08 23:43:01.891][INF] [35m[W1][0m   New code: 047939 (valid for 29s)[0m
+[32m[2026-04-08 23:43:17.310][ OK] [35m[W1][0m [32m  TOTP verification completed automatically![0m
+[0m[2026-04-08 23:43:17.312][INF] [35m[W1][0m   [Login Step 05] State: [1munknown[0m[0m
+[0m[2026-04-08 23:43:17.312][INF] [35m[W1][0m   Login appears complete (URL: https://mail.google.com/mail/u/0/#inbox)[0m
+[0m[2026-04-08 23:43:27.517][INF] [35m[W1][0m   Invite email not found yet, polling every 30s...[0m
+[0m[2026-04-08 23:43:57.518][INF] [35m[W1][0m   Poll 1: refreshing inbox (35s elapsed)...[0m
+[0m[2026-04-08 23:44:43.027][INF] [35m[W1][0m   Poll 2: refreshing inbox (81s elapsed)...[0m
+[0m[2026-04-08 23:45:25.755][INF] [35m[W1][0m   Poll 3: refreshing inbox (123s elapsed)...[0m
+[0m[2026-04-08 23:46:11.763][INF] [35m[W1][0m   Poll 4: refreshing inbox (169s elapsed)...[0m
+[0m[2026-04-08 23:46:53.708][INF] [35m[W1][0m   Poll 5: refreshing inbox (211s elapsed)...[0m
+[31m[2026-04-08 23:47:27.178][ERR] [35m[W1][0m [31mAccept failed [addilynsno310@gmail.com]: accept_hard_timeout: exceeded 300s[0m
+[33m[2026-04-08 23:47:27.179][WRN] [35m[W1][0m [33m  Restarting Chrome after hard failure...[0m
+[33m[2026-04-08 23:47:27.179][WRN] [35m[W1][0m [33mChrome seems crashed, restarting...[0m
+[33m[2026-04-08 23:47:27.214][WRN] [35m[W1][0m [33mChrome process exit: code=0, signal=null[0m
+[0m[2026-04-08 23:47:31.300][INF] [35m[W1][0m Chrome started (port 9235, PID 25424)[0m
+[32m[2026-04-08 23:47:31.300][ OK] [35m[W1][0m [32mChrome restarted[0m
+[0m[2026-04-08 23:47:33.067][INF] Browsers kept open (KEEP_BROWSER_OPEN=true)[0m
+[0m[2026-04-08 23:47:33.067][INF] [0m
+[0m[2026-04-08 23:47:33.067][INF] ============================================================[0m
+[32m[2026-04-08 23:47:33.067][ OK]   Stage 2 Complete[0m
+[0m[2026-04-08 23:47:33.067][INF]   OK: 0  FAIL: 2[0m
+[0m[2026-04-08 23:47:33.067][INF] ============================================================[0m
+[0m[2026-04-08 23:47:33.067][INF] [0m
+[0m[2026-04-08 23:47:37.990][INF] [35m[W1][0m   Poll 6: refreshing inbox (256s elapsed)...[0m
+[0m[2026-04-08 23:48:11.524][INF] [35m[W1][0m   Poll 7: refreshing inbox (289s elapsed)...[0m
+[0m[2026-04-08 23:48:45.060][INF] [35m[W1][0m   Poll 8: refreshing inbox (323s elapsed)...[0m
+[0m[2026-04-08 23:49:18.588][INF] [35m[W1][0m   Poll 9: refreshing inbox (356s elapsed)...[0m
+./run_pipeline.sh: line 77: 23167 Killed                  node 2_accept.js "${EXTRA_ARGS[@]}"
+ WARNING: Stage 2 had errors
+
+ ===========================================================
+   Pipeline finished.
+ ===========================================================
+

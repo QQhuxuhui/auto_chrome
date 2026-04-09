@@ -27,6 +27,292 @@ for (let i = 0; i < args.length; i++) {
 }
 
 const GOOGLE_ONE_FAMILY_URL = 'https://myaccount.google.com/family/details?utm_source=g1web&utm_medium=default';
+const GOOGLE_ONE_SETTINGS_URL = 'https://one.google.com/settings?g1_landing_page=1';
+
+// ============ 家庭组创建 + Google One 共享开关 ============
+
+async function detectNoFamilyGroup(page) {
+    return page.evaluate(() => {
+        const text = (document.body ? document.body.innerText : '').toLowerCase();
+        if (!text) return false;
+        const createKeywords = [
+            'create a family group', 'create family group',
+            'set up a family group', 'set up family group',
+            'start a family group', 'you don\'t have a family group',
+            "you haven't created a family group",
+            '创建家庭组', '设置家庭组', '建立家庭组',
+            '您还没有家庭组', '你还没有家庭组',
+        ];
+        return createKeywords.some(k => text.includes(k));
+    }).catch(() => false);
+}
+
+async function dumpPageState(page, wlog, label) {
+    try {
+        const info = await page.evaluate(() => {
+            function isVisible(el) {
+                if (!el || !el.getBoundingClientRect) return false;
+                const r = el.getBoundingClientRect();
+                const s = window.getComputedStyle(el);
+                return r.width > 0 && r.height > 0 && s.display !== 'none' && s.visibility !== 'hidden';
+            }
+            const buttons = [];
+            for (const el of document.querySelectorAll('button, a, [role="button"], input[type="submit"], [role="link"]')) {
+                if (!isVisible(el)) continue;
+                const text = (el.textContent || '').trim().replace(/\s+/g, ' ').substring(0, 80);
+                const aria = (el.getAttribute('aria-label') || '').substring(0, 80);
+                if (!text && !aria) continue;
+                buttons.push(`[${el.tagName}] "${text}"${aria ? ' aria="' + aria + '"' : ''}`);
+            }
+            return {
+                url: location.href,
+                title: document.title,
+                bodyPreview: (document.body ? document.body.innerText : '').replace(/\s+/g, ' ').substring(0, 400),
+                buttons: buttons.slice(0, 25),
+            };
+        });
+        wlog.info(`  [DUMP ${label}] url=${info.url}`);
+        wlog.info(`  [DUMP ${label}] title=${info.title}`);
+        wlog.info(`  [DUMP ${label}] body="${info.bodyPreview}"`);
+        for (const b of info.buttons) wlog.info(`  [DUMP ${label}]   ${b}`);
+    } catch (e) {
+        wlog.debug(`  [DUMP ${label}] failed: ${e.message}`);
+    }
+}
+
+// Click a visible element matching any keyword in its text OR aria-label.
+// Returns the matched text/aria (truncated) if clicked, else null.
+async function clickByTextOrAria(page, keywords) {
+    return page.evaluate((kws) => {
+        function isVisible(el) {
+            if (!el || !el.getBoundingClientRect) return false;
+            const r = el.getBoundingClientRect();
+            const s = window.getComputedStyle(el);
+            return r.width > 0 && r.height > 0 && s.display !== 'none' && s.visibility !== 'hidden';
+        }
+        const lc = kws.map(k => k.toLowerCase());
+        const candidates = [];
+        const sel = 'button, a, [role="button"], [role="link"], input[type="submit"], input[type="button"]';
+        for (const el of document.querySelectorAll(sel)) {
+            if (!isVisible(el)) continue;
+            if (el.disabled || el.getAttribute('aria-disabled') === 'true') continue;
+            const text = (el.textContent || '').trim().toLowerCase();
+            const aria = (el.getAttribute('aria-label') || '').toLowerCase();
+            const hay = (text + ' ' + aria).trim();
+            if (!hay) continue;
+            for (const k of lc) {
+                if (hay.includes(k)) {
+                    candidates.push({ el, hay, kwLen: k.length });
+                    break;
+                }
+            }
+        }
+        if (candidates.length === 0) return null;
+        // Prefer longest keyword match (more specific), then shortest overall text (tighter match)
+        candidates.sort((a, b) => (b.kwLen - a.kwLen) || (a.hay.length - b.hay.length));
+        const best = candidates[0];
+        best.el.click();
+        return (best.el.textContent || best.el.getAttribute('aria-label') || '').trim().substring(0, 80);
+    }, keywords).catch(() => null);
+}
+
+async function waitForUrlChange(page, fromUrl, timeoutMs = 15000) {
+    const start = Date.now();
+    while (Date.now() - start < timeoutMs) {
+        await sleep(500);
+        if (page.url() !== fromUrl) return true;
+    }
+    return false;
+}
+
+async function createFamilyGroup(page, wlog) {
+    wlog.info('  No family group detected — creating one...');
+    await dumpPageState(page, wlog, 'before_create');
+
+    // Step 1: On /family/details, click the entry button ("Get started" / 创建家庭组 / ...)
+    const entryKws = [
+        'get started', 'create a family group', 'create family group',
+        'set up a family group', 'start a family group',
+        '创建家庭组', '设置家庭组', '开始使用', '开始',
+    ];
+    const urlBefore1 = page.url();
+    const entryClicked = await clickByTextOrAria(page, entryKws);
+    if (!entryClicked) {
+        await dumpPageState(page, wlog, 'entry_btn_missing');
+        await takeScreenshot(page, 'create_family_entry_not_found', wlog);
+        throw new Error('Cannot find family-group entry button on /family/details');
+    }
+    wlog.info(`  Clicked entry button: "${entryClicked}"`);
+    await waitForUrlChange(page, urlBefore1, 15000);
+    await sleep(2000);
+    await dumpPageState(page, wlog, 'after_entry_click');
+
+    // Step 2: On /family/create, click the actual "Create a Family Group" action (empty text, aria-label only)
+    if (page.url().includes('/family/create')) {
+        const createKws2 = [
+            'create a family group', 'create family group', 'create family',
+            '创建家庭组', '确认创建', '创建',
+        ];
+        const urlBefore2 = page.url();
+        const createClicked = await clickByTextOrAria(page, createKws2);
+        if (!createClicked && createClicked !== '') {
+            await dumpPageState(page, wlog, 'create_action_missing');
+            await takeScreenshot(page, 'create_family_action_not_found', wlog);
+            throw new Error('Cannot find "Create a Family Group" action on /family/create');
+        }
+        wlog.info(`  Clicked create action: "${createClicked}"`);
+        await waitForUrlChange(page, urlBefore2, 15000);
+        await sleep(3000);
+        await dumpPageState(page, wlog, 'after_create_action');
+    }
+
+    // Step 3: Walk through any ToS / confirmation pages. Only advance on URL change.
+    const confirmKws = [
+        'yes, continue', "i agree", 'i accept', 'agree and continue',
+        'get started', 'continue', 'next', 'confirm', 'done', 'accept',
+        '同意并继续', '我同意', '继续', '下一步', '确认', '完成', '接受',
+    ];
+    for (let step = 0; step < 6; step++) {
+        const urlBefore = page.url();
+        // Bail if we reach the family details page with a real group already
+        if ((urlBefore.includes('family/details') || urlBefore.includes('family/members')) &&
+            !(await detectNoFamilyGroup(page))) {
+            wlog.debug(`  Family wizard done at step ${step}: ${urlBefore}`);
+            break;
+        }
+        await dumpPageState(page, wlog, `confirm_step_${step + 1}`);
+        const clicked = await clickByTextOrAria(page, confirmKws);
+        if (!clicked && clicked !== '') {
+            wlog.debug(`  No confirm button at step ${step + 1}, exiting wizard loop`);
+            break;
+        }
+        wlog.info(`  Clicked confirm: "${clicked}"`);
+        const advanced = await waitForUrlChange(page, urlBefore, 10000);
+        if (!advanced) {
+            wlog.warn(`  URL did not change after clicking "${clicked}" — stopping wizard`);
+            break;
+        }
+        await sleep(2000);
+    }
+
+    // Verify
+    await sleep(2000);
+    await page.goto(GOOGLE_ONE_FAMILY_URL, { waitUntil: 'networkidle2', timeout: 30000 }).catch(() => { });
+    await sleep(3000);
+    if (await detectNoFamilyGroup(page)) {
+        await dumpPageState(page, wlog, 'final_still_missing');
+        await takeScreenshot(page, 'create_family_still_missing', wlog);
+        throw new Error('Family group creation did not complete — page still shows "create" prompt');
+    }
+    wlog.success('  Family group created');
+}
+
+async function enableShareGoogleOneWithFamily(page, wlog) {
+    wlog.info('  Enabling "Share Google One with family"...');
+
+    await page.goto(GOOGLE_ONE_SETTINGS_URL, { waitUntil: 'networkidle2', timeout: 30000 })
+        .catch(e => wlog.warn(`  one.google.com load timeout: ${e.message}`));
+    await sleep(4000);
+
+    // Try expanding the Family section (may be a collapsible panel)
+    await page.evaluate(() => {
+        function isVisible(el) {
+            if (!el || !el.getBoundingClientRect) return false;
+            const r = el.getBoundingClientRect();
+            const s = window.getComputedStyle(el);
+            return r.width > 0 && r.height > 0 && s.display !== 'none' && s.visibility !== 'hidden';
+        }
+        const keywords = ['family', 'share google one', '家人', '家庭', '与家人共享', '共享 google one'];
+        const expandables = Array.from(document.querySelectorAll(
+            'button, a, [role="button"], [aria-expanded], summary, [role="tab"]'
+        ));
+        for (const el of expandables) {
+            if (!isVisible(el)) continue;
+            const text = (el.textContent || '').toLowerCase();
+            const aria = (el.getAttribute('aria-label') || '').toLowerCase();
+            const all = text + ' ' + aria;
+            if (!keywords.some(k => all.includes(k))) continue;
+            const expanded = el.getAttribute('aria-expanded');
+            if (expanded === 'false') {
+                el.click();
+                return true;
+            }
+            // If there's no aria-expanded, still click once — harmless if it's a toggle
+            if (expanded === null && text.length < 80) {
+                el.click();
+                return true;
+            }
+        }
+        return false;
+    }).catch(() => false);
+    await sleep(2000);
+
+    // Find and toggle ON the "Share Google One with family" switch
+    const result = await page.evaluate(() => {
+        function isVisible(el) {
+            if (!el || !el.getBoundingClientRect) return false;
+            const r = el.getBoundingClientRect();
+            const s = window.getComputedStyle(el);
+            return r.width > 0 && r.height > 0 && s.display !== 'none' && s.visibility !== 'hidden';
+        }
+        const shareKeywords = [
+            'share google one', 'share with family', 'share benefits',
+            'share your google one', 'share membership',
+            '与家人共享 google one', '与家人共享', '共享 google one',
+            '将 google one 与家人共享', '分享给家人',
+        ];
+
+        // Walk up from a text node containing a share keyword to find the nearest toggle
+        const textNodes = Array.from(document.querySelectorAll('*')).filter(el => {
+            if (!isVisible(el)) return false;
+            const own = (el.textContent || '').toLowerCase();
+            if (!shareKeywords.some(k => own.includes(k))) return false;
+            if (own.length > 600) return false;
+            return true;
+        });
+
+        // Sort by length ascending — smaller/more-specific containers first
+        textNodes.sort((a, b) => (a.textContent || '').length - (b.textContent || '').length);
+
+        for (const node of textNodes) {
+            // Look in this node and its ancestors (up to 6 levels) for a toggle
+            let scope = node;
+            for (let up = 0; up < 6 && scope; up++, scope = scope.parentElement) {
+                const toggles = scope.querySelectorAll('[role="switch"], input[type="checkbox"]');
+                for (const t of toggles) {
+                    if (!isVisible(t)) continue;
+                    const checked = t.getAttribute('aria-checked') === 'true' || t.checked === true;
+                    if (checked) {
+                        return { state: 'already_on' };
+                    }
+                    t.click();
+                    return { state: 'clicked' };
+                }
+            }
+        }
+        return { state: 'not_found' };
+    }).catch(() => ({ state: 'error' }));
+
+    if (result.state === 'already_on') {
+        wlog.success('  Share Google One with family: already ON');
+        return;
+    }
+    if (result.state === 'clicked') {
+        await sleep(2000);
+        // Confirm any dialog that appears
+        const confirmKws = [
+            'confirm', 'continue', 'ok', 'got it', 'turn on', 'enable',
+            '确认', '继续', '确定', '知道了', '开启', '启用',
+        ];
+        await tryClickStrategies(page, confirmKws, wlog, 'share_confirm').catch(() => { });
+        await sleep(2000);
+        wlog.success('  Share Google One with family: toggled ON');
+        return;
+    }
+
+    wlog.warn(`  Share Google One toggle not found (state=${result.state})`);
+    await takeScreenshot(page, 'share_toggle_not_found', wlog);
+}
 
 async function getInviteDialogRootHandle(page) {
     const handle = await page.evaluateHandle(() => {
@@ -250,35 +536,31 @@ async function isSendButtonEnabled(page) {
 }
 
 async function tryAddInviteEmail(page, email) {
+    // 每次都重新查询 input handle —— 上一次添加 chip 后 DOM 可能已重新渲染
     const input = await getInviteInputHandle(page);
     if (!input) return false;
 
     try {
-        // Focus and clear the input
+        // Click to focus — 对 chip-style input 必须点击以把光标放回输入区
+        await input.click().catch(() => { });
+        await sleep(200);
+
+        // 清空输入框（第一次 chip 添加后输入框应该是空的，但保险起见清一次）
         await page.evaluate((el) => {
             el.focus();
-            if ('value' in el) {
+            if ('value' in el && el.value) {
                 el.value = '';
                 el.dispatchEvent(new Event('input', { bubbles: true }));
                 el.dispatchEvent(new Event('change', { bubbles: true }));
-            } else if (el.isContentEditable) {
+            } else if (el.isContentEditable && el.textContent) {
                 el.textContent = '';
             }
         }, input).catch(() => { });
-
-        await input.click().catch(() => { });
-        await sleep(100);
-
-        const mod = process.platform === 'darwin' ? 'Meta' : 'Control';
-        await page.keyboard.down(mod).catch(() => { });
-        await page.keyboard.press('KeyA').catch(() => { });
-        await page.keyboard.up(mod).catch(() => { });
-        await page.keyboard.press('Backspace').catch(() => { });
         await sleep(100);
 
         // Type email via keyboard
-        await page.keyboard.type(email, { delay: 20 });
-        await sleep(1000);
+        await page.keyboard.type(email, { delay: 30 });
+        await sleep(800);
 
         // Verify email was typed into the input
         let typed = await page.evaluate((el) => {
@@ -313,23 +595,14 @@ async function tryAddInviteEmail(page, email) {
         }
 
         // Press Enter to confirm the email as a recipient.
-        // This clears the input and adds the email as a chip/tag,
-        // which also enables the Send button.
+        // This clears the input and adds the email as a chip/tag.
         await page.keyboard.press('Enter');
-        await sleep(1500);
+        await sleep(2000); // 给 chip 渲染 + DOM 更新留时间
 
-        // Verify: the email should now appear as page text (chip)
-        // and the input should be cleared
-        if (await isInviteEmailAdded(page, email)) {
-            return true;
-        }
-
-        // Also accept if Send button became enabled (email was added)
-        if (await isSendButtonEnabled(page)) {
-            return true;
-        }
-
-        return false;
+        // 严格验证：这个特定的邮箱必须作为 chip/tag 出现在对话框里
+        // （不能依赖 isSendButtonEnabled —— 第一个 chip 后按钮就亮了，
+        //  会对后续邮箱产生假阳性）
+        return await isInviteEmailAdded(page, email);
     } finally {
         await input.dispose().catch(() => { });
     }
@@ -537,42 +810,52 @@ async function inviteGroup(groupState, hostAccount, memberEmails, browser, worke
 
         await sleep(2000);
 
+        // 2.5 检测家庭组是否存在，不存在则创建并开启 Google One 共享
+        if (await detectNoFamilyGroup(page)) {
+            await createFamilyGroup(page, wlog);
+            timer.step('Create family group');
+            await enableShareGoogleOneWithFamily(page, wlog);
+            timer.step('Enable Google One sharing');
+            // 回到家庭管理页继续邀请
+            await page.goto(GOOGLE_ONE_FAMILY_URL, { waitUntil: 'networkidle2', timeout: 30000 })
+                .catch(e => wlog.warn(`  Re-navigation to family page timeout: ${e.message}`));
+            await sleep(3000);
+        } else {
+            wlog.debug('  Family group already exists');
+        }
+
         // 3. 一次性邀请所有成员（批量填写邮箱）
         wlog.info(`  Inviting ${memberEmails.length} members in batch...`);
 
-        // 点击"邀请家庭成员"按钮 (这是一个链接，会导航到 /family/invitemembers)
-        const inviteKws = [
-            'invite', 'add member', 'add family', 'invite member',
-            '邀请', '添加成员', '添加家庭成员', '邀请家庭成员',
-            'family member', 'manage family',
-            '发送邀请',
-        ];
-        const clicked = await tryClickStrategies(page, inviteKws, wlog, 'invite_btn');
-        if (!clicked) {
-            wlog.warn(`  Could not find invite button, taking screenshot...`);
-            await takeScreenshot(page, `invite_no_btn_g${groupState.groupId}`, wlog);
-            await page.reload({ waitUntil: 'networkidle2', timeout: 15000 }).catch(() => { });
-            await sleep(2000);
-            const retryClicked = await tryClickStrategies(page, inviteKws, wlog, 'invite_btn_retry');
-            if (!retryClicked) {
-                throw new Error('Cannot find invite button after retry');
-            }
-        }
+        // 直接导航到邀请页面（对新建和已存在的家庭组都有效，避免依赖页面上
+        // "邀请"按钮的文案/DOM 结构在不同账号状态下的差异）
+        const INVITE_URL = 'https://myaccount.google.com/family/invitemembers?utm_source=g1web&utm_medium=default';
+        wlog.info('  Navigating directly to invite page...');
+        await page.goto(INVITE_URL, { waitUntil: 'networkidle2', timeout: 30000 })
+            .catch(e => wlog.warn(`  Invite page navigation: ${e.message}`));
+        await sleep(3000);
 
-        // Wait for navigation to the invite members page
-        wlog.info('  Waiting for invite page to load...');
-        for (let wait = 0; wait < 15; wait++) {
-            await sleep(1000);
-            const url = page.url();
-            if (url.includes('invitemembers')) {
-                wlog.debug(`  Invite page loaded after ${wait + 1}s`);
-                break;
+        if (!page.url().includes('invitemembers')) {
+            // 兜底：如果直接导航没到，回落到旧的点击策略
+            wlog.warn(`  Direct nav did not land on invitemembers (url=${page.url()}), falling back to button click`);
+            const inviteKws = [
+                'invite', 'add member', 'add family', 'invite member',
+                '邀请', '添加成员', '添加家庭成员', '邀请家庭成员',
+                'family member', 'manage family',
+                '发送邀请',
+            ];
+            const clicked = await tryClickStrategies(page, inviteKws, wlog, 'invite_btn');
+            if (!clicked) {
+                wlog.warn(`  Could not find invite button, taking screenshot...`);
+                await takeScreenshot(page, `invite_no_btn_g${groupState.groupId}`, wlog);
+                throw new Error('Cannot reach invite members page (direct nav + button click both failed)');
             }
-            if (wait % 5 === 4) {
-                wlog.debug(`  Still waiting for invite page... URL: ${url}`);
+            for (let wait = 0; wait < 15; wait++) {
+                await sleep(1000);
+                if (page.url().includes('invitemembers')) break;
             }
+            await sleep(2000);
         }
-        await sleep(2000); // extra wait for page content to render
 
         // 等待邀请页面中的邮箱输入框加载
         wlog.info('  Waiting for email input on invite page...');
@@ -606,7 +889,7 @@ async function inviteGroup(groupState, hostAccount, memberEmails, browser, worke
                 await takeScreenshot(page, `invite_add_email_failed_g${groupState.groupId}_${i + 1}`, wlog);
                 throw new Error(`Failed to add invite email to dialog: ${memberEmail}`);
             }
-            wlog.debug(`  Added email ${i + 1}/${memberEmails.length}: ${memberEmail}`);
+            wlog.info(`  Added email ${i + 1}/${memberEmails.length}: ${memberEmail}`);
         }
 
         wlog.info(`  All ${memberEmails.length} emails entered, sending invite...`);

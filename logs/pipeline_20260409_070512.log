@@ -1,0 +1,70 @@
+
+ ===========================================================
+
+   Gemini Family Group Pipeline
+   2-Stage Automation (Invite + Accept)
+
+ ===========================================================
+
+ Running all 2 stages...
+
+ ---- Stage 1: Send Family Invitations ----
+[0m[2026-04-08 23:05:12.402][INF] [0m
+[0m[2026-04-08 23:05:12.403][INF] ============================================================[0m
+[0m[2026-04-08 23:05:12.403][INF]   Stage 1: Send Family Invitations[0m
+[0m[2026-04-08 23:05:12.403][INF] ============================================================[0m
+[0m[2026-04-08 23:05:12.403][INF]   Chrome:      /usr/bin/google-chrome[0m
+[0m[2026-04-08 23:05:12.403][INF]   Hosts:       /usr/src/workspace/github/QQhuxuhui/auto_chrome/hosts.txt[0m
+[0m[2026-04-08 23:05:12.403][INF]   Members:     /usr/src/workspace/github/QQhuxuhui/auto_chrome/members.txt[0m
+[0m[2026-04-08 23:05:12.403][INF]   Concurrency: 1[0m
+[0m[2026-04-08 23:05:12.403][INF] ============================================================[0m
+[0m[2026-04-08 23:05:12.403][INF] [0m
+[0m[2026-04-08 23:05:12.404][INF] Parsed: 1 hosts, 2 members[0m
+[0m[2026-04-08 23:05:12.404][INF] Built 1 groups[0m
+[0m[2026-04-08 23:05:12.404][INF] Pending groups: 1[0m
+[0m[2026-04-08 23:05:13.543][INF] [36m[W0][0m Chrome started (port 9234, PID 9270)[0m
+[0m[2026-04-08 23:05:13.547][INF] [36m[W0][0m >> Inviting group 1: host=hersalanllely@gmail.com, members=2[0m
+[0m[2026-04-08 23:05:13.637][INF] [36m[W0][0m   Navigating to Google One family settings...[0m
+[0m[2026-04-08 23:05:20.317][INF] [36m[W0][0m   Current URL after navigation: https://accounts.google.com/v3/signin/identifier?continue=https%3A%2F%2Fmyaccount.google.com%2Ffamily%2Fdetails%3Futm_source%3Dg1web%26utm_medium%3Ddefault&dsh=S-1640557318%3A1775689517311044&followup=https%3A%2F%2Fmyaccount.google.com%2Ffamily%2Fdetails%3Futm_source%3Dg1web%26utm_medium%3Ddefault&osid=1&passive=1209600&service=accountsettings&flowName=GlifWebSignIn&flowEntry=ServiceLogin&ifkv=AT1y2_XiVJZmTYyhk78nY4cqYn8sC-SiCV9BtBckFpL_-IlpkB045p3PXAlDbPp_n_bh_mHVT5x0vQ[0m
+[0m[2026-04-08 23:05:20.341][INF] [36m[W0][0m   Login required, logging in as host...[0m
+[0m[2026-04-08 23:05:20.348][INF] [36m[W0][0m   [Login Step 01] State: [1memail[0m[0m
+[0m[2026-04-08 23:05:21.504][INF] [36m[W0][0m   [Login Step 02] State: [1mpassword[0m[0m
+[0m[2026-04-08 23:05:39.636][INF] [36m[W0][0m   [Login Step 03] State: [1mpassword[0m[0m
+[0m[2026-04-08 23:05:43.438][INF] [36m[W0][0m   [Login Step 04] State: [1mverify_authenticator[0m[0m
+[0m[2026-04-08 23:05:43.439][INF] [36m[W0][0m   ============================================[0m
+[0m[2026-04-08 23:05:43.439][INF] [36m[W0][0m   Auto-generating TOTP code from fa_secret[0m
+[0m[2026-04-08 23:05:43.439][INF] [36m[W0][0m   Account: hersalanllely@gmail.com[0m
+[0m[2026-04-08 23:05:43.439][INF] [36m[W0][0m   Code: 278297 (valid for 17s)[0m
+[0m[2026-04-08 23:05:43.439][INF] [36m[W0][0m   ============================================[0m
+[32m[2026-04-08 23:05:54.266][ OK] [36m[W0][0m [32m  TOTP verification completed automatically![0m
+[0m[2026-04-08 23:05:54.271][INF] [36m[W0][0m   [Login Step 05] State: [1munknown[0m[0m
+[0m[2026-04-08 23:05:54.272][INF] [36m[W0][0m   Login appears complete (URL: https://myaccount.google.com/family/details?utm_source=g1web&utm_medium=default)[0m
+[0m[2026-04-08 23:06:05.171][INF] [36m[W0][0m   No family group detected — creating one...[0m
+[31m[2026-04-08 23:06:37.243][ERR] [36m[W0][0m [31mGroup 1 failed: Family group creation did not complete — page still shows "create" prompt[0m
+[0m[2026-04-08 23:06:39.071][INF] Browsers kept open (KEEP_BROWSER_OPEN=true)[0m
+[0m[2026-04-08 23:06:39.071][INF] [0m
+[0m[2026-04-08 23:06:39.071][INF] ============================================================[0m
+[32m[2026-04-08 23:06:39.071][ OK]   Stage 1 Complete[0m
+[0m[2026-04-08 23:06:39.071][INF]   OK: 0  FAIL: 1[0m
+[0m[2026-04-08 23:06:39.071][INF] ============================================================[0m
+[0m[2026-04-08 23:06:39.071][INF] [0m
+
+ ---- Stage 2: Accept Family Invitations ----
+[0m[2026-04-08 23:06:39.236][INF] [0m
+[0m[2026-04-08 23:06:39.236][INF] ============================================================[0m
+[0m[2026-04-08 23:06:39.237][INF]   Stage 2: Accept Family Invitations[0m
+[0m[2026-04-08 23:06:39.237][INF] ============================================================[0m
+[0m[2026-04-08 23:06:39.237][INF]   Chrome:       /usr/bin/google-chrome[0m
+[0m[2026-04-08 23:06:39.237][INF]   Members:      /usr/src/workspace/github/QQhuxuhui/auto_chrome/members.txt[0m
+[0m[2026-04-08 23:06:39.237][INF]   Concurrency:  3[0m
+[0m[2026-04-08 23:06:39.237][INF]   Poll interval: 30s[0m
+[0m[2026-04-08 23:06:39.237][INF]   Poll timeout:  600s[0m
+[0m[2026-04-08 23:06:39.237][INF] ============================================================[0m
+[0m[2026-04-08 23:06:39.237][INF] [0m
+[0m[2026-04-08 23:06:39.238][INF] Pending members to accept: 0[0m
+[32m[2026-04-08 23:06:39.238][ OK] All invitations already accepted. Exiting.[0m
+
+ ===========================================================
+   Pipeline finished.
+ ===========================================================
+

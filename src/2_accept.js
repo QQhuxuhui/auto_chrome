@@ -29,7 +29,43 @@ for (let i = 0; i < args.length; i++) {
 const INVITE_WAIT_TIMEOUT = parseInt(process.env.INVITE_WAIT_TIMEOUT, 10) || 600;
 const INVITE_POLL_INTERVAL = parseInt(process.env.INVITE_POLL_INTERVAL, 10) || 30;
 
-const GMAIL_URL = 'https://mail.google.com/mail/u/0/';
+// 追加 ?hl=en 强制 Gmail UI 为英文（tabs、按钮等），
+// 但邮件正文仍是发送方原语言
+const GMAIL_URL = 'https://mail.google.com/mail/u/0/?hl=en';
+
+// ============ 严格的按钮点击器：只按 text+aria 精确匹配 ============
+async function clickByTextOrAria(page, keywords) {
+    return page.evaluate((kws) => {
+        function isVisible(el) {
+            if (!el || !el.getBoundingClientRect) return false;
+            const r = el.getBoundingClientRect();
+            const s = window.getComputedStyle(el);
+            return r.width > 0 && r.height > 0 && s.display !== 'none' && s.visibility !== 'hidden';
+        }
+        const lc = kws.map(k => k.toLowerCase());
+        const candidates = [];
+        const sel = 'button, a, [role="button"], [role="link"], input[type="submit"], input[type="button"]';
+        for (const el of document.querySelectorAll(sel)) {
+            if (!isVisible(el)) continue;
+            if (el.disabled || el.getAttribute('aria-disabled') === 'true') continue;
+            const text = (el.textContent || '').trim().toLowerCase();
+            const aria = (el.getAttribute('aria-label') || '').toLowerCase();
+            const hay = (text + ' ' + aria).trim();
+            if (!hay) continue;
+            for (const k of lc) {
+                if (hay.includes(k)) {
+                    candidates.push({ el, hay, kwLen: k.length });
+                    break;
+                }
+            }
+        }
+        if (candidates.length === 0) return null;
+        candidates.sort((a, b) => (b.kwLen - a.kwLen) || (a.hay.length - b.hay.length));
+        const best = candidates[0];
+        best.el.click();
+        return (best.el.textContent || best.el.getAttribute('aria-label') || '').trim().substring(0, 80);
+    }, keywords).catch(() => null);
+}
 
 // ============ 单个成员接受邀请 ============
 async function acceptInvite(memberAccount, browser, workerId) {
@@ -41,7 +77,7 @@ async function acceptInvite(memberAccount, browser, workerId) {
     // 0. 先清除旧 session，避免残留上一阶段或上一个账号的登录态
     await clearBrowserSession(browser, wlog);
 
-    const page = await newPage(browser);
+    let page = await newPage(browser);
 
     try {
         // 1. 登录 Gmail
@@ -112,7 +148,23 @@ async function acceptInvite(memberAccount, browser, workerId) {
         await sleep(1000);
 
         // 2. 搜索邀请邮件（轮询）
-        const searchKeywords = ['Google One', 'family group', '家庭组', 'family plan'];
+        // 使用多语言关键词 + URL pattern 双重匹配：URL pattern "family/join" 对所有
+        // 语言的邀请邮件都有效（家庭邀请邮件体里总含 myaccount.google.com/family/join/... 链接）
+        const searchKeywords = [
+            'family/join',              // URL pattern — 跨语言，最稳
+            'family group', 'google one', 'family plan',  // 英文
+            '家庭组', '家族グループ',                      // 中/日
+            'nhóm gia đình',            // 越南语
+            'grupo familiar', 'grupo de familia',        // 西/葡
+            'groupe familial', 'groupe de famille',      // 法
+            'familiengruppe',           // 德
+            'grup keluarga',            // 印尼
+            'gruppo famiglia',          // 意
+            'gia đình',                 // 越南语（短）
+            '가족 그룹',                  // 韩
+            'семейная группа',          // 俄
+            'مجموعة العائلة',           // 阿
+        ];
         const startTime = Date.now();
         let inviteFound = false;
 
@@ -172,28 +224,9 @@ async function acceptInvite(memberAccount, browser, workerId) {
             }).catch(() => { });
             await sleep(1500);
 
-            // 方法1：使用 Gmail 搜索功能
-            try {
-                const searchInput = await page.$('input[aria-label="Search mail"], input[aria-label="搜索邮件"], input[name="q"]');
-                if (searchInput) {
-                    await searchInput.click();
-                    await sleep(300);
-
-                    // 清空搜索框
-                    const mod = process.platform === 'darwin' ? 'Meta' : 'Control';
-                    await page.keyboard.down(mod);
-                    await page.keyboard.press('KeyA');
-                    await page.keyboard.up(mod);
-                    await page.keyboard.press('Backspace');
-                    await sleep(100);
-
-                    await searchInput.type('in:anywhere Google One family', { delay: 0 });
-                    await page.keyboard.press('Enter');
-                    await sleep(3000);
-                }
-            } catch (e) {
-                wlog.debug(`  Search failed: ${e.message}`);
-            }
+            // 直接扫描收件箱可见行 —— Gmail 的短语搜索不索引 URL，
+            // 曾尝试 `in:anywhere "family/join"` 始终返回 0 结果并清空 view。
+            // 对于新账号来说家庭邀请邮件通常就在最近的几十条中，row-scan 足够。
 
             // 方法2：直接在页面中查找邀请邮件（排除标签栏等非邮件元素）
             const emailFound = await page.evaluate((keywords) => {
@@ -319,39 +352,87 @@ async function acceptInvite(memberAccount, browser, workerId) {
 
         // Gmail 的邮件内容在 iframe 或特定 div 中，需要先尝试获取邮件正文区域
         // 查找接受邀请的链接/按钮
+        // 多语言 accept/join 关键词
         const acceptKws = [
-            'accept', 'join', 'accept invitation', 'join family',
-            '接受', '加入', '接受邀请', '加入家庭组',
-            'get started', '开始', 'open invitation', '打开邀请',
+            // 英文
+            'accept', 'join', 'accept invitation', 'join family', 'get started',
+            'open invitation',
+            // 中文
+            '接受', '加入', '接受邀请', '加入家庭组', '开始', '打开邀请',
+            // 越南
+            'tham gia', 'chấp nhận', 'chap nhan',
+            // 西/葡
+            'aceptar', 'unirme', 'unirse', 'aceitar', 'juntar', 'entrar',
+            // 法
+            'accepter', 'rejoindre',
+            // 德
+            'akzeptieren', 'beitreten', 'annehmen',
+            // 印尼
+            'terima', 'bergabung', 'gabung',
+            // 意
+            'accetta', 'unisciti', 'partecipa',
+            // 日/韩
+            '承諾', '参加', '参加する', '수락', '참여', '가입',
+            // 俄
+            'принять', 'присоединиться', 'присоединение',
+            // 阿
+            'قبول', 'انضمام', 'انضم',
         ];
 
         let accepted = false;
 
         // 方法1：在邮件正文中查找链接（包括 iframe 内）
         const acceptLink = await page.evaluate((keywords) => {
+            // 已知的 Google 家庭邀请链接 / 重定向包装
+            const hrefPatterns = [
+                'myaccount.google.com/family',
+                'one.google.com',
+                'families.google.com',
+                'google.com/families',
+                // Google 邮件重定向包装 —— accept 按钮的实际 href 往往是这些域
+                'notifications.googleapis.com/email/redirect',
+                'c.gle/',           // Google short URL
+                's.gle/',           // Google short URL (variant)
+                'google.com/url?',  // Google redirect
+            ];
+
+            // Gmail 会把邮件里的原始链接包装为跟踪 URL，放在 href 里，
+            // 真实目标在 data-saferedirecturl 属性里 —— 直接访问 href 会触发
+            // ERR_INVALID_REDIRECT（需要特定 referrer）。优先用 saferedirecturl。
+            function getRealHref(link) {
+                return (link.getAttribute('data-saferedirecturl') || link.href || '').trim();
+            }
+
             // 先在主文档中找
             function findAcceptLink(root) {
                 const links = root.querySelectorAll('a[href]');
+                const cand = [];
                 for (const link of links) {
                     const text = (link.textContent || '').toLowerCase().trim();
-                    const href = (link.href || '').toLowerCase();
-                    // 按链接 URL 匹配（最可靠）
-                    if (href.includes('one.google.com') ||
-                        href.includes('families.google.com') ||
-                        href.includes('myaccount.google.com/family') ||
-                        href.includes('google.com/families')) {
-                        return link.href;
+                    const realHref = getRealHref(link);
+                    const href = realHref.toLowerCase();
+                    if (!href) continue;
+                    const r = link.getBoundingClientRect();
+                    const visible = r.width > 0 && r.height > 0;
+                    if (!visible) continue;
+                    // 按真实 URL 匹配（最可靠）
+                    if (hrefPatterns.some(p => href.includes(p))) {
+                        return realHref;
                     }
-                    // 按链接文本匹配
+                    // 按链接文本匹配（多语言）
                     if (text && keywords.some(k => text.includes(k))) {
-                        // 排除 Gmail 自身的导航链接（太短或在侧边栏）
-                        const r = link.getBoundingClientRect();
                         if (r.width > 50 && r.height > 15) {
-                            return link.href;
+                            return realHref;
                         }
                     }
+                    // 兜底候选：邮件正文里按钮样式 + Google 域 的链接
+                    if (r.width > 80 && r.height > 20 &&
+                        (href.includes('google.com') || href.includes('googleusercontent.com'))) {
+                        cand.push({ href: realHref, area: r.width * r.height });
+                    }
                 }
-                return null;
+                cand.sort((a, b) => b.area - a.area);
+                return cand[0] ? cand[0].href : null;
             }
 
             // 主文档
@@ -375,10 +456,82 @@ async function acceptInvite(memberAccount, browser, workerId) {
 
         if (acceptLink) {
             wlog.info(`  Found accept link: ${acceptLink.substring(0, 100)}`);
-            await page.goto(acceptLink, { waitUntil: 'networkidle2', timeout: 30000 })
-                .catch(e => wlog.warn(`Accept link navigation timeout: ${e.message}`));
-            await sleep(3000);
-            accepted = true;
+
+            // 核心难点：Gmail 把邮件正文里的原始链接用多层跟踪 URL 包装
+            // （google.com/url?q=... → notifications.googleapis.com/email/redirect?t=...
+            //  → 真正的 myaccount.google.com/family/join/...）。
+            // 直接 page.goto 这些跟踪 URL 会返回 ERR_INVALID_REDIRECT，因为要求
+            // 来自 Gmail 上下文的 referer + 一次性 token。
+            //
+            // 正确做法：在 Gmail 页面里点击链接元素本身 —— Chrome 会用 Gmail 的
+            // referer 完成整个重定向链并到达最终的 family/join 页面。
+
+            // 先监听即将打开的 target（Gmail 通常 target="_blank" 开新 tab）
+            const browser2 = page.browser();
+            const targetPromise = new Promise((resolve) => {
+                const onTarget = (t) => {
+                    if (t.type() === 'page') {
+                        browser2.off('targetcreated', onTarget);
+                        resolve(t);
+                    }
+                };
+                browser2.on('targetcreated', onTarget);
+                setTimeout(() => {
+                    browser2.off('targetcreated', onTarget);
+                    resolve(null);
+                }, 10000);
+            });
+
+            // 点击匹配到的 <a> 元素（按 href 或 data-saferedirecturl 定位）
+            const clickOk = await page.evaluate((url) => {
+                const links = document.querySelectorAll('a[href]');
+                for (const a of links) {
+                    const h = a.getAttribute('data-saferedirecturl') || a.href || '';
+                    if (h === url || h.includes(url.substring(0, 60))) {
+                        const r = a.getBoundingClientRect();
+                        if (r.width > 0 && r.height > 0) {
+                            a.click();
+                            return true;
+                        }
+                    }
+                }
+                return false;
+            }, acceptLink).catch(() => false);
+
+            if (clickOk) {
+                wlog.info('  Clicked accept link inside Gmail');
+                const newTarget = await targetPromise;
+                if (newTarget) {
+                    const newPage = await newTarget.page().catch(() => null);
+                    if (newPage) {
+                        wlog.info('  New tab opened, switching to it');
+                        await newPage.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => { });
+                        await sleep(2000);
+                        // 把后续操作的 page 切换到新 tab
+                        try { await page.close(); } catch (_) { }
+                        page = newPage;
+                    }
+                } else {
+                    // 没开新 tab —— 可能同 tab 跳转
+                    await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => { });
+                }
+                await sleep(3000);
+                accepted = true;
+            } else {
+                // 兜底：尝试解包 google.com/url?q= 然后 goto（大部分情况下会失败，但保留）
+                let realUrl = acceptLink;
+                try {
+                    const u = new URL(acceptLink);
+                    if (u.hostname === 'www.google.com' && u.pathname === '/url') {
+                        const q = u.searchParams.get('q');
+                        if (q) realUrl = q;
+                    }
+                } catch (_) { }
+                await page.goto(realUrl, { waitUntil: 'domcontentloaded', timeout: 30000 })
+                    .catch(e => wlog.warn(`Accept link fallback navigation: ${e.message}`));
+                await sleep(3000);
+                accepted = true;
+            }
         }
 
         // 方法2：用 tryClickStrategies 直接点击邮件中的按钮
@@ -386,7 +539,7 @@ async function acceptInvite(memberAccount, browser, workerId) {
             wlog.info('  Trying to click accept button in email...');
             const clicked = await tryClickStrategies(page, acceptKws, wlog, 'accept_invite');
             if (clicked) {
-                await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 15000 }).catch(() => { });
+                await page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => { });
                 await sleep(3000);
                 // 检查是否真的导航到了新页面
                 const newUrl = page.url();
@@ -438,8 +591,8 @@ async function acceptInvite(memberAccount, browser, workerId) {
 
             if (inviteLink) {
                 wlog.info(`  Found invite link: "${inviteLink.text}" -> ${inviteLink.href.substring(0, 80)}`);
-                await page.goto(inviteLink.href, { waitUntil: 'networkidle2', timeout: 30000 })
-                    .catch(e => wlog.warn(`Navigation timeout: ${e.message}`));
+                await page.goto(inviteLink.href, { waitUntil: 'domcontentloaded', timeout: 30000 })
+                    .catch(e => wlog.warn(`Navigation: ${e.message}`));
                 await sleep(3000);
                 accepted = true;
             }
@@ -457,42 +610,94 @@ async function acceptInvite(memberAccount, browser, workerId) {
         await sleep(3000);
         await takeScreenshot(page, `accept_page_${memberAccount.email}`, wlog);
 
-        for (let confirmStep = 0; confirmStep < 8; confirmStep++) {
+        // 成功状态判定：文本包含以下任一短语
+        const successTexts = [
+            "you're now part of", "you've joined", "you are now a member",
+            "you're in the family", "welcome to your family",
+            "你已加入", "已成为", "成功加入",
+        ];
+        // 确认按钮关键词（按具体度排序，具体的优先）
+        const confirmKws = [
+            'join family group', 'join family', 'join group',
+            '加入家庭组', '加入家庭群组',
+            'accept invitation', 'accept',
+            'continue', 'confirm', 'get started', 'agree',
+            '接受', '加入', '确认', '继续', '同意', '完成', '开始',
+        ];
+
+        let joined = false;
+        for (let confirmStep = 0; confirmStep < 6; confirmStep++) {
             const pageText = await page.evaluate(() =>
                 document.body ? document.body.innerText.substring(0, 2000).toLowerCase() : ''
             ).catch(() => '');
+            const urlBefore = page.url();
 
-            wlog.debug(`  Confirm step ${confirmStep + 1}, page text: "${pageText.substring(0, 100)}..."`);
+            wlog.debug(`  Confirm step ${confirmStep + 1}: url=${urlBefore} text="${pageText.substring(0, 80)}..."`);
 
-            // 检查是否已成功加入
-            if (pageText.includes('you\'re now part of') || pageText.includes('已加入') ||
-                pageText.includes('welcome to your family') ||
-                pageText.includes('you\'ve joined') || pageText.includes('已成为') ||
-                pageText.includes('you are now a member') || pageText.includes('成功加入') ||
-                pageText.includes('you\'re in the family')) {
-                wlog.success(`  Successfully joined family group!`);
+            // 是否已经加入
+            if (successTexts.some(t => pageText.includes(t))) {
+                wlog.success('  Successfully joined family group!');
+                joined = true;
                 break;
             }
 
-            // 点击确认按钮 — "join family group" 优先
-            const confirmKws = [
-                'join family group', 'join family', 'join group',
-                '加入家庭组', '加入家庭群组',
-                'accept', 'join', 'confirm', 'continue', 'agree', 'ok', 'done',
-                'get started', 'accept invitation',
-                '接受', '加入', '确认', '继续', '同意', '确定', '完成', '开始',
-            ];
-            const confirmClicked = await tryClickStrategies(page, confirmKws, wlog, 'accept_confirm');
-            if (confirmClicked) {
-                await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 15000 }).catch(() => { });
-                await sleep(3000);
-            } else {
-                // 没找到按钮，等一下再试（页面可能还在加载）
-                if (confirmStep < 3) {
+            // 严格点击（只按 text/aria 匹配，不走 fallback 策略）
+            const clicked = await clickByTextOrAria(page, confirmKws);
+            if (!clicked && clicked !== '') {
+                if (confirmStep < 2) {
+                    // 页面可能还在加载，等一下再试
                     await sleep(3000);
-                } else {
+                    continue;
+                }
+                wlog.debug(`  No confirm button found at step ${confirmStep + 1}, stopping`);
+                break;
+            }
+            wlog.info(`  Clicked: "${clicked}"`);
+
+            // 轮询 URL/文本变化而不是 waitForNavigation —— 目标页可能是 SPA 原地更新
+            let changed = false;
+            for (let poll = 0; poll < 20; poll++) {
+                await sleep(500);
+                const curUrl = page.url();
+                if (curUrl !== urlBefore) { changed = true; break; }
+                const curText = await page.evaluate(() =>
+                    document.body ? document.body.innerText.substring(0, 2000).toLowerCase() : ''
+                ).catch(() => '');
+                if (successTexts.some(t => curText.includes(t))) {
+                    wlog.success('  Successfully joined family group!');
+                    joined = true;
+                    changed = true;
                     break;
                 }
+                // 如果按钮/文本明显变了也算推进
+                if (curText && curText !== pageText && curText.length !== pageText.length) {
+                    changed = true; break;
+                }
+            }
+            if (joined) break;
+            if (!changed) {
+                wlog.warn(`  Click "${clicked}" produced no visible change, stopping`);
+                break;
+            }
+            await sleep(1500);
+        }
+        if (!joined) {
+            // 最终再查一次是否已经实际加入（有些页面不显示成功短语，而是直接跳回 /family/details）
+            const finalUrl = page.url();
+            const finalText = await page.evaluate(() =>
+                document.body ? document.body.innerText.substring(0, 500).toLowerCase() : ''
+            ).catch(() => '');
+            // Chrome 错误页直接视为失败
+            if (finalUrl.startsWith('chrome-error://') || finalUrl.startsWith('chrome://network-error')) {
+                await takeScreenshot(page, `accept_chrome_error_${memberAccount.email}`, wlog);
+                throw new Error(`accept_navigation_failed: ${finalUrl}`);
+            }
+            if (finalUrl.includes('family/details') || finalUrl.includes('family/members') ||
+                successTexts.some(t => finalText.includes(t))) {
+                wlog.success('  Joined (detected via final state)');
+            } else {
+                await takeScreenshot(page, `accept_unconfirmed_${memberAccount.email}`, wlog);
+                throw new Error(`accept_not_confirmed: final url=${finalUrl.substring(0, 120)}`);
             }
         }
 
@@ -614,7 +819,17 @@ async function main() {
                 const alive = await isChromeAlive(worker);
                 if (!alive) await restartChrome(chromePath, worker);
 
-                const success = await acceptInvite(pending.account, worker.browser, worker.id);
+                // 硬超时保护：单个账号 accept 流程的上限，避免某个页面 hang 住把 worker 卡死。
+                // 默认 = 邀请等待超时 + 5 分钟 buffer（用于登录 + 点击确认 + 重定向）
+                const ACCEPT_HARD_TIMEOUT_MS = parseInt(process.env.ACCEPT_HARD_TIMEOUT_MS, 10) ||
+                    (INVITE_WAIT_TIMEOUT * 1000 + 300000);
+                const success = await Promise.race([
+                    acceptInvite(pending.account, worker.browser, worker.id),
+                    new Promise((_, rej) => setTimeout(
+                        () => rej(new Error(`accept_hard_timeout: exceeded ${ACCEPT_HARD_TIMEOUT_MS / 1000}s`)),
+                        ACCEPT_HARD_TIMEOUT_MS
+                    )),
+                ]);
 
                 if (success) {
                     await updateState(state => {
@@ -632,6 +847,14 @@ async function main() {
                     memberEmail: pending.account.email,
                     reason: e.message,
                 });
+                // 硬超时或严重错误时重启 Chrome —— 上一次的页面/协议调用可能仍挂起，
+                // 会污染后续账号流程
+                if (/hard_timeout|Protocol error|Session closed|Target closed/i.test(e.message || '')) {
+                    wlog.warn('  Restarting Chrome after hard failure...');
+                    try { await restartChrome(chromePath, worker); } catch (re) {
+                        wlog.error(`  Chrome restart failed: ${re.message}`);
+                    }
+                }
             }
 
             await sleep(rand(1000, 2000));

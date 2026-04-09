@@ -98,7 +98,10 @@ function parseAccounts(f) {
                 // email:pass:recovery:fa_secret 格式
                 pass = parts[0].trim();
                 recovery = parts[1].trim();
-                totp_secret = parts.slice(2).join(':').trim(); // fa码可能含特殊字符，保留完整
+                totp_secret = parts.slice(2).join(':').trim();
+                // fa_secret 后面可能跟 | 或其他后缀，只保留 base32 前缀
+                const m = totp_secret.match(/^[A-Za-z2-7]+/);
+                totp_secret = m ? m[0] : '';
             } else if (parts.length === 2) {
                 const afterLast = parts[1].trim();
                 const beforeLast = parts[0].trim();
