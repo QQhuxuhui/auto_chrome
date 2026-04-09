@@ -628,90 +628,111 @@ async function clickOAuthConsentTarget(page, email) {
  *
  * Returns true when the flow appears to have completed, false on timeout.
  */
-async function completeValidationFlow(page, validationUrl, member, wlog, { timeoutMs = 120000 } = {}) {
-    wlog.info(`  [validate] navigating directly to validation URL...`);
-    wlog.debug(`  [validate] url: ${validationUrl.slice(0, 120)}...`);
+async function completeValidationFlow(page, validationUrl, member, wlog, { timeoutMs = 180000 } = {}) {
+    wlog.info(`  [validate] >> starting validation flow for ${member.email}`);
+    wlog.info(`  [validate] >> url: ${validationUrl.slice(0, 120)}...`);
 
-    await page.goto(validationUrl, { waitUntil: 'domcontentloaded', timeout: 30000 })
-        .catch(e => wlog.warn(`  [validate] initial nav warning: ${e.message}`));
-    await sleep(2000);
+    // Fire navigation WITHOUT awaiting — we don't wait for "fully loaded",
+    // we drive the page reactively from the polling loop below. This avoids
+    // hanging on slow redirects / network stalls.
+    wlog.info(`  [validate] >> firing page.goto (not awaited)...`);
+    page.goto(validationUrl, { waitUntil: 'domcontentloaded', timeout: 60000 })
+        .then(() => wlog.debug(`  [validate]    goto resolved`))
+        .catch(e => wlog.debug(`  [validate]    goto rejected: ${e.message}`));
 
-    // If Google bounced us to its signin flow (identifier / pwd / challenge
-    // etc.), drive the login. NOTE: we must NOT match signin/continue —
-    // that's the validation page itself.
-    const urlAfterNav = page.url();
-    wlog.debug(`  [validate] landed at: ${urlAfterNav.slice(0, 120)}`);
-    const onSigninFlow =
-        /accounts\.google\.com\/(v3\/)?signin/i.test(urlAfterNav) &&
-        !urlAfterNav.includes('/signin/continue') &&
-        !urlAfterNav.includes('gemini-code-assist');
-    if (onSigninFlow) {
-        wlog.info(`  [validate] signin required — running googleLogin as ${member.email}`);
-        try {
-            await googleLogin(page, member, wlog);
-        } catch (e) {
-            wlog.warn(`  [validate] googleLogin failed: ${e.message}`);
-            return false;
-        }
-        // After login, make sure we're on the verify page by re-navigating
-        // to the validation URL. Google will fast-forward now that we have
-        // a session cookie.
-        await sleep(1500);
-        await page.goto(validationUrl, { waitUntil: 'domcontentloaded', timeout: 30000 })
-            .catch(e => wlog.warn(`  [validate] post-login nav warning: ${e.message}`));
-        await sleep(1500);
-    }
+    // Small initial grace period so Chrome can at least start the request.
+    await sleep(1500);
 
     const startedAt = Date.now();
     let lastUrl = '';
     let idleRounds = 0;
+    let loginAttempted = false;
+    let tick = 0;
 
     while (Date.now() - startedAt < timeoutMs) {
-        // 1) auto-fill TOTP if Google asks for another 2FA challenge
-        try {
-            const totpHandled = await handleTotpChallenge(page, member, wlog);
-            if (totpHandled) {
-                await sleep(4000);
-                continue;
-            }
-        } catch (_) { /* keep polling */ }
+        tick++;
+        const elapsed = Math.round((Date.now() - startedAt) / 1000);
 
-        // 2) click "Continue / Verify / Tiếp tục / ..." buttons
-        try {
-            const hit = await clickOAuthConsentTarget(page, member.email);
-            if (hit) {
-                wlog.info(`  [validate] click: ${hit}`);
-                await sleep(2500);
-                continue;
-            }
-        } catch (_) { /* keep polling */ }
-
-        // 3) detect success: either the target redirect (auth_success_gemini)
-        //    or a settled non-signin page (myaccount / gstatic / about:blank)
-        let url;
+        // Poll current URL
+        let url = '';
         try { url = page.url(); } catch (_) { url = lastUrl; }
-        if (url && url !== lastUrl) {
-            wlog.debug(`  [validate] url -> ${url.slice(0, 100)}`);
+
+        const urlChanged = url && url !== lastUrl;
+        if (urlChanged) {
+            wlog.info(`  [validate] [tick ${tick} t=${elapsed}s] url changed → ${url.slice(0, 110)}`);
             lastUrl = url;
             idleRounds = 0;
         } else {
             idleRounds++;
         }
 
+        // Success detection first — if we already landed at auth_success, stop
         if (url && /auth_success_gemini/i.test(url)) {
-            wlog.success(`  [validate] success landing reached`);
+            wlog.success(`  [validate] ✓ success landing reached at tick ${tick} (${elapsed}s)`);
             return true;
         }
-        // Settled on a non-signin Google page for several idle rounds — treat as done
-        if (idleRounds >= 4 && url && !/accounts\.google\.com\/signin/i.test(url)) {
-            wlog.success(`  [validate] settled on ${url.slice(0, 80)} — treating as done`);
+
+        // Detect signin flow (NOT signin/continue which is the verify page)
+        const onSigninFlow =
+            /accounts\.google\.com\/(v3\/)?signin/i.test(url) &&
+            !url.includes('/signin/continue') &&
+            !url.includes('gemini-code-assist');
+
+        if (onSigninFlow && !loginAttempted) {
+            loginAttempted = true;
+            wlog.info(`  [validate] [tick ${tick}] signin page detected — running googleLogin as ${member.email}`);
+            try {
+                await googleLogin(page, member, wlog);
+                wlog.info(`  [validate] googleLogin finished, post-login url: ${page.url().slice(0, 110)}`);
+                // Google may or may not have auto-followed the `continue` param.
+                // Re-navigate to the validation URL to force the verify page.
+                wlog.info(`  [validate] re-navigating to validation URL...`);
+                page.goto(validationUrl, { waitUntil: 'domcontentloaded', timeout: 60000 })
+                    .then(() => wlog.debug(`  [validate]    re-nav resolved`))
+                    .catch(e => wlog.debug(`  [validate]    re-nav rejected: ${e.message}`));
+                await sleep(2000);
+            } catch (e) {
+                wlog.warn(`  [validate] googleLogin failed: ${e.message}`);
+                return false;
+            }
+            continue;
+        }
+
+        // TOTP re-challenge
+        try {
+            const totpHandled = await handleTotpChallenge(page, member, wlog);
+            if (totpHandled) {
+                wlog.info(`  [validate] [tick ${tick}] TOTP filled`);
+                await sleep(4000);
+                continue;
+            }
+        } catch (_) { /* keep polling */ }
+
+        // Consent click (Continue / Allow / Tiếp tục / ...)
+        try {
+            const hit = await clickOAuthConsentTarget(page, member.email);
+            if (hit) {
+                wlog.info(`  [validate] [tick ${tick}] click → ${hit}`);
+                await sleep(2500);
+                continue;
+            }
+        } catch (_) { /* keep polling */ }
+
+        // Idle progress heartbeat every 5 ticks so you can see we're alive
+        if (tick % 5 === 0) {
+            wlog.info(`  [validate] [tick ${tick} t=${elapsed}s idle=${idleRounds}] url=${url.slice(0, 90)}`);
+        }
+
+        // Settled on a non-signin Google page for several idle rounds → done
+        if (idleRounds >= 6 && url && !/accounts\.google\.com\/(v3\/)?signin/i.test(url) && url !== 'about:blank') {
+            wlog.success(`  [validate] ✓ settled on ${url.slice(0, 80)} (idle ${idleRounds}) — treating as done`);
             return true;
         }
 
         await sleep(1500);
     }
 
-    wlog.warn(`  [validate] timed out after ${timeoutMs / 1000}s`);
+    wlog.warn(`  [validate] ✗ timed out after ${timeoutMs / 1000}s (last url: ${lastUrl.slice(0, 100)})`);
     return false;
 }
 
