@@ -64,31 +64,50 @@ const HARD_TIMEOUT_MS = parseInt(process.env.STAGE4_HARD_TIMEOUT_MS, 10) || 3000
 // ============ Phase 1: HTTP-only test (no browser) ============
 
 /**
- * Find the sub2api account for a member and run the test endpoint once.
- * Pure HTTP — does NOT launch Chrome, does NOT log into Google. Returns
- * a record that phase 2 uses to decide which members need browser-side
- * validation.
+ * Format milliseconds as a short human string: "1234ms" or "5.2s".
  */
-async function phase1TestOne({ member, host, client, opts, workerId }) {
-    const wlog = createWorkerLogger(workerId);
-    const name = accountName(host.email, member.email);
-    wlog.info(`>> [phase1] ${name}`);
+function fmtMs(ms) {
+    if (ms < 1000) return `${ms}ms`;
+    return `${(ms / 1000).toFixed(1)}s`;
+}
 
-    const account = await client.findAccountByName(name);
+/**
+ * Find the sub2api account for a member and run the test endpoint once.
+ * Pure HTTP — does NOT launch Chrome, does NOT log into Google.
+ */
+async function phase1TestOne({ member, host, client, opts, tag }) {
+    const name = accountName(host.email, member.email);
+    log(`${tag} ▶ START  ${name}  <${member.email}>`);
+
+    const t0 = Date.now();
+    let account;
+    try {
+        account = await client.findAccountByName(name);
+    } catch (e) {
+        log(`${tag} ✗ FAIL   findAccountByName failed: ${e.message}`, 'ERROR');
+        return { member, host, name, status: 'failed', error: e.message };
+    }
+    const t1 = Date.now();
+    log(`${tag} ·  lookup: ${fmtMs(t1 - t0)} → ${account ? `id=${account.id} status=${account.status}` : 'NOT FOUND'}`);
+
     if (!account) {
-        wlog.warn(`  [phase1] account NOT FOUND on sub2api — run stage 3 first`);
+        log(`${tag} ⚠ SKIP   account not registered on sub2api — run stage 3 first`, 'WARN');
         return { member, host, name, status: 'not_found' };
     }
-    wlog.info(`  [phase1] found id=${account.id} status=${account.status}`);
 
+    log(`${tag} ·  testing model=${opts.modelId} on id=${account.id}...`);
     const result = await client.testAccount(account.id, { modelId: opts.modelId });
+    const t2 = Date.now();
+    log(`${tag} ·  test:   ${fmtMs(t2 - t1)}`);
+
     if (result.ok) {
-        wlog.success(`  [phase1] test PASSED (id=${account.id})`);
+        log(`${tag} ✓ OK     id=${account.id} — ready to use (total ${fmtMs(t2 - t0)})`, 'SUCCESS');
         return { member, host, name, account, status: 'ok_first_try' };
     }
 
     if (result.validationUrl) {
-        wlog.warn(`  [phase1] test failed, VALIDATION REQUIRED (id=${account.id})`);
+        log(`${tag} ↻ VERIFY id=${account.id} — 403 VALIDATION_REQUIRED, will drive browser in phase 2`, 'WARN');
+        log(`${tag} ·  validation_url: ${result.validationUrl.slice(0, 110)}...`);
         return {
             member, host, name, account,
             status: 'needs_validation',
@@ -98,7 +117,8 @@ async function phase1TestOne({ member, host, client, opts, workerId }) {
     }
 
     const snippet = (result.error || '').slice(0, 200);
-    wlog.error(`  [phase1] test FAILED, no validation URL (id=${account.id}). error: ${snippet}`);
+    log(`${tag} ✗ FAIL   id=${account.id} — unrecoverable error (no validation URL)`, 'ERROR');
+    log(`${tag} ·  error: ${snippet}`, 'ERROR');
     return {
         member, host, name, account,
         status: 'failed_no_url',
@@ -107,33 +127,40 @@ async function phase1TestOne({ member, host, client, opts, workerId }) {
 }
 
 /**
- * Run phase1TestOne on all members in parallel with a simple concurrency
- * limit. Order-preserving: results[i] matches pending[i].
+ * Run phase1TestOne on all members in parallel with a concurrency limit.
+ * Order-preserving (results[i] matches pending[i]). Each in-flight test
+ * gets a `[phase1 k/n]` tag where k is the overall completion counter so
+ * logs stay readable even when interleaved.
  */
 async function phase1TestAll(pending, client, opts, limit) {
     const results = new Array(pending.length);
     let next = 0;
-    async function worker(workerId) {
+    let completed = 0;
+    const total = pending.length;
+
+    async function worker() {
         while (true) {
             const i = next++;
-            if (i >= pending.length) return;
+            if (i >= total) return;
+            const tag = `[phase1 ${String(i + 1).padStart(String(total).length, ' ')}/${total}]`;
             try {
-                results[i] = await phase1TestOne({
-                    ...pending[i], client, opts, workerId,
-                });
+                results[i] = await phase1TestOne({ ...pending[i], client, opts, tag });
             } catch (e) {
+                log(`${tag} ✗ UNCAUGHT ${pending[i].member.email}: ${e.message}`, 'ERROR');
                 results[i] = {
                     ...pending[i],
                     name: accountName(pending[i].host.email, pending[i].member.email),
                     status: 'failed',
                     error: e.message,
                 };
-                log(`[phase1] uncaught error on ${pending[i].member.email}: ${e.message}`, 'ERROR');
             }
+            completed++;
+            log(`[phase1] progress: ${completed}/${total} done`);
         }
     }
+
     const workerCount = Math.min(limit, pending.length);
-    await Promise.all(Array.from({ length: workerCount }, (_, i) => worker(i)));
+    await Promise.all(Array.from({ length: workerCount }, worker));
     return results;
 }
 
@@ -256,8 +283,17 @@ async function main() {
     }
 
     // ---------- Phase 1: pure HTTP test (no Chrome) ----------
-    log(`[phase1] Testing ${pending.length} members via sub2api API...`);
+    log('');
+    log('─'.repeat(60));
+    log(`  Phase 1 — HTTP test ${pending.length} accounts (no browser)`);
+    log('─'.repeat(60));
+    log(`  Model:       ${CLI_OPTS.modelId}`);
+    log(`  Parallelism: up to ${Math.min(CLI_OPTS.concurrency, pending.length)} concurrent sub2api test calls`);
+    log('─'.repeat(60));
+
+    const p1Started = Date.now();
     const results = await phase1TestAll(pending, client, CLI_OPTS, CLI_OPTS.concurrency);
+    const p1Elapsed = Date.now() - p1Started;
 
     const summary = {
         ok_first_try: 0,
@@ -270,7 +306,14 @@ async function main() {
         if (summary[r.status] !== undefined) summary[r.status]++;
     }
     log('');
-    log(`[phase1] Results: ok_first_try=${summary.ok_first_try}, needs_validation=${summary.needs_validation}, failed_no_url=${summary.failed_no_url}, not_found=${summary.not_found}`);
+    log('─'.repeat(60));
+    log(`  Phase 1 done in ${fmtMs(p1Elapsed)}`);
+    log(`    ✓ ok_first_try     = ${summary.ok_first_try}  (ready to use)`);
+    log(`    ↻ needs_validation = ${summary.needs_validation}  (will drive browser in phase 2)`);
+    log(`    ✗ failed_no_url    = ${summary.failed_no_url}  (unrecoverable)`);
+    log(`    ⚠ not_found        = ${summary.not_found}  (run stage 3 first)`);
+    if (summary.failed) log(`    ✗ failed           = ${summary.failed}  (uncaught errors)`);
+    log('─'.repeat(60));
     log('');
 
     // Record failed_no_url and not_found to failed.json
