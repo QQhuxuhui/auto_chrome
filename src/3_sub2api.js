@@ -47,6 +47,7 @@ const CLI_OPTS = {
     reauthAll: args.includes('--reauth-all'),
     reauthList: parseListArg('--reauth='),
     skipTest: args.includes('--skip-test'),
+    skipValidation: args.includes('--skip-validation'),
 };
 
 const HARD_TIMEOUT_MS = parseInt(process.env.SUB2API_HARD_TIMEOUT_MS, 10) || 300000;
@@ -112,6 +113,55 @@ function shouldForceReauth(memberEmail, opts) {
     if (opts.reauthAll) return true;
     const target = String(memberEmail).toLowerCase();
     return (opts.reauthList || []).some(e => String(e).toLowerCase() === target);
+}
+
+/**
+ * Extract a Google account-verification URL from a sub2api test error
+ * string. The typical failure mode for newly-added antigravity accounts
+ * is a 403 PERMISSION_DENIED with reason=VALIDATION_REQUIRED, whose
+ * response body (passed through verbatim by sub2api at the form
+ * `API 返回 403: {...json...}`) contains:
+ *
+ *   error.details[].metadata.validation_url
+ *
+ * or, equivalently, a `google.rpc.Help` link carrying the same URL.
+ * Returns the URL string on the first match, or null when:
+ *  - input is empty / not a string
+ *  - no JSON payload can be extracted
+ *  - JSON parses but contains no validation URL
+ */
+function extractValidationUrl(errorString) {
+    if (!errorString || typeof errorString !== 'string') return null;
+
+    // Locate the first `{` and try to parse from there. This tolerates both
+    // `API 返回 403: {...}` and `API 返回 403：{...}` (full/half-width colon)
+    // as well as a bare JSON body with no prefix.
+    const braceIdx = errorString.indexOf('{');
+    if (braceIdx < 0) return null;
+    const jsonCandidate = errorString.slice(braceIdx);
+
+    let payload;
+    try { payload = JSON.parse(jsonCandidate); }
+    catch (_) { return null; }
+
+    const details = payload?.error?.details;
+    if (!Array.isArray(details)) return null;
+
+    // Priority 1: ErrorInfo.metadata.validation_url (the canonical field)
+    for (const d of details) {
+        const url = d && d.metadata && d.metadata.validation_url;
+        if (typeof url === 'string' && url.startsWith('http')) return url;
+    }
+    // Priority 2: Help.links[].url matching an accounts.google.com signin URL
+    for (const d of details) {
+        if (!d || !Array.isArray(d.links)) continue;
+        for (const link of d.links) {
+            const url = link && link.url;
+            if (typeof url !== 'string') continue;
+            if (url.includes('accounts.google.com/signin')) return url;
+        }
+    }
+    return null;
 }
 
 // ============ REST client ============
@@ -218,26 +268,68 @@ class Sub2apiClient {
     }
 
     /**
-     * Runs the test endpoint. Consumes the SSE stream and returns true if no
-     * explicit error event was seen, false otherwise. Non-fatal by design.
+     * Runs the test endpoint against a specific model and consumes the SSE
+     * stream. Returns:
+     *   {
+     *     ok:            boolean — true only when a test_complete with
+     *                              success=true was observed
+     *     error:         string | null — the error message from the last
+     *                                    error event (if any), which for
+     *                                    antigravity accounts often embeds
+     *                                    a raw Google 4xx JSON body
+     *     validationUrl: string | null — parsed Google account-verification
+     *                                    URL extracted from the error body
+     *                                    (see extractValidationUrl)
+     *   }
+     * Non-fatal by design — callers decide what to do with the result.
      */
-    async testAccount(id) {
+    async testAccount(id, { modelId = 'claude-sonnet-4-6' } = {}) {
         const url = `${this.baseUrl}/api/v1/admin/accounts/${encodeURIComponent(id)}/test`;
+        const fail = (error) => ({
+            ok: false,
+            error,
+            validationUrl: extractValidationUrl(error),
+        });
+
         let res;
         try {
             res = await fetch(url, {
                 method: 'POST',
                 headers: { 'x-api-key': this.apiKey, 'content-type': 'application/json' },
-                body: JSON.stringify({}),
+                body: JSON.stringify({ model_id: modelId }),
             });
         } catch (e) {
-            return false;
+            return fail(`network: ${e.message}`);
         }
-        if (!res.ok || !res.body) return false;
+        if (!res.ok) return fail(`http ${res.status} ${res.statusText}`);
+        if (!res.body) return fail('empty response body');
+
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
         let buf = '';
-        let sawError = false;
+        let lastError = null;
+        let sawSuccess = false;
+
+        const parseEvent = (evt) => {
+            // A single SSE event may contain multiple lines; we only care
+            // about the "data: {...}" payload line.
+            for (const line of evt.split('\n')) {
+                const m = line.match(/^data:\s*(.*)$/);
+                if (!m) continue;
+                const raw = m[1];
+                if (!raw) continue;
+                let obj;
+                try { obj = JSON.parse(raw); } catch (_) { continue; }
+                if (!obj || typeof obj !== 'object') continue;
+                if (obj.type === 'error' && typeof obj.error === 'string') {
+                    lastError = obj.error;
+                }
+                if (obj.type === 'test_complete' && obj.success === true) {
+                    sawSuccess = true;
+                }
+            }
+        };
+
         try {
             while (true) {
                 const { done, value } = await reader.read();
@@ -245,20 +337,19 @@ class Sub2apiClient {
                 buf += decoder.decode(value, { stream: true })
                     .replace(/\r\n/g, '\n')
                     .replace(/\r/g, '\n');
-                // Scan each SSE event (separated by blank line)
                 let idx;
                 while ((idx = buf.indexOf('\n\n')) >= 0) {
-                    const evt = buf.slice(0, idx);
+                    parseEvent(buf.slice(0, idx));
                     buf = buf.slice(idx + 2);
-                    if (/event:\s*error/i.test(evt) || /"type"\s*:\s*"error"/i.test(evt)) {
-                        sawError = true;
-                    }
                 }
             }
-        } catch (_) {
-            return false;
+            if (buf.trim()) parseEvent(buf); // trailing event without blank line
+        } catch (e) {
+            return fail(lastError || `stream read failed: ${e.message}`);
         }
-        return !sawError;
+
+        if (sawSuccess && !lastError) return { ok: true, error: null, validationUrl: null };
+        return fail(lastError || 'test did not emit a success event');
     }
 }
 
@@ -524,6 +615,79 @@ async function clickOAuthConsentTarget(page, email) {
     }, email).catch(() => null);
 }
 
+/**
+ * Drive a Google account-verification URL to completion inside an
+ * already-logged-in `page`. Used after a sub2api test fails with a
+ * VALIDATION_REQUIRED error: Google sent us a signin/continue URL that,
+ * once visited, shows a "verify your account" confirmation page. This
+ * function navigates to that URL and then reuses the same TOTP +
+ * consent-click pollers as the OAuth flow to click past the prompts,
+ * waiting until Google redirects to a success page
+ * (auth_success_gemini / myaccount / about:blank).
+ *
+ * Returns true when the flow appears to have completed, false on timeout.
+ */
+async function completeValidationFlow(page, validationUrl, member, wlog, { timeoutMs = 90000 } = {}) {
+    wlog.info(`  [validate] navigating to account-verification URL...`);
+    wlog.debug(`  [validate] url: ${validationUrl.slice(0, 120)}...`);
+
+    await page.goto(validationUrl, { waitUntil: 'domcontentloaded', timeout: 30000 })
+        .catch(e => wlog.warn(`  [validate] initial nav warning: ${e.message}`));
+    await sleep(2000);
+
+    const startedAt = Date.now();
+    let lastUrl = '';
+    let idleRounds = 0;
+
+    while (Date.now() - startedAt < timeoutMs) {
+        // 1) auto-fill TOTP if Google asks for another 2FA challenge
+        try {
+            const totpHandled = await handleTotpChallenge(page, member, wlog);
+            if (totpHandled) {
+                await sleep(4000);
+                continue;
+            }
+        } catch (_) { /* keep polling */ }
+
+        // 2) click "Continue / Verify / Tiếp tục / ..." buttons
+        try {
+            const hit = await clickOAuthConsentTarget(page, member.email);
+            if (hit) {
+                wlog.info(`  [validate] click: ${hit}`);
+                await sleep(2500);
+                continue;
+            }
+        } catch (_) { /* keep polling */ }
+
+        // 3) detect success: either the target redirect (auth_success_gemini)
+        //    or a settled non-signin page (myaccount / gstatic / about:blank)
+        let url;
+        try { url = page.url(); } catch (_) { url = lastUrl; }
+        if (url && url !== lastUrl) {
+            wlog.debug(`  [validate] url -> ${url.slice(0, 100)}`);
+            lastUrl = url;
+            idleRounds = 0;
+        } else {
+            idleRounds++;
+        }
+
+        if (url && /auth_success_gemini/i.test(url)) {
+            wlog.success(`  [validate] success landing reached`);
+            return true;
+        }
+        // Settled on a non-signin Google page for several idle rounds — treat as done
+        if (idleRounds >= 4 && url && !/accounts\.google\.com\/signin/i.test(url)) {
+            wlog.success(`  [validate] settled on ${url.slice(0, 80)} — treating as done`);
+            return true;
+        }
+
+        await sleep(1500);
+    }
+
+    wlog.warn(`  [validate] timed out after ${timeoutMs / 1000}s`);
+    return false;
+}
+
 // ============ 单 member 编排 ============
 
 const SESSION_SAFETY_WINDOW_MS = 25 * 60 * 1000; // sub2api SessionTTL = 30min, keep 5min buffer
@@ -666,15 +830,39 @@ async function processMember({ member, host, client, browser, workerId, opts }) 
             timer.step('updateAccountCredentials');
         }
 
-        // 9. Optional test (non-fatal)
+        // 9. Optional test (non-fatal). On VALIDATION_REQUIRED errors Google
+        //    hands us an account-verification URL; if --skip-validation
+        //    isn't set, we drive that URL through the browser (same TOTP +
+        //    consent clickers as the OAuth flow) and re-run the test once.
         if (!opts.skipTest) {
-            const ok = await client.testAccount(account.id);
-            if (ok) {
-                wlog.success(`  test passed (id=${account.id})`);
-            } else {
-                wlog.warn(`  test did not pass (id=${account.id}) — non-fatal, account still counted as success`);
-            }
+            let result = await client.testAccount(account.id);
             timer.step('testAccount');
+
+            if (result.ok) {
+                wlog.success(`  test passed (id=${account.id})`);
+            } else if (result.validationUrl && !opts.skipValidation) {
+                wlog.warn(`  test failed (id=${account.id}) — validation required; running auto-verify`);
+                const verified = await completeValidationFlow(page, result.validationUrl, member, wlog);
+                timer.step('completeValidationFlow');
+                if (verified) {
+                    // Re-test to confirm the account is usable now
+                    result = await client.testAccount(account.id);
+                    timer.step('testAccount (retry)');
+                    if (result.ok) {
+                        wlog.success(`  test passed after validation (id=${account.id})`);
+                    } else {
+                        wlog.warn(`  test still failing after validation (id=${account.id}): ${(result.error || '').slice(0, 200)}`);
+                    }
+                } else {
+                    wlog.warn(`  validation flow did not complete (id=${account.id}) — non-fatal`);
+                }
+            } else if (result.validationUrl) {
+                wlog.warn(`  test failed (id=${account.id}) — validation URL present but --skip-validation set`);
+                wlog.info(`  validation_url: ${result.validationUrl}`);
+            } else {
+                const snippet = (result.error || '').slice(0, 300);
+                wlog.warn(`  test did not pass (id=${account.id}) — non-fatal. error: ${snippet}`);
+            }
         }
 
         wlog.success(`  ${mode} done: id=${account.id}`);
@@ -754,6 +942,7 @@ async function main() {
     log(`  Reauth all:   ${CLI_OPTS.reauthAll}`);
     log(`  Reauth list:  ${CLI_OPTS.reauthList.length ? CLI_OPTS.reauthList.join(',') : '(none)'}`);
     log(`  Skip test:    ${CLI_OPTS.skipTest}`);
+    log(`  Skip validate:${CLI_OPTS.skipValidation}`);
     log('='.repeat(60));
     log('');
 
@@ -853,6 +1042,7 @@ module.exports = {
     accountName,
     parseSub2apiConfig,
     shouldForceReauth,
+    extractValidationUrl,
     Sub2apiClient,
     Sub2apiError,
     captureOAuthCode,
