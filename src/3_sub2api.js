@@ -193,10 +193,75 @@ class Sub2apiClient {
     }
 }
 
+// ============ OAuth code capture via request interception ============
+
+/**
+ * Opens authUrl in `page`, intercepts the redirect to
+ * http://localhost:8085/callback, and returns the OAuth `code`.
+ * Throws on timeout (60s default) or if the callback URL carries `error=`.
+ *
+ * Relies on request interception, so port 8085 is never actually contacted
+ * and multiple workers can run in parallel without collision.
+ */
+async function captureOAuthCode(page, authUrl, wlog, { timeoutMs = 60000 } = {}) {
+    await page.setRequestInterception(true);
+
+    let resolveCode, rejectCode;
+    const codePromise = new Promise((resolve, reject) => {
+        resolveCode = resolve;
+        rejectCode = reject;
+    });
+
+    const onRequest = (req) => {
+        const url = req.url();
+        if (url.startsWith('http://localhost:8085/callback')) {
+            try {
+                const u = new URL(url);
+                const code = u.searchParams.get('code');
+                const err = u.searchParams.get('error');
+                if (err) {
+                    rejectCode(new Error(`oauth_denied:${err}`));
+                } else if (code) {
+                    resolveCode(code);
+                } else {
+                    rejectCode(new Error('oauth_callback_missing_code'));
+                }
+            } catch (e) {
+                rejectCode(new Error(`oauth_callback_parse: ${e.message}`));
+            }
+            req.abort().catch(() => { });
+            return;
+        }
+        req.continue().catch(() => { });
+    };
+
+    page.on('request', onRequest);
+
+    const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('oauth_capture_timeout')), timeoutMs)
+    );
+
+    try {
+        // Kick off navigation but do not await it — the redirect to
+        // localhost:8085 will fire request interception first and we resolve
+        // via the promise, not via goto's return value.
+        page.goto(authUrl, { waitUntil: 'domcontentloaded', timeout: timeoutMs })
+            .catch(() => { /* navigation may error due to aborted request; ignore */ });
+
+        const code = await Promise.race([codePromise, timeoutPromise]);
+        if (wlog) wlog.debug(`  OAuth code captured (${code.length} chars)`);
+        return code;
+    } finally {
+        page.off('request', onRequest);
+        await page.setRequestInterception(false).catch(() => { });
+    }
+}
+
 module.exports = {
     accountName,
     parseSub2apiConfig,
     shouldForceReauth,
     Sub2apiClient,
     Sub2apiError,
+    captureOAuthCode,
 };
