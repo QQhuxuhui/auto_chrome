@@ -1,0 +1,5 @@
+# sub2api 平台配置
+# 填写后保存即可，Stage 3 和 Stage 4 会读取此文件
+
+url=http://104.194.91.23:3001
+api_key=admin-1ce15ad15f76df928f400a8301ef5c21bd748c929e68ad125fc5126d9482aec5
