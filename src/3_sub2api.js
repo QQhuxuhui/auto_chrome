@@ -258,11 +258,29 @@ class Sub2apiClient {
             platform: 'antigravity',
             type: 'oauth',
             credentials,
+            concurrency: 10,
+            priority: 1,
+            proxy_id: 4,
+            group_ids: [4],
+            extra: {
+                allow_overages: true,
+                privacy_mode: 'privacy_set',
+            },
         });
     }
 
     async updateAccountCredentials(id, credentials) {
-        return this._request('PUT', `/api/v1/admin/accounts/${encodeURIComponent(id)}`, { credentials });
+        return this._request('PUT', `/api/v1/admin/accounts/${encodeURIComponent(id)}`, {
+            credentials,
+            concurrency: 10,
+            priority: 1,
+            proxy_id: 4,
+            group_ids: [4],
+            extra: {
+                allow_overages: true,
+                privacy_mode: 'privacy_set',
+            },
+        });
     }
 
     /**
@@ -872,6 +890,28 @@ async function processMember({ member, host, client, browser, workerId, opts }) 
             token_type: tokens.token_type || 'Bearer',
             email: tokens.email,
             project_id: tokens.project_id,
+            intercept_warmup_requests: true,
+            model_mapping: {
+                'claude-3-5-sonnet-20241022': 'claude-sonnet-4-6',
+                'claude-haiku-4-5-20251001': 'gemini-3-flash',
+                'claude-opus-4-5-20251101': 'claude-opus-4-6-thinking',
+                'claude-opus-4-6': 'claude-opus-4-6-thinking',
+                'claude-opus-4-6-thinking': 'claude-opus-4-6-thinking',
+                'claude-sonnet-4-20250514': 'claude-sonnet-4-6',
+                'claude-sonnet-4-5': 'claude-sonnet-4-5',
+                'claude-sonnet-4-5-20250929': 'claude-sonnet-4-6',
+                'claude-sonnet-4-6': 'claude-sonnet-4-6',
+                'gemini-2.5-flash-image': 'gemini-2.5-flash-image',
+                'gemini-2.5-flash-lite': 'gemini-2.5-flash-lite',
+                'gemini-3-flash': 'gemini-3-flash',
+                'gemini-3-pro-high': 'gemini-3.1-pro-high',
+                'gemini-3-pro-image': 'gemini-3.1-flash-image',
+                'gemini-3-pro-low': 'gemini-3.1-pro-low',
+                'gemini-3-pro-preview': 'gemini-3.1-pro-high',
+                'gemini-3.1-flash-image': 'gemini-3.1-flash-image',
+                'gemini-3.1-pro-high': 'gemini-3.1-pro-high',
+                'gemini-3.1-pro-low': 'gemini-3.1-pro-low',
+            },
         };
 
         // 8. Create or update
