@@ -19,7 +19,7 @@ const { googleLogin } = require('./common/google-login');
 const args = process.argv.slice(2);
 if (args.includes('--verbose') || args.includes('-v')) setVerbose(true);
 
-let concurrency = 1;
+let concurrency = 3;
 for (let i = 0; i < args.length; i++) {
     if ((args[i] === '--concurrency' || args[i] === '-c') && args[i + 1]) {
         concurrency = parseInt(args[i + 1], 10) || 1;
@@ -791,6 +791,9 @@ async function inviteGroup(groupState, hostAccount, memberEmails, browser, worke
     const timer = new StepTimer(wlog);
 
     wlog.info(`>> Inviting group ${groupState.groupId}: host=${hostAccount.email}, members=${memberEmails.length}`);
+
+    // 清理旧 session，确保不会复用之前的登录态
+    await clearBrowserSession(browser, wlog);
 
     const page = await newPage(browser);
 
