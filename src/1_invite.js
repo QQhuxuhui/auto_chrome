@@ -1003,9 +1003,53 @@ async function inviteGroup(groupState, hostAccount, memberEmails, browser, worke
         wlog.success(`>> Group ${groupState.groupId} all invites sent (${(timer.total() / 1000).toFixed(1)}s)`);
         return true;
 
-    } finally {
+    } catch (e) {
+        // 失败时关闭页面并清理
         await page.close().catch(() => { });
         await clearBrowserSession(browser, wlog);
+        throw e;
+    }
+    // 成功后 host 浏览器保持打开
+}
+
+// ============ 成员人工操作 ============
+async function processMemberManual(memberAccount, chromePath, portOffset, wlog) {
+    wlog.info(`  [Member] Opening browser for ${memberAccount.email}...`);
+    wlog.info('  [Member] Please accept the invitation manually, then close the browser to continue.');
+
+    const memberChrome = await launchRealChrome(chromePath, portOffset);
+
+    try {
+        // 提前注册断开监听，避免登录/导航期间浏览器关闭导致 promise 永远挂起
+        const disconnectedPromise = new Promise(resolve => {
+            memberChrome.browser.on('disconnected', resolve);
+        });
+
+        const page = await newPage(memberChrome.browser);
+
+        // 登录 Google
+        await page.goto('https://accounts.google.com/signin', { waitUntil: 'networkidle2', timeout: 30000 })
+            .catch(() => { });
+        await sleep(1000);
+        await googleLogin(page, memberAccount, wlog);
+
+        // 导航到 Gmail
+        await sleep(2000);
+        await page.goto('https://mail.google.com', { waitUntil: 'networkidle2', timeout: 30000 })
+            .catch(() => { });
+
+        wlog.info(`  [Member] ${memberAccount.email} — browser ready, waiting for you to close it...`);
+
+        // 等待用户手动关闭浏览器
+        await disconnectedPromise;
+
+        wlog.success(`  [Member] ${memberAccount.email} — done (browser closed by user)`);
+        try { memberChrome.proc.kill(); } catch (_) { }
+    } catch (e) {
+        wlog.error(`  [Member] ${memberAccount.email} error: ${e.message}`);
+        try { memberChrome.browser.close(); } catch (_) { }
+        try { memberChrome.proc.kill(); } catch (_) { }
+        throw e;
     }
 }
 
@@ -1118,6 +1162,42 @@ async function main() {
                         if (g) g.stage1_invited = true;
                     });
                     stats.ok++;
+
+                    // 逐个为 member 开浏览器，等待用户人工接受邀请
+                    wlog.info(`Host browser kept open. Now opening browsers for ${memberEmails.length} members...`);
+                    for (let mi = 0; mi < memberEmails.length; mi++) {
+                        const memberEmail = memberEmails[mi];
+                        const memberAccount = members.find(m => m.email === memberEmail);
+                        if (!memberAccount) {
+                            wlog.warn(`  Member account not found for ${memberEmail}`);
+                            continue;
+                        }
+                        try {
+                            const portOffset = 200 + worker.id * 20 + mi;
+                            await processMemberManual(memberAccount, chromePath, portOffset, wlog);
+                            // 标记该成员已接受（跳过 Stage 2）
+                            await updateState(state => {
+                                const g = state.find(s => s.groupId === groupState.groupId);
+                                if (g) {
+                                    const memberIdx = g.members.indexOf(memberEmail);
+                                    if (memberIdx >= 0) {
+                                        g.stage2_accepted[memberIdx] = true;
+                                    }
+                                }
+                            });
+                        } catch (e) {
+                            wlog.error(`  Member ${memberEmail} failed: ${e.message}`);
+                            await addFailedRecord({
+                                stage: '1_member_manual',
+                                groupId: groupState.groupId,
+                                memberEmail,
+                                reason: e.message,
+                            });
+                        }
+                    }
+
+                    // 清理 host 会话，避免下一个 group 复用浏览器时残留旧登录态
+                    await clearBrowserSession(worker.browser, wlog);
                 }
             } catch (e) {
                 wlog.error(`Group ${groupState.groupId} failed: ${e.message}`, e);
