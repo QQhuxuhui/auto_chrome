@@ -11,7 +11,7 @@ echo
 echo " ==========================================================="
 echo
 echo "   Gemini Family Group Pipeline"
-echo "   2-Stage Automation (Invite + Accept)"
+echo "   4-Stage Automation (Invite + Accept + Sub2api + Verify)"
 echo
 echo " ==========================================================="
 echo
@@ -99,11 +99,15 @@ run_stage() {
 }
 
 if [[ "$RUN_ALL" == "1" ]]; then
-    echo " Running all 2 stages..."
+    echo " Running all 4 stages..."
     echo
     run_stage 1 || echo " WARNING: Stage 1 had errors"
     echo
     run_stage 2 || echo " WARNING: Stage 2 had errors"
+    echo
+    run_stage 3 || echo " WARNING: Stage 3 had errors"
+    echo
+    run_stage 4 || echo " WARNING: Stage 4 had errors"
 else
     for s in $STAGE; do
         echo " ---- Running Stage $s ----"
