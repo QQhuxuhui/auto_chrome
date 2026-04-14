@@ -1,12 +1,11 @@
 /**
- * 状态管理：state.json 读写、failed.json 读写、账号解析、分组逻辑
+ * 账号解析、分组逻辑、failed.json 读写
  */
 
 const fs = require('fs');
 const path = require('path');
 const { log } = require('./logger');
 
-const STATE_FILE = path.resolve(__dirname, '..', '..', 'state.json');
 const FAILED_FILE = path.resolve(__dirname, '..', '..', 'failed.json');
 
 // ============ AsyncMutex ============
@@ -43,7 +42,7 @@ class AsyncMutex {
     }
 }
 
-const stateMutex = new AsyncMutex();
+const failedMutex = new AsyncMutex();
 
 // ============ 账号解析 ============
 function parseAccounts(f) {
@@ -158,63 +157,6 @@ function buildGroups(hosts, members) {
     return groups;
 }
 
-// ============ state.json 操作 ============
-function loadStateUnsafe() {
-    if (!fs.existsSync(STATE_FILE)) return [];
-    try {
-        const raw = fs.readFileSync(STATE_FILE, 'utf-8').trim();
-        const arr = JSON.parse(raw);
-        return Array.isArray(arr) ? arr : [];
-    } catch (_) {
-        return [];
-    }
-}
-
-function saveStateUnsafe(state) {
-    fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2), 'utf-8');
-}
-
-async function loadState() {
-    return stateMutex.runExclusive(() => loadStateUnsafe());
-}
-
-async function saveState(state) {
-    return stateMutex.runExclusive(() => saveStateUnsafe(state));
-}
-
-async function updateState(updater) {
-    return stateMutex.runExclusive(() => {
-        const state = loadStateUnsafe();
-        const result = updater(state);
-        saveStateUnsafe(state);
-        return result;
-    });
-}
-
-/**
- * 初始化 state.json：按分组创建初始状态（跳过已存在的组）
- */
-async function initState(groups) {
-    return stateMutex.runExclusive(() => {
-        const existing = loadStateUnsafe();
-        const existingIds = new Set(existing.map(g => g.groupId));
-
-        for (const g of groups) {
-            if (existingIds.has(g.groupId)) continue;
-            existing.push({
-                groupId: g.groupId,
-                host: g.host.email,
-                members: g.members.map(m => m.email),
-                stage1_invited: false,
-                stage2_accepted: g.members.map(() => false),
-            });
-        }
-
-        saveStateUnsafe(existing);
-        return existing;
-    });
-}
-
 // ============ failed.json 操作 ============
 function loadFailedUnsafe() {
     if (!fs.existsSync(FAILED_FILE)) return [];
@@ -229,7 +171,7 @@ function saveFailedUnsafe(data) {
 }
 
 async function addFailedRecord(record) {
-    return stateMutex.runExclusive(() => {
+    return failedMutex.runExclusive(() => {
         const fail = loadFailedUnsafe();
         fail.push({
             ...record,
@@ -244,11 +186,6 @@ module.exports = {
     AsyncMutex,
     parseAccounts,
     buildGroups,
-    loadState,
-    saveState,
-    updateState,
-    initState,
     addFailedRecord,
-    STATE_FILE,
     FAILED_FILE,
 };

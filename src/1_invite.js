@@ -12,7 +12,7 @@ const {
     isChromeAlive, clearBrowserSession, newPage, fastType,
     tryClickStrategies, takeScreenshot, detectPageState,
 } = require('./common/chrome');
-const { parseAccounts, buildGroups, initState, updateState, addFailedRecord } = require('./common/state');
+const { parseAccounts, buildGroups, addFailedRecord } = require('./common/state');
 const { googleLogin } = require('./common/google-login');
 
 // ============ CLI 参数 ============
@@ -1107,14 +1107,15 @@ async function main() {
     const groups = buildGroups(hosts, members);
     log(`Built ${groups.length} groups`);
 
-    const state = await initState(groups);
-
-    // 筛选未完成的组
-    const pendingGroups = state.filter(g => !g.stage1_invited);
-    log(`Pending groups: ${pendingGroups.length}`);
+    // 每个组转换为 worker 消费的扁平结构（host email + member emails）
+    const pendingGroups = groups.map(g => ({
+        groupId: g.groupId,
+        host: g.host.email,
+        members: g.members.map(m => m.email),
+    }));
 
     if (pendingGroups.length === 0) {
-        log('All groups already invited. Exiting.', 'SUCCESS');
+        log('No groups to process. Exiting.', 'SUCCESS');
         return;
     }
 
@@ -1160,10 +1161,6 @@ async function main() {
                 const success = await inviteGroup(groupState, hostAccount, memberEmails, worker.browser, worker.id);
 
                 if (success) {
-                    await updateState(state => {
-                        const g = state.find(s => s.groupId === groupState.groupId);
-                        if (g) g.stage1_invited = true;
-                    });
                     stats.ok++;
 
                     // 逐个为 member 开浏览器，等待用户人工接受邀请
@@ -1178,16 +1175,6 @@ async function main() {
                         try {
                             const portOffset = 200 + worker.id * 20 + mi;
                             await processMemberManual(memberAccount, chromePath, portOffset, wlog);
-                            // 标记该成员已接受（跳过 Stage 2）
-                            await updateState(state => {
-                                const g = state.find(s => s.groupId === groupState.groupId);
-                                if (g) {
-                                    const memberIdx = g.members.indexOf(memberEmail);
-                                    if (memberIdx >= 0) {
-                                        g.stage2_accepted[memberIdx] = true;
-                                    }
-                                }
-                            });
                         } catch (e) {
                             wlog.error(`  Member ${memberEmail} failed: ${e.message}`);
                             await addFailedRecord({

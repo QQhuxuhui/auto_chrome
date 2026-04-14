@@ -13,7 +13,7 @@ const {
     isChromeAlive, clearBrowserSession, newPage,
     tryClickStrategies, takeScreenshot, detectPageState,
 } = require('./common/chrome');
-const { parseAccounts, buildGroups, loadState, initState, updateState, addFailedRecord } = require('./common/state');
+const { parseAccounts, buildGroups, addFailedRecord } = require('./common/state');
 const { googleLogin } = require('./common/google-login');
 
 // ============ CLI 参数 ============
@@ -789,55 +789,36 @@ async function main() {
     log('');
 
     const allMembers = parseAccounts(membersFile);
-    let state = await loadState();
 
-    // 如果没有状态文件，自动从 members.txt (+ 可选 hosts.txt) 初始化一份，
-    // 并把 stage1_invited 标记为 true —— 允许跳过阶段1 直接接受已存在的邀请。
-    if (state.length === 0) {
-        log('No state found. Auto-initializing from members.txt (assumes invites already sent).', 'WARN');
-        const hostsFile = path.resolve(__dirname, '..', 'hosts.txt');
-        let groups;
-        if (fs.existsSync(hostsFile)) {
-            const hosts = parseAccounts(hostsFile);
-            if (hosts.length > 0) {
-                groups = buildGroups(hosts, allMembers);
-                log(`  Using hosts.txt: built ${groups.length} group(s)`);
-            }
+    // 从 hosts.txt + members.txt 构建分组（假设阶段1 邀请已发出），
+    // 若无 hosts.txt 则所有成员归入一个合成组。
+    const hostsFile = path.resolve(__dirname, '..', 'hosts.txt');
+    let groups;
+    if (fs.existsSync(hostsFile)) {
+        const hosts = parseAccounts(hostsFile);
+        if (hosts.length > 0) {
+            groups = buildGroups(hosts, allMembers);
+            log(`Using hosts.txt: built ${groups.length} group(s)`);
         }
-        if (!groups || groups.length === 0) {
-            // 无 hosts.txt 或为空 —— 所有成员放到一个合成组
-            groups = [{
-                groupId: 1,
-                host: { email: 'synthetic@local' },
-                members: allMembers,
-            }];
-            log(`  No hosts.txt: created 1 synthetic group with ${allMembers.length} members`);
-        }
-        await initState(groups);
-        await updateState(s => {
-            for (const g of s) g.stage1_invited = true;
-        });
-        state = await loadState();
-        log(`  State initialized: ${state.length} group(s) ready for stage 2`);
+    }
+    if (!groups || groups.length === 0) {
+        groups = [{
+            groupId: 1,
+            host: { email: 'synthetic@local' },
+            members: allMembers,
+        }];
+        log(`No hosts.txt: created 1 synthetic group with ${allMembers.length} members`);
     }
 
     // 收集所有需要接受邀请的成员
     const pendingMembers = [];
-    for (const group of state) {
-        if (!group.stage1_invited) continue;
+    for (const group of groups) {
         for (let i = 0; i < group.members.length; i++) {
-            if (!group.stage2_accepted[i]) {
-                const memberAccount = allMembers.find(m => m.email === group.members[i]);
-                if (memberAccount) {
-                    pendingMembers.push({
-                        groupId: group.groupId,
-                        memberIdx: i,
-                        account: memberAccount,
-                    });
-                } else {
-                    log(`Member account not found in file: ${group.members[i]}`, 'WARN');
-                }
-            }
+            pendingMembers.push({
+                groupId: group.groupId,
+                memberIdx: i,
+                account: group.members[i],
+            });
         }
     }
 
@@ -893,10 +874,6 @@ async function main() {
                 ]);
 
                 if (success) {
-                    await updateState(state => {
-                        const g = state.find(s => s.groupId === pending.groupId);
-                        if (g) g.stage2_accepted[pending.memberIdx] = true;
-                    });
                     stats.ok++;
                 }
             } catch (e) {
