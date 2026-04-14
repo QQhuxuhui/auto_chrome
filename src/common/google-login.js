@@ -68,11 +68,11 @@ async function googleLogin(page, account, wlog) {
                 wlog.debug(`Entering email: ${account.email}`);
                 await fastType(page, 'input[type="email"]', account.email, wlog);
                 await sleep(100);
-                await Promise.all([
-                    page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 15000 }).catch(() => { }),
-                    page.keyboard.press('Enter'),
-                ]);
-                await sleep(300);
+                await page.keyboard.press('Enter');
+                // Google 登录是 SPA，按 Enter 未必触发 navigation；直接等密码框注入即可。
+                // 若账号走 2FA/challenge 分支没有密码框，等 8s 后超时放行，下一轮 detectPageState 兜底。
+                await page.waitForSelector('input[type="password"]', { timeout: 8000 }).catch(() => { });
+                await sleep(100);
                 break;
             }
 
@@ -102,12 +102,15 @@ async function googleLogin(page, account, wlog) {
                 wlog.debug('Entering password');
                 await fastType(page, 'input[type="password"]', account.pass, wlog);
                 await sleep(100);
-                await Promise.all([
-                    page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 15000 }).catch(() => { }),
-                    page.keyboard.press('Enter'),
-                ]);
-                // 等待足够长时间让页面跳转，避免误判
-                await sleep(3000);
+                await page.keyboard.press('Enter');
+                // 密码提交后可能是 SPA 过渡（URL 客户端切换）或真实 navigation，
+                // 统一判"已离开密码页"：密码输入框消失或 URL 不在 /pwd 路径。
+                await page.waitForFunction(
+                    () => !document.querySelector('input[type="password"]:not([aria-hidden="true"])')
+                        || !/\/pwd(\/|\?|$)/i.test(location.pathname),
+                    { timeout: 8000 }
+                ).catch(() => { });
+                await sleep(500);
                 break;
             }
 
