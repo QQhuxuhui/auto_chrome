@@ -708,6 +708,7 @@ async function googleLogin(page, account, wlog) {
                 let smsSuccess = false;
 
                 for (let smsAttempt = 1; smsAttempt <= SMS_MAX_RETRIES; smsAttempt++) {
+                    let phoneSubmitted = false;
                     try {
                         wlog.info(`  [SMS] Attempt ${smsAttempt}/${SMS_MAX_RETRIES}`);
                         const smsResult = await getNumberAndWaitCode({
@@ -757,6 +758,7 @@ async function googleLogin(page, account, wlog) {
                                 if (!sendClicked) await page.keyboard.press('Enter');
                                 await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 15000 }).catch(() => {});
                                 await sleep(3000);
+                                phoneSubmitted = true;
                                 wlog.info('  [SMS] Phone number submitted, waiting for code...');
                             },
                         });
@@ -807,14 +809,17 @@ async function googleLogin(page, account, wlog) {
                         wlog.error(`  [SMS] Attempt ${smsAttempt} failed: ${smsErr.message}`);
                         if (smsAttempt < SMS_MAX_RETRIES) {
                             wlog.info(`  [SMS] Retrying with new number...`);
-                            // 尝试回到手机号输入页面（点浏览器后退或检测当前状态）
+                            // 号码还没填进页面（SMS 接口本身就失败了）→ 页面没动，直接重试，不要 goBack
+                            if (!phoneSubmitted) {
+                                await sleep(1500);
+                                continue;
+                            }
+                            // 已经提交过手机号，页面跳到验证码页/卡住 → 才需要回退
                             await page.goBack({ waitUntil: 'networkidle2', timeout: 10000 }).catch(() => {});
                             await sleep(2000);
-                            // 检查是否回到了手机号输入页
                             const retryState = await detectPageState(page, wlog);
                             if (retryState.state !== 'verify_phone' && retryState.state !== 'phone_verification') {
                                 wlog.warn(`  [SMS] Could not return to phone input (state: ${retryState.state})`);
-                                // 如果回到 identity_verify，重新选 phone
                                 if (retryState.state === 'identity_verify') {
                                     const reClicked = await tryClickStrategies(page,
                                         ['verifying your phone', 'verify your phone', 'phone number',
