@@ -341,9 +341,11 @@ async function detectPageState(page, wlog) {
     if (u.includes('challenge/pwd') && pageInfo.hasPasswordInput) {
         // 必须有可见密码框才判 password，避免在 SPA 过场期对隐藏框 fastType
         state = 'password';
-    } else if ((u.includes('challenge/totp') || u.includes('challenge/ipp')) && pageInfo.inputCount > 0) {
+    } else if ((u.includes('challenge/totp') || u.includes('challenge/ipp')) &&
+        (pageInfo.hasPhoneInput || pageInfo.hasEmailInput || pageInfo.hasPasswordInput)) {
         // Authenticator (TOTP) challenge URL is unambiguous — route to auto-TOTP flow
-        // 等输入框真正注入后再判，避免对未渲染的页面 keyboard.type 丢键
+        // 必须有可见输入框（tel/email/password 任一）才判，避免对未渲染的页面 keyboard.type 丢键
+        // 注意：TOTP 输入实际是 type=tel，但即使没匹配到也由 google-login 内部 selector 兜底
         state = 'verify_authenticator';
     } else if (t.includes('verificer, at det er dig') || t.includes('验证身份') ||
         t.includes("verify it's you") || t.includes('verify your identity') ||
@@ -400,14 +402,21 @@ async function detectPageState(page, wlog) {
             t.includes('use your fingerprint') || t.includes('指纹') ||
             t.includes('save your password') || t.includes('save credential') ||
             // 添加恢复信息
-            t.includes('add recovery') || t.includes('添加恢复')
+            t.includes('add recovery') || t.includes('添加恢复') ||
+            // 头像 / 快速登录 / 确保始终能登录 / 家庭住址
+            t.includes('add a profile picture') || t.includes('添加头像') || t.includes('个人资料照片') ||
+            t.includes('sign in faster') || t.includes('更快登录') || t.includes('更快地登录') ||
+            t.includes('make sure you can always sign in') ||
+            t.includes('确保您始终能登录') || t.includes('确保你始终能登录') ||
+            t.includes('set a home address') || t.includes('设置家庭住址') || t.includes('设置住址')
         ) &&
         // 必须同时存在可跳过的操作文本，避免把强制页面误判成 skippable
         (
             t.includes('skip') || t.includes('跳过') || t.includes("yes, i'm in") ||
             t.includes('not now') || t.includes('以后再说') ||
             t.includes('no thanks') || t.includes('不用了') ||
-            t.includes('later') || t.includes('稍后')
+            t.includes('later') || t.includes('稍后') ||
+            t.includes('cancel') || t.includes('取消')
         )
     ) {
         // "添加手机号"/passkey/保存凭据等可跳过的中间页面 — 必须在 profile_info 之前检测

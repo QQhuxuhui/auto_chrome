@@ -291,7 +291,7 @@ async function googleLogin(page, account, wlog) {
 
                 // 先用 evaluate 在 Shadow DOM 中搜索 Skip 按钮
                 const skipClicked = await page.evaluate(() => {
-                    const kws = ['skip', '跳过', 'not now', '以后再说', 'no thanks', '不用了'];
+                    const kws = ['skip', '跳过', 'not now', '以后再说', 'no thanks', '不用了', 'cancel', '取消'];
                     function findInShadow(root) {
                         const els = root.querySelectorAll('button, a, span, div[role="button"], [jscontroller]');
                         for (const el of els) {
@@ -319,7 +319,7 @@ async function googleLogin(page, account, wlog) {
                 } else {
                     // 退回 tryClickStrategies
                     const clicked = await tryClickStrategies(page,
-                        ['skip', 'not now', 'later', 'no thanks', '跳过', '以后再说', '暂时不', '稍后', '不用了'],
+                        ['skip', 'not now', 'later', 'no thanks', 'cancel', '跳过', '以后再说', '暂时不', '稍后', '不用了', '取消'],
                         wlog, 'skip_prompt');
                     if (!clicked) {
                         await tryClickStrategies(page,
@@ -612,7 +612,9 @@ async function googleLogin(page, account, wlog) {
                     });
 
                     if (!totpSelector) {
-                        wlog.warn('  TOTP input not found, will retry next loop');
+                        // 页面可能还在渲染输入框，等一下再让外层循环重新判一次状态
+                        wlog.warn('  TOTP input not found, waiting 1.5s before retry');
+                        await sleep(1500);
                         break;
                     }
                     await fastType(page, totpSelector, totpCode, wlog);
