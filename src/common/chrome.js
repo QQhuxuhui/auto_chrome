@@ -225,7 +225,17 @@ async function fastClick(page, element) {
 async function fastType(page, selector, text, wlog) {
     try {
         const success = await page.evaluate((sel, txt) => {
-            const el = document.querySelector(sel);
+            // 多个匹配时优先可见、未禁用、非 aria-hidden 的那一个，避免写到隐藏占位框
+            const candidates = Array.from(document.querySelectorAll(sel));
+            const isVisible = (e) => {
+                const r = e.getBoundingClientRect();
+                const s = window.getComputedStyle(e);
+                return r.width > 0 && r.height > 0
+                    && s.display !== 'none' && s.visibility !== 'hidden' && s.opacity !== '0'
+                    && e.getAttribute('aria-hidden') !== 'true'
+                    && !e.disabled;
+            };
+            const el = candidates.find(isVisible) || candidates[0];
             if (!el) return false;
             el.focus();
             const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
@@ -234,8 +244,9 @@ async function fastType(page, selector, text, wlog) {
             nativeInputValueSetter.call(el, txt);
             el.dispatchEvent(new Event('input', { bubbles: true }));
             el.dispatchEvent(new Event('change', { bubbles: true }));
-            el.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true }));
-            el.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true }));
+            // React 可能在 input/change 后替换 DOM 节点，重新查询并 focus，避免后续 Enter 落到 body
+            const refreshed = document.querySelector(sel);
+            if (refreshed) refreshed.focus();
             return true;
         }, selector, text);
 
@@ -327,10 +338,12 @@ async function detectPageState(page, wlog) {
 
     let state = 'unknown';
     // URL-based detection takes priority for certain patterns
-    if (u.includes('challenge/pwd')) {
+    if (u.includes('challenge/pwd') && pageInfo.hasPasswordInput) {
+        // 必须有可见密码框才判 password，避免在 SPA 过场期对隐藏框 fastType
         state = 'password';
-    } else if (u.includes('challenge/totp') || u.includes('challenge/ipp')) {
+    } else if ((u.includes('challenge/totp') || u.includes('challenge/ipp')) && pageInfo.inputCount > 0) {
         // Authenticator (TOTP) challenge URL is unambiguous — route to auto-TOTP flow
+        // 等输入框真正注入后再判，避免对未渲染的页面 keyboard.type 丢键
         state = 'verify_authenticator';
     } else if (t.includes('verificer, at det er dig') || t.includes('验证身份') ||
         t.includes("verify it's you") || t.includes('verify your identity') ||

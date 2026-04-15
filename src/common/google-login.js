@@ -68,15 +68,47 @@ async function googleLogin(page, account, wlog) {
                 wlog.debug(`Entering email: ${account.email}`);
                 await fastType(page, 'input[type="email"]', account.email, wlog);
                 await sleep(100);
+                // 显式 focus 后再按 Enter，避免 React 重渲染后焦点落到 body 上导致表单不提交
+                await page.focus('input[type="email"]').catch(() => { });
                 await page.keyboard.press('Enter');
-                // Google 登录是 SPA，按 Enter 未必触发 navigation；直接等密码框注入即可。
-                // 若账号走 2FA/challenge 分支没有密码框，等 8s 后超时放行，下一轮 detectPageState 兜底。
-                await page.waitForSelector('input[type="password"]', { timeout: 8000 }).catch(() => { });
+                // Google 登录是 SPA，按 Enter 未必触发 navigation；等"可见"密码框注入。
+                // 隐藏的占位密码框会在过场期就出现，必须等可见才算就绪，否则下轮会对隐藏框 fastType。
+                await page.waitForFunction(() => {
+                    const inputs = Array.from(document.querySelectorAll('input[type="password"]'));
+                    return inputs.some(el => {
+                        const r = el.getBoundingClientRect();
+                        const s = window.getComputedStyle(el);
+                        return r.width > 0 && r.height > 0
+                            && s.display !== 'none' && s.visibility !== 'hidden' && s.opacity !== '0'
+                            && el.getAttribute('aria-hidden') !== 'true';
+                    });
+                }, { timeout: 8000 }).catch(() => { });
                 await sleep(100);
                 break;
             }
 
             case 'password': {
+                // 诊断日志：URL / 可见密码框数量 / 累计进入次数，定位"密码框反复刷新"
+                const pwDiag = await page.evaluate(() => {
+                    const all = Array.from(document.querySelectorAll('input[type="password"]'));
+                    const visible = all.filter(el => {
+                        const r = el.getBoundingClientRect();
+                        const s = window.getComputedStyle(el);
+                        return r.width > 0 && r.height > 0
+                            && s.display !== 'none' && s.visibility !== 'hidden' && s.opacity !== '0'
+                            && el.getAttribute('aria-hidden') !== 'true';
+                    });
+                    return {
+                        url: location.href,
+                        path: location.pathname,
+                        total: all.length,
+                        visible: visible.length,
+                        currentValueLen: visible[0] ? (visible[0].value || '').length : -1,
+                    };
+                }).catch(() => null);
+                const pwSeen = stateHistory.filter(s => s === 'password').length;
+                wlog.info(`  [pwd-diag] enter#${pwSeen} path=${pwDiag && pwDiag.path} pwInputs total=${pwDiag && pwDiag.total} visible=${pwDiag && pwDiag.visible} valueLen=${pwDiag && pwDiag.currentValueLen}`);
+
                 // 检查页面上是否已有密码错误提示
                 const hasError = await page.evaluate(() => {
                     const text = (document.body ? document.body.innerText : '').toLowerCase();
@@ -102,6 +134,8 @@ async function googleLogin(page, account, wlog) {
                 wlog.debug('Entering password');
                 await fastType(page, 'input[type="password"]', account.pass, wlog);
                 await sleep(100);
+                // 显式 focus 后再按 Enter，避免 React 重渲染后焦点落到 body 上导致表单不提交
+                await page.focus('input[type="password"]:not([aria-hidden="true"])').catch(() => { });
                 await page.keyboard.press('Enter');
                 // 密码提交后可能是 SPA 过渡（URL 客户端切换）或真实 navigation，
                 // 统一判"已离开密码页"：密码输入框消失或 URL 不在 /pwd 路径。
@@ -558,39 +592,41 @@ async function googleLogin(page, account, wlog) {
                         var totpCode = code;
                     }
 
-                    // 查找输入框并填入验证码
-                    const inputFound = await page.evaluate(() => {
-                        const sels = ['input[type="tel"]', 'input[type="number"]', 'input[type="text"]',
+                    // 定位 TOTP 输入框的精确 selector（按优先级），再用 fastType 一次性写入
+                    const totpSelector = await page.evaluate(() => {
+                        const sels = ['#totpPin', '#idvPin',
                             'input[name*="totpPin" i]', 'input[name*="pin" i]', 'input[name*="code" i]',
                             'input[aria-label*="code" i]', 'input[aria-label*="验证码" i]',
-                            '#totpPin', '#idvPin'];
+                            'input[type="tel"]', 'input[type="number"]', 'input[type="text"]'];
+                        const isVisible = (e) => {
+                            const r = e.getBoundingClientRect();
+                            const s = window.getComputedStyle(e);
+                            return r.width > 0 && r.height > 0
+                                && s.display !== 'none' && s.visibility !== 'hidden' && s.opacity !== '0'
+                                && e.getAttribute('aria-hidden') !== 'true' && !e.disabled;
+                        };
                         for (const sel of sels) {
-                            for (const inp of document.querySelectorAll(sel)) {
-                                const r = inp.getBoundingClientRect();
-                                if (r.width > 0 && r.height > 0 && !inp.disabled) {
-                                    inp.focus();
-                                    inp.value = '';
-                                    return true;
-                                }
-                            }
+                            if (Array.from(document.querySelectorAll(sel)).some(isVisible)) return sel;
                         }
-                        return false;
+                        return null;
                     });
 
-                    if (inputFound) {
-                        await sleep(200);
-                        await page.keyboard.type(totpCode, { delay: 30 });
-                    } else {
-                        await fastType(page, 'input[type="tel"], input[type="text"]', totpCode, wlog);
+                    if (!totpSelector) {
+                        wlog.warn('  TOTP input not found, will retry next loop');
+                        break;
                     }
-
+                    await fastType(page, totpSelector, totpCode, wlog);
+                    await sleep(150);
+                    // 显式 focus 后 Enter，避免按钮匹配落空 + 焦点丢失
+                    await page.focus(totpSelector).catch(() => { });
+                    await page.keyboard.press('Enter');
+                    // 不等 networkidle2（太慢），改为等"离开 totp 输入页"或验证码框消失
+                    await page.waitForFunction(() => {
+                        if (!/\/challenge\/(totp|ipp)(\/|\?|$)/i.test(location.pathname)) return true;
+                        const inp = document.querySelector('#totpPin, input[name*="totpPin" i], input[name*="pin" i]');
+                        return !inp || inp.disabled;
+                    }, { timeout: 8000 }).catch(() => { });
                     await sleep(500);
-                    const clicked = await tryClickStrategies(page,
-                        ['verify', 'next', 'continue', 'confirm', '验证', '下一步', '继续', '确认'],
-                        wlog, 'totp_verify');
-                    if (!clicked) await page.keyboard.press('Enter');
-                    await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 15000 }).catch(() => {});
-                    await sleep(3000);
 
                     // 检查是否通过
                     const postState = await detectPageState(page, wlog);
