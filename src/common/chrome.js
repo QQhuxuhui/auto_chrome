@@ -375,11 +375,29 @@ async function detectPageState(page, wlog) {
     } else if (pageInfo.hasEmailInput &&
         (u.includes('identifier') || u.includes('signin'))) {
         state = 'email';
-    } else if ((t.includes('add a phone number') || t.includes('添加电话号码') ||
-        t.includes('添加手机号') || t.includes('add phone')) &&
-        (t.includes('skip') || t.includes('跳过') || t.includes("yes, i'm in") ||
-         t.includes('not now') || t.includes('以后再说'))) {
-        // "添加手机号"等可跳过的中间页面 — 必须在 profile_info 之前检测
+    } else if (
+        (
+            // 添加手机号
+            t.includes('add a phone number') || t.includes('添加电话号码') ||
+            t.includes('添加手机号') || t.includes('add phone') ||
+            // Passkey / 通行密钥 / 保存凭据
+            t.includes('passkey') || t.includes('通行密钥') ||
+            t.includes('simpler sign-in') || t.includes('simpler sign in') ||
+            t.includes('更简单的登录') ||
+            t.includes('use your fingerprint') || t.includes('指纹') ||
+            t.includes('save your password') || t.includes('save credential') ||
+            // 添加恢复信息
+            t.includes('add recovery') || t.includes('添加恢复')
+        ) &&
+        // 必须同时存在可跳过的操作文本，避免把强制页面误判成 skippable
+        (
+            t.includes('skip') || t.includes('跳过') || t.includes("yes, i'm in") ||
+            t.includes('not now') || t.includes('以后再说') ||
+            t.includes('no thanks') || t.includes('不用了') ||
+            t.includes('later') || t.includes('稍后')
+        )
+    ) {
+        // "添加手机号"/passkey/保存凭据等可跳过的中间页面 — 必须在 profile_info 之前检测
         state = 'skippable_prompt';
     } else if ((u.includes('personal-info') || u.includes('personalinfo') ||
         t.includes('birthday') || t.includes('出生日期') ||
