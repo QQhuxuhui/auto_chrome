@@ -1123,4 +1123,6 @@ module.exports = {
     Sub2apiError,
     captureOAuthCode,
     completeValidationFlow,
+    clickOAuthConsentTarget,
+    handleTotpChallenge,
 };

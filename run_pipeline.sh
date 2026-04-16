@@ -11,7 +11,7 @@ echo
 echo " ==========================================================="
 echo
 echo "   Gemini Family Group Pipeline"
-echo "   4-Stage Automation (Invite + Accept + Sub2api + Verify)"
+echo "   3-Stage Automation (Invite + Accept + Local OAuth & Verify)"
 echo
 echo " ==========================================================="
 echo
@@ -38,6 +38,14 @@ done
 # ==== Check Node.js ====
 if ! command -v node >/dev/null 2>&1; then
     echo " ERROR: Node.js not found. Install it first:"
+    echo "   curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -"
+    echo "   sudo apt install -y nodejs"
+    exit 1
+fi
+
+NODE_MAJOR=$(node -e "process.stdout.write(String(process.versions.node.split('.')[0]))")
+if [ "$NODE_MAJOR" -lt 18 ] 2>/dev/null; then
+    echo " ERROR: Node.js >= 18 required (found v$(node -v)). Stage 3 uses global fetch."
     echo "   curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -"
     echo "   sudo apt install -y nodejs"
     exit 1
@@ -84,11 +92,15 @@ run_stage() {
             node 2_accept.js "${EXTRA_ARGS[@]}"
             ;;
         3)
-            echo " ---- Stage 3: Register Accounts in sub2api ----"
+            echo " ---- Stage 3: Local OAuth + Antigravity Validation ----"
+            node 3_local_oauth.js "${EXTRA_ARGS[@]}"
+            ;;
+        3-legacy)
+            echo " ---- Stage 3 (legacy): Register Accounts in sub2api ----"
             node 3_sub2api.js "${EXTRA_ARGS[@]}"
             ;;
         4)
-            echo " ---- Stage 4: Verify Accounts on sub2api ----"
+            echo " ---- Stage 4 (legacy): Verify Accounts on sub2api ----"
             node 4_verify.js "${EXTRA_ARGS[@]}"
             ;;
         *)
@@ -99,15 +111,13 @@ run_stage() {
 }
 
 if [[ "$RUN_ALL" == "1" ]]; then
-    echo " Running all 4 stages..."
+    echo " Running all 3 stages..."
     echo
     run_stage 1 || echo " WARNING: Stage 1 had errors"
     echo
     run_stage 2 || echo " WARNING: Stage 2 had errors"
     echo
     run_stage 3 || echo " WARNING: Stage 3 had errors"
-    echo
-    run_stage 4 || echo " WARNING: Stage 4 had errors"
 else
     for s in $STAGE; do
         echo " ---- Running Stage $s ----"
