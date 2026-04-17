@@ -8,7 +8,7 @@
 const { LOG_COLORS } = require('./logger');
 const {
     sleep, fastType, detectPageState, tryClickStrategies,
-    takeScreenshot, listVisibleElements, fastClick,
+    takeScreenshot, listVisibleElements, fastClick, forceEnglishUI,
 } = require('./chrome');
 const { getNumberAndWaitCode } = require('./sms');
 const { generateTOTP, getTOTPWithTTL } = require('./totp');
@@ -38,6 +38,11 @@ async function googleLogin(page, account, wlog) {
             wlog.info(`  Login complete (reached authenticated URL: ${curUrl.substring(0, 100)})`);
             return;
         }
+
+        // 账号语言非英文时，Google 会忽略 Accept-Language 头渲染本地化 UI，
+        // 导致下方按钮文本关键词（verify/next/continue 等）全部匹配不上。
+        // 每轮先尝试切成英文，已是英文或找不到切换器时 no-op。
+        await forceEnglishUI(page, wlog);
 
         const stateInfo = await detectPageState(page, wlog);
         const state = stateInfo.state;
@@ -1017,6 +1022,13 @@ async function googleLogin(page, account, wlog) {
 
                 wlog.warn('  Unknown page state');
                 await takeScreenshot(page, `login_unknown_${account.email}_step${step}`, wlog).catch(() => {});
+
+                // 非英文页面可能因为按钮匹配不上而卡在 unknown，再尝试一次强制切换英文
+                const switched = await forceEnglishUI(page, wlog);
+                if (switched) {
+                    // 切换后页面已重载，回到循环顶部重新检测
+                    break;
+                }
 
                 // 页面可能还在加载，先等一下再操作
                 await sleep(2000);
