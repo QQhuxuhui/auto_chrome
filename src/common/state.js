@@ -62,6 +62,29 @@ function parseAccounts(f) {
         const trimmed = line.trim();
         if (!trimmed) return null;
 
+        // TAB 分隔格式：email\tpass\trecovery\ttotp_secret（后两列可选）
+        if (trimmed.includes('\t')) {
+            const cols = trimmed.split(/\t+/).map(s => s.trim());
+            const email = cols[0] || '';
+            const pass = cols[1] || '';
+            const recovery = cols[2] || '';
+            const totpRaw = cols[3] || '';
+            if (!email || !pass) {
+                log(`  Line ${i + 1}: empty email or password, skipping`, 'WARN');
+                return null;
+            }
+            if (!email.includes('@')) {
+                log(`  Line ${i + 1}: invalid email "${email}", skipping`, 'WARN');
+                return null;
+            }
+            const account = { idx: i + 1, email, pass, recovery };
+            if (totpRaw) {
+                const m = totpRaw.match(/^[A-Za-z2-7]+/);
+                if (m && m[0].length >= 16) account.totp_secret = m[0];
+            }
+            return account;
+        }
+
         const colonPos = trimmed.indexOf(':');
         const dashPos = trimmed.indexOf('----');
 
