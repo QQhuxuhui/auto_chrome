@@ -289,43 +289,13 @@ async function googleLogin(page, account, wlog) {
                 // 可跳过的中间页面（添加手机号、住址等）— 直接跳过
                 wlog.info(`  Skippable page detected (${state}), skipping...`);
 
-                // 先用 evaluate 在 Shadow DOM 中搜索 Skip 按钮
-                const skipClicked = await page.evaluate(() => {
-                    const kws = ['skip', '跳过', 'not now', '以后再说', 'no thanks', '不用了', 'cancel', '取消'];
-                    function findInShadow(root) {
-                        const els = root.querySelectorAll('button, a, span, div[role="button"], [jscontroller]');
-                        for (const el of els) {
-                            const txt = (el.textContent || '').trim().toLowerCase();
-                            const r = el.getBoundingClientRect();
-                            if (r.width > 0 && r.height > 0 && kws.some(k => txt === k || txt.includes(k))) {
-                                el.click();
-                                return txt;
-                            }
-                        }
-                        const allEls = root.querySelectorAll('*');
-                        for (const el of allEls) {
-                            if (el.shadowRoot) {
-                                const result = findInShadow(el.shadowRoot);
-                                if (result) return result;
-                            }
-                        }
-                        return null;
-                    }
-                    return findInShadow(document);
-                }).catch(() => null);
-
-                if (skipClicked) {
-                    wlog.debug(`  Clicked skip via evaluate: "${skipClicked}"`);
-                } else {
-                    // 退回 tryClickStrategies
-                    const clicked = await tryClickStrategies(page,
-                        ['skip', 'not now', 'later', 'no thanks', 'cancel', '跳过', '以后再说', '暂时不', '稍后', '不用了', '取消'],
-                        wlog, 'skip_prompt');
-                    if (!clicked) {
-                        await tryClickStrategies(page,
-                            ['next', 'continue', 'done', '下一步', '继续', '完成'],
-                            wlog, 'skip_next');
-                    }
+                const clicked = await tryClickStrategies(page,
+                    ['skip', 'not now', 'later', 'no thanks', 'cancel', '跳过', '以后再说', '暂时不', '稍后', '不用了', '取消'],
+                    wlog, 'skip_prompt');
+                if (!clicked) {
+                    await tryClickStrategies(page,
+                        ['next', 'continue', 'done', '下一步', '继续', '完成'],
+                        wlog, 'skip_next');
                 }
                 await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 10000 }).catch(() => { });
                 await sleep(2000);
