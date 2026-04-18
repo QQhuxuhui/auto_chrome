@@ -62,8 +62,8 @@ function registerChromeTools({ registry, logger, config }) {
         async handler({ sessionId }) {
             const s = registry.get(sessionId);
             try { await s.browser.close(); } catch (_) {}
-            try { s.proc.kill(); } catch (_) {}
-            try { fs.rmSync(s.dataDir, { recursive: true, force: true }); } catch (_) {}
+            try { if (s.proc) s.proc.kill(); } catch (_) {}
+            try { if (s.dataDir) fs.rmSync(s.dataDir, { recursive: true, force: true }); } catch (_) {}
             registry.close(sessionId);
             logger.info(`chrome.close ok sessionId=${sessionId}`);
             return { ok: true };
@@ -73,6 +73,71 @@ function registerChromeTools({ registry, logger, config }) {
     tools['chrome.list'] = {
         schema: { type: 'object', properties: {} },
         async handler() { return { sessions: registry.list() }; },
+    };
+
+    tools['chrome.connect'] = {
+        schema: {
+            type: 'object',
+            properties: {
+                browserURL: { type: 'string' },
+                wsEndpoint: { type: 'string' },
+                tags: { type: 'object' },
+            },
+        },
+        async handler({ browserURL, wsEndpoint, tags = {} } = {}) {
+            if (!browserURL && !wsEndpoint) throw new McpError(CODES.PRECONDITION_FAILED, 'browserURL or wsEndpoint required');
+            const puppeteer = require('puppeteer-core');
+            let browser;
+            try {
+                browser = browserURL
+                    ? await puppeteer.connect({ browserURL, defaultViewport: null })
+                    : await puppeteer.connect({ browserWSEndpoint: wsEndpoint, defaultViewport: null });
+            } catch (e) {
+                throw new McpError(CODES.CHROME_PROTOCOL_ERROR, `connect failed: ${e.message}`, { cause: e });
+            }
+            const sessionId = registry.create({
+                workerId: registry.list().length,
+                browser, proc: null,
+                dataDir: null,
+                debugPort: null,
+                tags: { ...tags, connected: 'true' },
+            });
+            return { sessionId };
+        },
+    };
+
+    tools['chrome.clear_google_cookies'] = {
+        schema: { type: 'object', required: ['sessionId'], properties: { sessionId: { type: 'string' } } },
+        async handler({ sessionId }) {
+            const s = registry.get(sessionId);
+            const wlog = logger.child(`[${sessionId}]`);
+            await clearBrowserSession(s.browser, wlog);
+            return { ok: true };
+        },
+    };
+
+    tools['chrome.evaluate'] = {
+        schema: {
+            type: 'object',
+            required: ['sessionId', 'script'],
+            properties: {
+                sessionId: { type: 'string' },
+                script: { type: 'string' },
+                args: { type: 'array' },
+            },
+        },
+        async handler({ sessionId, script, args = [] }) {
+            const s = registry.get(sessionId);
+            const pages = await s.browser.pages();
+            const page = pages[0] || await s.browser.newPage();
+            try {
+                const fn = new Function(...(args.map((_, i) => `arg${i}`)), `return (${script});`);
+                const value = await page.evaluate(fn, ...args);
+                return { value };
+            } catch (e) {
+                throw new McpError(CODES.CHROME_PROTOCOL_ERROR, `evaluate failed: ${e.message}`, { cause: e });
+            }
+        },
     };
 
     return tools;
