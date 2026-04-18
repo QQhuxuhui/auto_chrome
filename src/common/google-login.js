@@ -10,7 +10,6 @@ const {
     sleep, fastType, detectPageState, tryClickStrategies,
     takeScreenshot, listVisibleElements, fastClick, forceEnglishUI,
 } = require('./chrome');
-const { getNumberAndWaitCode } = require('./sms');
 const { generateTOTP, getTOTPWithTTL } = require('./totp');
 
 const MAX_LOGIN_STEPS = 25;
@@ -22,7 +21,8 @@ const MAX_LOGIN_STEPS = 25;
  * @param {Object} wlog - worker logger
  * @returns {Promise<void>} - 登录完成后返回（page 保持在登录后的目标页面）
  */
-async function googleLogin(page, account, wlog) {
+async function googleLogin(page, account, wlog, opts = {}) {
+    const smsProvider = opts.smsProvider || require('./sms');
     const stateHistory = [];
 
     for (let step = 0; step < MAX_LOGIN_STEPS; step++) {
@@ -686,7 +686,7 @@ async function googleLogin(page, account, wlog) {
                     let phoneSubmitted = false;
                     try {
                         wlog.info(`  [SMS] Attempt ${smsAttempt}/${SMS_MAX_RETRIES}`);
-                        const smsResult = await getNumberAndWaitCode({
+                        const smsResult = await smsProvider.getNumberAndWaitCode({
                             service: process.env.HERO_SMS_SERVICE || 'go',
                             country: parseInt(process.env.HERO_SMS_COUNTRY || '0', 10),
                             timeout: parseInt(process.env.HERO_SMS_TIMEOUT || '120', 10),
