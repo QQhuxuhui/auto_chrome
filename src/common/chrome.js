@@ -78,7 +78,6 @@ const BASE_DEBUG_PORT = parseInt(process.env.DEBUG_PORT, 10) || 9234;
 
 function buildChromeArgs({ workerId = 0, dataDir, debugPort, extraArgs = [], lang = 'en-US', viewport = '1280,800' }) {
     const resolvedDataDir = dataDir || path.resolve(__dirname, '..', `chrome_data_temp_pipeline_${workerId}`);
-    if (!fs.existsSync(resolvedDataDir)) fs.mkdirSync(resolvedDataDir, { recursive: true });
     return [
         `--remote-debugging-port=${debugPort}`,
         `--user-data-dir=${resolvedDataDir}`,
@@ -113,6 +112,7 @@ async function launchRealChrome(chromePath, workerId = 0, opts = {}) {
     const wlog = createWorkerLogger(workerId);
     const debugPort = opts.debugPort || (BASE_DEBUG_PORT + workerId);
     const dataDir = opts.dataDir || path.resolve(__dirname, '..', `chrome_data_temp_pipeline_${workerId}`);
+    if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
     const args = buildChromeArgs({ workerId, dataDir, debugPort, extraArgs: opts.extraArgs, lang: opts.lang, viewport: opts.viewport });
 
     wlog.debug(`Launch Chrome: debugPort=${debugPort}, dataDir=${dataDir}`);

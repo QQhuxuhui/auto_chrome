@@ -18,3 +18,18 @@ test('buildChromeArgs falls back to default pipeline dataDir when not provided',
     const args = buildChromeArgs({ workerId: 2, debugPort: 9236 });
     assert.ok(args.some(a => a.includes('chrome_data_temp_pipeline_2')));
 });
+
+test('buildChromeArgs preserves stealth flag set', () => {
+    const args = buildChromeArgs({ workerId: 0, dataDir: '/tmp/x', debugPort: 9234 });
+    const required = [
+        '--no-first-run', '--no-default-browser-check', '--disable-sync',
+        '--disable-features=InProductHelp', '--lang=en-US', '--accept-lang=en-US,en',
+        '--disable-gpu', '--disable-dev-shm-usage', '--disable-background-networking',
+        '--disable-background-timer-throttling', '--disable-backgrounding-occluded-windows',
+        '--disable-renderer-backgrounding', '--disable-hang-monitor',
+        '--disable-popup-blocking', '--disable-prompt-on-repost', '--disable-extensions',
+        '--disable-component-update', '--disable-domain-reliability',
+        '--no-sandbox', '--metrics-recording-only',
+    ];
+    for (const flag of required) assert.ok(args.includes(flag), `missing ${flag}`);
+});
