@@ -6,7 +6,8 @@ const { McpError, CODES } = require('../errors');
 const COMMON_PATH = path.resolve(__dirname, '..', '..', '..', 'src', 'common');
 const { googleLogin } = require(path.join(COMMON_PATH, 'google-login'));
 
-const REJECTED_URL_PATTERN = /\/v3\/signin\/rejected/;
+// Fix 5: broaden pattern to match v3/signin/rejected, signin/v2/rejected, signin/rejected/...
+const REJECTED_URL_PATTERN = /\/signin\/[^?]*rejected/;
 
 function registerGoogleTools({ registry, logger, config }) {
     const tools = {};
@@ -33,6 +34,7 @@ function registerGoogleTools({ registry, logger, config }) {
                 startUrl: { type: 'string', default: 'https://accounts.google.com/signin' },
             },
         },
+        // Returns: { status: 'ok'|'rejected'|'timeout'|'stuck'|'sms_needed', finalUrl, stateHistory, screenshot? }
         async handler({ sessionId, account, smsBehavior = 'auto', timeoutMs = 180000, startUrl = 'https://accounts.google.com/signin' }) {
             return registry.withLock(sessionId, async () => {
                 const s = registry.get(sessionId);
@@ -46,12 +48,19 @@ function registerGoogleTools({ registry, logger, config }) {
 
                 // Determine smsProvider based on smsBehavior
                 let smsProvider = null;
+                // Fix 1: fall back to common/sms when providers/sms module not yet present
                 if (smsBehavior === 'auto') {
                     try {
                         const { getProvider } = require('../providers/sms');
                         smsProvider = getProvider(config.smsProvider, config);
                     } catch (e) {
-                        throw new McpError(CODES.SMS_PROVIDER_ERROR, `SMS provider '${config.smsProvider}' unavailable: ${e.message}`);
+                        // providers/sms module doesn't exist yet — fall back to common/sms directly
+                        // (same module google-login.js lazy-loads by default).
+                        if (e.code === 'MODULE_NOT_FOUND') {
+                            smsProvider = require(path.join(COMMON_PATH, 'sms'));
+                        } else {
+                            throw new McpError(CODES.SMS_PROVIDER_ERROR, `SMS provider '${config.smsProvider}' unavailable: ${e.message}`);
+                        }
                     }
                 } else if (smsBehavior === 'skip') {
                     smsProvider = {
@@ -66,13 +75,11 @@ function registerGoogleTools({ registry, logger, config }) {
 
                 const page = await s.browser.newPage();
 
-                // Rejected-page watcher: polls URL, short-circuits if rejected landing detected
-                let rejected = false;
+                // Fix 4: remove dead `rejected` boolean — only emit event
                 const rejectWatcher = setInterval(() => {
                     try {
                         const url = page.url();
                         if (REJECTED_URL_PATTERN.test(url)) {
-                            rejected = true;
                             page.emit('__mcp_rejected');
                         }
                     } catch (_) {}
@@ -82,18 +89,29 @@ function registerGoogleTools({ registry, logger, config }) {
                     await page.goto(startUrl, { waitUntil: 'domcontentloaded', timeout: 30000 })
                         .catch(e => wlog.warn(`signin nav: ${e.message}`));
 
-                    const loginPromise = googleLogin(page, effectiveAccount, wlog, { smsProvider });
-                    const rejectPromise = new Promise((_, rej) => {
-                        page.once('__mcp_rejected', () => rej(new McpError(CODES.GOOGLE_LOGIN_REJECTED,
-                            'Google rejected signin: "Couldn\'t sign you in"')));
+                    // Fix 3: clearTimeout + swallow losing promise to avoid leaks
+                    let timeoutId;
+                    const timeoutPromise = new Promise((_, rej) => {
+                        timeoutId = setTimeout(() => rej(new McpError(CODES.TIMEOUT, `login timed out after ${timeoutMs}ms`)), timeoutMs);
                     });
-                    const timeoutPromise = new Promise((_, rej) => setTimeout(
-                        () => rej(new McpError(CODES.TIMEOUT, `login timed out after ${timeoutMs}ms`)),
-                        timeoutMs));
+                    const loginPromise = googleLogin(page, effectiveAccount, wlog, { smsProvider });
+                    // Attach noop catcher so losing promise doesn't become unhandled rejection
+                    loginPromise.catch(() => {});
+
+                    const rejectPromise = new Promise((_, rej) => {
+                        // Fix: no escaped apostrophe — write it directly
+                        page.once('__mcp_rejected', () => rej(new McpError(CODES.GOOGLE_LOGIN_REJECTED,
+                            "Google rejected signin: \"Couldn't sign you in\"")));
+                    });
 
                     try {
                         await Promise.race([loginPromise, rejectPromise, timeoutPromise]);
                     } catch (e) {
+                        // Fix 2: map "SMS skipped" to status sms_needed per spec §5.6
+                        if (/SMS skipped/.test(e.message || '')) {
+                            const screenshot = await captureBase64Screenshot(page).catch(() => null);
+                            return { status: 'sms_needed', finalUrl: page.url(), stateHistory: [], screenshot };
+                        }
                         if (e instanceof McpError) {
                             const screenshot = await captureBase64Screenshot(page).catch(() => null);
                             return {
@@ -108,6 +126,8 @@ function registerGoogleTools({ registry, logger, config }) {
                             return { status: 'stuck', finalUrl: page.url(), stateHistory: [], screenshot };
                         }
                         throw e;
+                    } finally {
+                        clearTimeout(timeoutId);
                     }
 
                     return { status: 'ok', finalUrl: page.url(), stateHistory: [] };
