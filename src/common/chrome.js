@@ -690,6 +690,51 @@ async function listVisibleElements(page) {
     }).catch(() => []);
 }
 
+// 强制把 Google 页面 UI 切到英文：点击底部语言切换器里的 "English"。
+// 已登录账号会让 Google 忽略 Accept-Language 头，改用账号语言偏好渲染。
+// 切换器展开后 "English" 选项文本不随当前语言变化，所以能稳定匹配。
+// 已是英文或找不到切换器时 no-op。
+async function forceEnglishUI(page, wlog) {
+    const result = await page.evaluate(async () => {
+        if ((document.documentElement.lang || '').toLowerCase().startsWith('en')) {
+            return { skipped: 'already_en' };
+        }
+
+        const isVisible = (el) => {
+            const r = el.getBoundingClientRect();
+            const s = window.getComputedStyle(el);
+            return r.width > 0 && r.height > 0
+                && s.display !== 'none' && s.visibility !== 'hidden' && s.opacity !== '0';
+        };
+
+        // Google 的语言切换器特征：aria-haspopup="listbox"，位于页脚附近。
+        // 取最靠下的那个，排除其它弹出菜单。
+        const switchers = Array.from(document.querySelectorAll('[aria-haspopup="listbox"]'))
+            .filter(isVisible)
+            .sort((a, b) => b.getBoundingClientRect().top - a.getBoundingClientRect().top);
+        if (!switchers.length) return { skipped: 'no_switcher' };
+
+        switchers[0].click();
+        await new Promise(r => setTimeout(r, 500));
+
+        // "English" 在语言弹层里永远是英文字面量，与页面当前语言无关。
+        const opt = Array.from(document.querySelectorAll('[role="option"], li, [data-value]'))
+            .find(el => isVisible(el) && /^english\b/i.test((el.textContent || '').trim()));
+        if (!opt) return { skipped: 'no_english_option' };
+
+        opt.click();
+        return { clicked: true, currentLang: document.documentElement.lang || 'unknown' };
+    }).catch(e => ({ error: e.message }));
+
+    if (result && result.clicked) {
+        wlog.info(`  Forced UI → English (was lang="${result.currentLang}")`);
+        await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 8000 }).catch(() => { });
+        await sleep(1500);
+        return true;
+    }
+    return false;
+}
+
 async function takeScreenshot(page, label, wlog) {
     try {
         const safeName = label.replace(/[^a-zA-Z0-9_-]/g, '_');
@@ -755,6 +800,7 @@ module.exports = {
     clickAnyElementByText,
     tryClickStrategies,
     listVisibleElements,
+    forceEnglishUI,
     takeScreenshot,
     newPage,
 };

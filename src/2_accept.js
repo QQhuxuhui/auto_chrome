@@ -67,8 +67,16 @@ async function maybePause(label, wlog) {
 }
 
 // ============ 严格的按钮点击器：只按 text+aria 精确匹配 ============
+// one.google.com/family/join 的 "Accept invitation" 是 Material Design
+// 按钮，内部绑在 pointerdown/pointerup 上，合成 el.click() 不触发。
+// 做法：先在 evaluate 里按 text/aria 严格匹配并打标记，再回到 Node 侧
+// 用 ElementHandle.click()（走 CDP 发真实鼠标事件）。JS click 兜底。
+const CLICK_MARK_ATTR = 'data-auto-click-target';
+
 async function clickByTextOrAria(page, keywords) {
-    return page.evaluate((kws) => {
+    const label = await page.evaluate((kws, attr) => {
+        document.querySelectorAll(`[${attr}]`).forEach(el => el.removeAttribute(attr));
+
         function isVisible(el) {
             if (!el || !el.getBoundingClientRect) return false;
             const r = el.getBoundingClientRect();
@@ -95,9 +103,34 @@ async function clickByTextOrAria(page, keywords) {
         if (candidates.length === 0) return null;
         candidates.sort((a, b) => (b.kwLen - a.kwLen) || (a.hay.length - b.hay.length));
         const best = candidates[0];
-        best.el.click();
+        best.el.setAttribute(attr, '1');
         return (best.el.textContent || best.el.getAttribute('aria-label') || '').trim().substring(0, 80);
-    }, keywords).catch(() => null);
+    }, keywords, CLICK_MARK_ATTR).catch(() => null);
+
+    if (label === null) return null;
+
+    const handle = await page.$(`[${CLICK_MARK_ATTR}]`).catch(() => null);
+    try {
+        if (handle) {
+            // ElementHandle.click 走 CDP：滚入视图 + 真实 mousedown/mouseup
+            await handle.click({ delay: 30 });
+        } else {
+            throw new Error('handle_missing');
+        }
+    } catch (_) {
+        // 兜底：被遮挡/脱离视口时用 JS click
+        await page.evaluate((attr) => {
+            const el = document.querySelector(`[${attr}]`);
+            if (el) el.click();
+        }, CLICK_MARK_ATTR).catch(() => { });
+    } finally {
+        if (handle) await handle.dispose().catch(() => { });
+        await page.evaluate((attr) => {
+            document.querySelectorAll(`[${attr}]`).forEach(el => el.removeAttribute(attr));
+        }, CLICK_MARK_ATTR).catch(() => { });
+    }
+
+    return label;
 }
 
 // ============ 单个成员接受邀请 ============
