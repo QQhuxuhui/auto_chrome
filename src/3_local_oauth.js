@@ -475,7 +475,9 @@ async function processMember({ member, host, browser, workerId, opts }) {
         if (!probe.ok && probe.validationUrl && !opts.skipValidation) {
             wlog.warn(`  validation_url detected → driving validation flow`);
             wlog.info(`  ${probe.validationUrl.slice(0, 120)}...`);
-            await clearBrowserSession(browser, wlog);
+            // 故意不清 session：保留 googleLogin 刚建立的 accounts.google.com
+            // cookie，让 validationUrl 能直接 follow continue= 进入验证页，
+            // 避免二次登录（-1 次密码 / -1 次 TOTP，降低 Google 风控挑战）。
             const vpage = await newPage(browser);
             try {
                 const ok = await completeValidationFlow(vpage, probe.validationUrl, member, wlog);
