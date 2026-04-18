@@ -722,7 +722,19 @@ async function completeValidationFlow(page, validationUrl, member, wlog, { timeo
             wlog.info(`  [validate] [tick ${tick}] signin page detected — running googleLogin as ${member.email}`);
             try {
                 await googleLogin(page, member, wlog);
-                wlog.info(`  [validate] googleLogin finished, post-login url: ${page.url().slice(0, 110)}`);
+                const postLoginUrl = page.url();
+                wlog.info(`  [validate] googleLogin finished, post-login url: ${postLoginUrl.slice(0, 110)}`);
+                // googleLogin 内部可能已把页面带到 auth_success_gemini（例如 SMS 后
+                // Google 直接 follow 了 continue=）。此时再 re-nav 会把成功的会话
+                // 打回 signin 导致 stuck。直接判定完成。
+                try {
+                    const u = new URL(postLoginUrl);
+                    if (u.host === 'developers.google.com' &&
+                        u.pathname.includes('/auth_success_gemini')) {
+                        wlog.success(`  [validate] ✓ googleLogin landed directly on success URL`);
+                        return true;
+                    }
+                } catch (_) { /* malformed, fall through to re-nav */ }
                 // Google may or may not have auto-followed the `continue` param.
                 // Re-navigate to the validation URL to force the verify page.
                 wlog.info(`  [validate] re-navigating to validation URL...`);
