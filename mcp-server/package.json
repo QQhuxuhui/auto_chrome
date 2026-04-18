@@ -1,0 +1,19 @@
+{
+  "name": "stealth-chrome-mcp",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Atomic browser + Google login tools as an MCP server for auto_chrome",
+  "type": "commonjs",
+  "bin": { "stealth-chrome-mcp": "./bin/server.js" },
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node bin/server.js",
+    "test": "node --test test/"
+  },
+  "engines": { "node": ">=18" },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "puppeteer-core": "^24.2.1",
+    "undici": "^7.25.0"
+  }
+}
