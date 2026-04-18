@@ -24,6 +24,18 @@ const path = require('path');
 const http = require('http');
 const { randomUUID } = require('crypto');
 
+// Node 内置 fetch (undici) 默认不读 HTTPS_PROXY 环境变量。
+// 若环境里配置了代理（如 WSL2 下的 127.0.0.1:10808），需要显式注入 dispatcher。
+{
+    const proxyUrl = process.env.HTTPS_PROXY || process.env.https_proxy
+        || process.env.HTTP_PROXY || process.env.http_proxy;
+    if (proxyUrl) {
+        const { setGlobalDispatcher, ProxyAgent } = require('undici');
+        setGlobalDispatcher(new ProxyAgent(proxyUrl));
+        console.log(`[proxy] Node fetch routed through ${proxyUrl}`);
+    }
+}
+
 const { log, createWorkerLogger, setVerbose, StepTimer } = require('./common/logger');
 const {
     sleep, rand, findChrome, launchRealChrome, restartChrome,
