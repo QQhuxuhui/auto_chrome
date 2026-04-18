@@ -76,26 +76,21 @@ function findChrome() {
 // ============ Chrome 启动 ============
 const BASE_DEBUG_PORT = parseInt(process.env.DEBUG_PORT, 10) || 9234;
 
-async function launchRealChrome(chromePath, workerId = 0) {
-    const wlog = createWorkerLogger(workerId);
-    const debugPort = BASE_DEBUG_PORT + workerId;
-    const CHROME_DATA = path.resolve(__dirname, '..', `chrome_data_temp_pipeline_${workerId}`);
-    if (!fs.existsSync(CHROME_DATA)) fs.mkdirSync(CHROME_DATA, { recursive: true });
-
-    wlog.debug(`Launch Chrome: debugPort=${debugPort}, dataDir=${CHROME_DATA}`);
-
-    const proc = spawn(chromePath, [
+function buildChromeArgs({ workerId = 0, dataDir, debugPort, extraArgs = [], lang = 'en-US', viewport = '1280,800' }) {
+    const resolvedDataDir = dataDir || path.resolve(__dirname, '..', `chrome_data_temp_pipeline_${workerId}`);
+    if (!fs.existsSync(resolvedDataDir)) fs.mkdirSync(resolvedDataDir, { recursive: true });
+    return [
         `--remote-debugging-port=${debugPort}`,
-        `--user-data-dir=${CHROME_DATA}`,
+        `--user-data-dir=${resolvedDataDir}`,
         '--no-first-run',
         '--no-default-browser-check',
         '--disable-sync',
         '--disable-features=InProductHelp',
         // 强制 UI 语言为英文，避免不同国家账号返回不同语言的 Google 页面
         // （Google 服务器根据 Accept-Language 决定 UI 语言）
-        '--lang=en-US',
-        '--accept-lang=en-US,en',
-        '--window-size=1280,800',
+        `--lang=${lang}`,
+        `--accept-lang=${lang},en`,
+        `--window-size=${viewport}`,
         '--disable-gpu',
         '--disable-dev-shm-usage',
         '--disable-background-networking',
@@ -110,12 +105,25 @@ async function launchRealChrome(chromePath, workerId = 0) {
         '--disable-domain-reliability',
         '--no-sandbox',
         '--metrics-recording-only',
-    ], { detached: (process.env.KEEP_BROWSER_OPEN || '').toLowerCase() === 'true', stdio: 'ignore' });
+        ...extraArgs,
+    ];
+}
+
+async function launchRealChrome(chromePath, workerId = 0, opts = {}) {
+    const wlog = createWorkerLogger(workerId);
+    const debugPort = opts.debugPort || (BASE_DEBUG_PORT + workerId);
+    const dataDir = opts.dataDir || path.resolve(__dirname, '..', `chrome_data_temp_pipeline_${workerId}`);
+    const args = buildChromeArgs({ workerId, dataDir, debugPort, extraArgs: opts.extraArgs, lang: opts.lang, viewport: opts.viewport });
+
+    wlog.debug(`Launch Chrome: debugPort=${debugPort}, dataDir=${dataDir}`);
+
+    const proc = spawn(chromePath, args, {
+        detached: (process.env.KEEP_BROWSER_OPEN || '').toLowerCase() === 'true',
+        stdio: 'ignore',
+    });
 
     // 如果 KEEP_BROWSER_OPEN，unref 让 Node 退出时不等待 Chrome
-    if ((process.env.KEEP_BROWSER_OPEN || '').toLowerCase() === 'true') {
-        proc.unref();
-    }
+    if ((process.env.KEEP_BROWSER_OPEN || '').toLowerCase() === 'true') proc.unref();
 
     proc.on('error', e => { wlog.error(`Chrome process error: ${e.message}`, e); });
     proc.on('exit', (code, signal) => {
@@ -156,7 +164,7 @@ async function launchRealChrome(chromePath, workerId = 0) {
     }
 
     wlog.info(`Chrome started (port ${debugPort}, PID ${proc.pid})`);
-    return { browser, proc, dataDir: CHROME_DATA, debugPort };
+    return { browser, proc, dataDir, debugPort };
 }
 
 async function restartChrome(chromePath, worker) {
@@ -788,6 +796,7 @@ module.exports = {
     rand,
     httpFetch,
     findChrome,
+    buildChromeArgs,
     launchRealChrome,
     restartChrome,
     isChromeAlive,
