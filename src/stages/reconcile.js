@@ -30,22 +30,85 @@ function computeUnknownEmails(familyEmails, localMembers, hostEmail) {
     return out;
 }
 
+/**
+ * 抓取 Google Family 页面上所有家庭成员（含 pending invitations）。
+ *
+ * 返回 Array<{ email, href, name, isPending }>：
+ *   - pending invite: email 列表页直接可见
+ *   - joined member: 必须 visit 详情页才拿到 email
+ *
+ * 副作用：为了拿到 joined member 的 email，会依次 goto 每个 a[href*="family/member"]
+ * 详情页。N 个成员 ≈ 3N 秒。最后 page 会被导航回 family/details。
+ */
 async function scrapeFamilyMembers(page, wlog) {
     await page.goto(FAMILY_URL, { waitUntil: 'networkidle2', timeout: 30000 }).catch(e =>
         wlog && wlog.warn && wlog.warn(`family page load: ${e.message}`));
     await sleep(2000);
 
-    // Google Family UI renders email text inside each member row; exact DOM
-    // classes are unstable — rely on text extraction + email regex filter.
-    const emails = await page.evaluate(() => {
-        const EMAIL_RE = /([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/g;
-        const text = document.body ? document.body.innerText : '';
-        const hits = new Set();
-        let m;
-        while ((m = EMAIL_RE.exec(text)) !== null) hits.add(m[1].toLowerCase());
-        return Array.from(hits);
+    // 1. 列表页枚举所有候选 anchor（含 member 和 pending invitation）
+    const anchorInfo = await page.evaluate(() => {
+        const out = [];
+        const seen = new Set();
+        // 同时覆盖 /family/member/ 和 /family/invit... 两类 href
+        for (const a of document.querySelectorAll('a[href*="family/"]')) {
+            const href = a.getAttribute('href') || '';
+            if (!href || seen.has(href)) continue;
+            // 过滤无关链接（如 Family Group 侧栏、Learn more 等）
+            if (!/family\/(member|invit)/i.test(href)) continue;
+            seen.add(href);
+            const text = (a.textContent || '').trim();
+            // 跳过 host 自己（"Family manager" 标记）
+            if (/family manager|家庭管理员/i.test(text)) continue;
+            // 列表页可见邮箱（pending invite 的情况）
+            const emailMatch = text.match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
+            out.push({
+                href,
+                text: text.substring(0, 120),
+                listPageEmail: emailMatch ? emailMatch[1].toLowerCase() : null,
+            });
+        }
+        return out;
     }).catch(() => []);
-    return emails;
+
+    wlog && wlog.info && wlog.info(`scrape: ${anchorInfo.length} family anchor(s) on list page`);
+
+    const results = [];
+    for (const info of anchorInfo) {
+        if (info.listPageEmail) {
+            // pending invite：列表就能看到邮箱，不用进详情
+            results.push({
+                email: info.listPageEmail,
+                href: info.href,
+                name: null,
+                isPending: true,
+            });
+            continue;
+        }
+        // joined member：visit detail 页抽邮箱
+        const absUrl = info.href.startsWith('http')
+            ? info.href
+            : `https://myaccount.google.com/${info.href.replace(/^\/+/, '')}`;
+        await page.goto(absUrl, { waitUntil: 'networkidle2', timeout: 20000 }).catch(() => { });
+        await sleep(2500);
+        const email = await extractDetailEmail(page);
+        if (email) {
+            results.push({
+                email,
+                href: info.href,
+                name: info.text || null,
+                isPending: false,
+            });
+            wlog && wlog.info && wlog.info(`scrape: joined ${email} (${info.text})`);
+        } else {
+            wlog && wlog.warn && wlog.warn(`scrape: could not parse email on detail ${absUrl}`);
+        }
+    }
+
+    // 回到列表页，下一次 evaluate 拿到的是最新 DOM
+    await page.goto(FAMILY_URL, { waitUntil: 'networkidle2', timeout: 20000 }).catch(() => { });
+    await sleep(1500);
+
+    return results;
 }
 
 async function reconcileAgainstDB(hostRecord, googleEmails, runId) {
@@ -206,11 +269,25 @@ async function extractDetailEmail(page) {
  *
  * 两种情况到达详情页后都走同样的「Remove member / 确认」流程。
  */
-async function removeFamilyMember(page, memberEmail, wlog) {
+async function removeFamilyMember(page, memberEmail, wlog, opts = {}) {
     const tag = `[removeFamilyMember ${memberEmail}]`;
     const log = (m) => wlog && wlog.info && wlog.info(`${tag} ${m}`);
     const warn = (m) => wlog && wlog.warn && wlog.warn(`${tag} ${m}`);
     const targetLower = memberEmail.toLowerCase();
+
+    // ========== Fast path: 上层已经知道 href（来自 scrapeFamilyMembers 缓存） ==========
+    if (opts.href) {
+        const absUrl = opts.href.startsWith('http')
+            ? opts.href
+            : `https://myaccount.google.com/${opts.href.replace(/^\/+/, '')}`;
+        log(`fast path via cached href: ${opts.href}`);
+        await page.goto(absUrl, { waitUntil: 'networkidle2', timeout: 20000 }).catch(() => { });
+        await sleep(2500);
+        const ok = await clickRemoveAndConfirm(page, tag, wlog);
+        await page.goto(FAMILY_URL, { waitUntil: 'networkidle2', timeout: 20000 }).catch(() => { });
+        await sleep(1500);
+        return ok;
+    }
 
     // 确保在 family 列表页
     if (!/\/family\/details/.test(page.url())) {
@@ -317,8 +394,10 @@ async function reconcileHost(hostRecord, browser, runId, wlog, options = {}) {
             totp_secret: hostRecord.totp_secret || undefined,
         }, wlog);
         await sleep(2000);
-        const emails = await scrapeFamilyMembers(page, wlog);
-        wlog && wlog.info && wlog.info(`reconcile: host ${hostRecord.email} has ${emails.length} family members`);
+        const familyMembers = await scrapeFamilyMembers(page, wlog);
+        const emails = familyMembers.map(m => m.email).filter(Boolean);
+        const emailToHref = new Map(familyMembers.map(m => [m.email.toLowerCase(), m.href]));
+        wlog && wlog.info && wlog.info(`reconcile: host ${hostRecord.email} has ${familyMembers.length} family member(s): ${emails.join(', ') || '(none)'}`);
 
         // 先把远程状态同步到本地，确保下一步 listMembersNeedingFamilyRemoval 用最新数据
         try {
@@ -337,7 +416,8 @@ async function reconcileHost(hostRecord, browser, runId, wlog, options = {}) {
                 wlog && wlog.info && wlog.info(`${member.email} already absent from family, cleaning local state`);
             } else {
                 wlog && wlog.info && wlog.info(`removing ${member.email} from ${hostRecord.email}'s family (disabled on platform)`);
-                const ok = await removeFamilyMember(page, member.email, wlog);
+                const href = emailToHref.get(member.email.toLowerCase());
+                const ok = await removeFamilyMember(page, member.email, wlog, { href });
                 if (!ok) {
                     wlog && wlog.warn && wlog.warn(`skip ${member.email}: removal UI failed, will retry next round`);
                     continue;
@@ -364,10 +444,11 @@ async function reconcileHost(hostRecord, browser, runId, wlog, options = {}) {
         if (options.removeUnknown) {
             const localMembers = await membersDb.listMembers({ hostId: hostRecord.id, pageSize: 10000 });
             const unknown = computeUnknownEmails(emails, localMembers, hostRecord.email);
-            wlog && wlog.info && wlog.info(`removeUnknown: ${unknown.length} unknown email(s) on ${hostRecord.email}'s family`);
+            wlog && wlog.info && wlog.info(`removeUnknown: ${unknown.length} unknown email(s) on ${hostRecord.email}'s family: ${unknown.join(', ') || '(none)'}`);
             for (const email of unknown) {
                 wlog && wlog.info && wlog.info(`removing unknown member ${email} from ${hostRecord.email}'s family`);
-                const ok = await removeFamilyMember(page, email, wlog);
+                const href = emailToHref.get(email.toLowerCase());
+                const ok = await removeFamilyMember(page, email, wlog, { href });
                 if (ok) {
                     await eventsDb.logEvent({
                         memberId: null, hostId: hostRecord.id, runId,
