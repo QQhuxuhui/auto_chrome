@@ -4,13 +4,15 @@
 const db = require('./index');
 
 async function createRun({ launched_by, stages, host_filter, concurrency, pid }) {
+    // host_filter 是 JSONB 列；pg 会把 JS 数组转成 PostgreSQL array literal（非 JSON），
+    // 非空数组会在 jsonb 解析时报错。用 JSON.stringify + ::jsonb 显式转换。
     const sql = `
         INSERT INTO pipeline_runs (launched_by, stages, host_filter, concurrency, pid)
-        VALUES ($1, $2, $3, $4, $5)
+        VALUES ($1, $2, $3::jsonb, $4, $5)
         RETURNING *
     `;
     const { rows } = await db.query(sql, [
-        launched_by, stages, host_filter || [], concurrency || 1, pid || null,
+        launched_by, stages, JSON.stringify(host_filter || []), concurrency || 1, pid || null,
     ]);
     return rows[0];
 }

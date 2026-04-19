@@ -41,3 +41,15 @@ test('listRuns returns rows', async () => {
     const list = await runs.listRuns(10);
     assert.ok(Array.isArray(list));
 });
+
+test('createRun accepts non-empty host_filter (jsonb roundtrip)', async () => {
+    // 回归：早前 pg 把 JS 数组转成 PG array literal，非空 host_filter 会
+    // 在 JSONB 解析时报错 "invalid input syntax for type json"
+    const r = await runs.createRun({
+        launched_by: 'cli', stages: '2', host_filter: ['a@x.com', 'b@y.com'], concurrency: 1,
+    });
+    testIds.push(r.id);
+    assert.ok(Array.isArray(r.host_filter));
+    assert.equal(r.host_filter.length, 2);
+    assert.equal(r.host_filter[0], 'a@x.com');
+});
