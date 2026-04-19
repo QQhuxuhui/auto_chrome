@@ -15,6 +15,7 @@ const {
 } = require('./common/chrome');
 const { parseAccounts, buildGroups, addFailedRecord } = require('./common/state');
 const { googleLogin } = require('./common/google-login');
+const { isInviteRow, findAcceptLinkInRows } = require('./stages/stage2-matcher');
 
 // ============ CLI 参数 ============
 const args = process.argv.slice(2);
@@ -294,22 +295,28 @@ async function acceptInvite(memberAccount, browser, workerId) {
             // 曾尝试 `in:anywhere "family/join"` 始终返回 0 结果并清空 view。
             // 对于新账号来说家庭邀请邮件通常就在最近的几十条中，row-scan 足够。
 
-            // 方法2：直接在页面中查找邀请邮件（排除标签栏等非邮件元素）
-            const emailFound = await page.evaluate((keywords) => {
-                // Gmail email rows have specific structure
+            // Scan inbox rows, extract { text, hrefs }, delegate to pure matcher (see stage2-matcher.js).
+            const rowData = await page.evaluate(() => {
                 const rows = document.querySelectorAll('tr.zA, tr.zE, div[role="row"], tr[draggable="true"]');
+                const out = [];
                 for (const row of rows) {
                     const r = row.getBoundingClientRect();
                     if (r.width < 200 || r.height < 20) continue;
-                    const text = (row.textContent || '').toLowerCase();
-                    // Exclude tab bar text (contains "primary", "promotions", "social" together)
-                    if (text.includes('promotions') && text.includes('social')) continue;
-                    if (keywords.some(k => text.includes(k.toLowerCase()))) {
-                        return text.substring(0, 80);
+                    const text = (row.textContent || '').trim();
+                    if (!text) continue;
+                    if (text.toLowerCase().includes('promotions') && text.toLowerCase().includes('social')) continue;
+                    const hrefs = [];
+                    for (const a of row.querySelectorAll('a[href]')) {
+                        const h = a.getAttribute('data-saferedirecturl') || a.getAttribute('href') || '';
+                        if (h) hrefs.push(h);
                     }
+                    out.push({ text, hrefs });
                 }
-                return null;
-            }, searchKeywords).catch(() => null);
+                return out;
+            }).catch(() => []);
+
+            const matched = rowData.find(r => isInviteRow(r));
+            const emailFound = matched ? matched.text.substring(0, 80) : null;
 
             if (emailFound) {
                 wlog.success(`  Found invite email: "${emailFound}"`);
@@ -780,173 +787,94 @@ async function acceptInvite(memberAccount, browser, workerId) {
     }
 }
 
-// ============ 浏览器清理（支持 KEEP_BROWSER_OPEN） ============
-const keepBrowserOpen = (process.env.KEEP_BROWSER_OPEN || '').toLowerCase() === 'true';
-let _workers = []; // 供 SIGINT handler 访问
+// ============ main — DB-backed ============
+const membersDb = require('./db/members');
+const eventsDb  = require('./db/events');
 
-function cleanupWorkers(workers) {
+let _workers2 = [];
+function cleanupWorkers2(workers) {
+    const keep = (process.env.KEEP_BROWSER_OPEN || '').toLowerCase() === 'true';
     for (const w of workers) {
-        if (keepBrowserOpen) {
-            try { w.browser.disconnect(); } catch (_) { }
-        } else {
-            try { w.browser.close(); } catch (_) { }
-            try { w.proc.kill(); } catch (_) { }
-        }
+        if (keep) { try { w.browser.disconnect(); } catch (_) { } }
+        else { try { w.browser.close(); } catch (_) { } try { w.proc.kill(); } catch (_) { } }
     }
-    if (keepBrowserOpen && workers.length > 0) log('Browsers kept open (KEEP_BROWSER_OPEN=true)');
 }
 
-process.on('SIGINT', () => {
-    log('\nInterrupted (Ctrl+C). Cleaning up...', 'WARN');
-    cleanupWorkers(_workers);
-    process.exit();
-});
-
-// ============ main ============
-async function main() {
-    const membersFile = path.resolve(__dirname, '..', 'members.txt');
-
+async function runStage2({ runId, concurrency = 1 } = {}) {
     const chromePath = findChrome();
-    if (!chromePath) { console.error('Chrome not found'); process.exit(1); }
+    if (!chromePath) throw new Error('Chrome not found');
 
-    log('');
-    log(`${'='.repeat(60)}`);
-    log(`  Stage 2: Accept Family Invitations`);
-    log(`${'='.repeat(60)}`);
-    log(`  Chrome:       ${chromePath}`);
-    log(`  Members:      ${membersFile}`);
-    log(`  Concurrency:  ${concurrency}`);
-    log(`  Poll interval: ${INVITE_POLL_INTERVAL}s`);
-    log(`  Poll timeout:  ${INVITE_WAIT_TIMEOUT}s`);
-    log(`${'='.repeat(60)}`);
-    log('');
+    const work = await membersDb.listMembersForStage(2);
+    log(`Stage2: ${work.length} pending acceptances`);
+    if (!work.length) return { ok: 0, ng: 0 };
 
-    const allMembers = parseAccounts(membersFile);
-
-    // 从 hosts.txt + members.txt 构建分组（假设阶段1 邀请已发出），
-    // 若无 hosts.txt 则所有成员归入一个合成组。
-    const hostsFile = path.resolve(__dirname, '..', 'hosts.txt');
-    let groups;
-    if (fs.existsSync(hostsFile)) {
-        const hosts = parseAccounts(hostsFile);
-        if (hosts.length > 0) {
-            groups = buildGroups(hosts, allMembers);
-            log(`Using hosts.txt: built ${groups.length} group(s)`);
-        }
-    }
-    if (!groups || groups.length === 0) {
-        groups = [{
-            groupId: 1,
-            host: { email: 'synthetic@local' },
-            members: allMembers,
-        }];
-        log(`No hosts.txt: created 1 synthetic group with ${allMembers.length} members`);
+    const workers = _workers2 = [];
+    for (let w = 0; w < Math.min(concurrency, work.length); w++) {
+        const chrome = await launchRealChrome(chromePath, w);
+        workers.push({ id: w, ...chrome });
+        if (w < concurrency - 1) await sleep(rand(2000, 3000));
     }
 
-    // 收集所有需要接受邀请的成员
-    const pendingMembers = [];
-    for (const group of groups) {
-        for (let i = 0; i < group.members.length; i++) {
-            pendingMembers.push({
-                groupId: group.groupId,
-                memberIdx: i,
-                account: group.members[i],
-            });
-        }
-    }
-
-    log(`Pending members to accept: ${pendingMembers.length}`);
-
-    if (pendingMembers.length === 0) {
-        log('All invitations already accepted. Exiting.', 'SUCCESS');
-        return;
-    }
-
-    // 启动 Chrome
-    const workers = _workers = [];
-    for (let w = 0; w < Math.min(concurrency, pendingMembers.length); w++) {
-        try {
-            const chrome = await launchRealChrome(chromePath, w);
-            workers.push({ id: w, ...chrome });
-            if (w < concurrency - 1) await sleep(rand(2000, 3000));
-        } catch (e) {
-            log(`Worker${w} launch failed: ${e.message}`, 'ERROR');
-        }
-    }
-
-    if (workers.length === 0) {
-        console.error('All Chrome instances failed to start');
-        process.exit(1);
-    }
-
-    let memberIdx = 0;
+    let idx = 0;
     const stats = { ok: 0, ng: 0 };
 
     async function workerFn(worker) {
         const wlog = createWorkerLogger(worker.id);
         while (true) {
-            const idx = memberIdx++;
-            if (idx >= pendingMembers.length) break;
+            const i = idx++;
+            if (i >= work.length) break;
+            const m = work[i];
+            const memberAccount = {
+                idx: m.id, email: m.email, pass: m.password,
+                recovery: m.recovery_email || '',
+                totp_secret: m.totp_secret || undefined,
+            };
 
-            const pending = pendingMembers[idx];
-
+            await eventsDb.logEvent({ memberId: m.id, hostId: m.host_id, runId, stage: 'stage2', eventType: 'start' });
             try {
                 const alive = await isChromeAlive(worker);
                 if (!alive) await restartChrome(chromePath, worker);
 
-                // 硬超时保护：单个账号 accept 流程的上限，避免某个页面 hang 住把 worker 卡死。
-                // 默认 = 邀请等待超时 + 5 分钟 buffer（用于登录 + 点击确认 + 重定向）
-                const ACCEPT_HARD_TIMEOUT_MS = parseInt(process.env.ACCEPT_HARD_TIMEOUT_MS, 10) ||
+                const hardTimeout = parseInt(process.env.ACCEPT_HARD_TIMEOUT_MS, 10) ||
                     (INVITE_WAIT_TIMEOUT * 1000 + 300000);
-                const success = await Promise.race([
-                    acceptInvite(pending.account, worker.browser, worker.id),
-                    new Promise((_, rej) => setTimeout(
-                        () => rej(new Error(`accept_hard_timeout: exceeded ${ACCEPT_HARD_TIMEOUT_MS / 1000}s`)),
-                        ACCEPT_HARD_TIMEOUT_MS
-                    )),
+                const ok = await Promise.race([
+                    acceptInvite(memberAccount, worker.browser, worker.id),
+                    new Promise((_, rej) => setTimeout(() => rej(new Error(`hard_timeout ${hardTimeout}ms`)), hardTimeout)),
                 ]);
 
-                if (success) {
+                if (ok) {
+                    await membersDb.transitionToJoined(m.id);
+                    await eventsDb.logEvent({ memberId: m.id, hostId: m.host_id, runId, stage: 'stage2', eventType: 'success' });
                     stats.ok++;
+                } else {
+                    throw new Error('acceptInvite returned falsy');
                 }
             } catch (e) {
-                wlog.error(`Accept failed [${pending.account.email}]: ${e.message}`, e);
+                wlog.error(`Stage2 [${m.email}]: ${e.message}`);
+                await membersDb.transitionToFailed(m.id, { newStatus: 'accept_failed', error: e.message, releaseHost: false });
+                await eventsDb.logEvent({ memberId: m.id, hostId: m.host_id, runId, stage: 'stage2', eventType: 'fail', message: e.message });
                 stats.ng++;
-                await addFailedRecord({
-                    stage: 2,
-                    groupId: pending.groupId,
-                    memberEmail: pending.account.email,
-                    reason: e.message,
-                });
-                // 硬超时或严重错误时重启 Chrome —— 上一次的页面/协议调用可能仍挂起，
-                // 会污染后续账号流程
                 if (/hard_timeout|Protocol error|Session closed|Target closed/i.test(e.message || '')) {
-                    wlog.warn('  Restarting Chrome after hard failure...');
-                    try { await restartChrome(chromePath, worker); } catch (re) {
-                        wlog.error(`  Chrome restart failed: ${re.message}`);
-                    }
+                    try { await restartChrome(chromePath, worker); } catch (_) { }
                 }
             }
-
             await sleep(rand(1000, 2000));
         }
     }
 
     await Promise.all(workers.map(w => workerFn(w)));
-
-    // 清理
-    cleanupWorkers(workers);
-
-    log('');
-    log(`${'='.repeat(60)}`);
-    log(`  Stage 2 Complete`, 'SUCCESS');
-    log(`  OK: ${stats.ok}  FAIL: ${stats.ng}`);
-    log(`${'='.repeat(60)}`);
-    log('');
+    cleanupWorkers2(workers);
+    log(`Stage2 done: OK=${stats.ok} FAIL=${stats.ng}`, 'SUCCESS');
+    return stats;
 }
 
-main().catch(e => {
-    log(`Fatal: ${e.message}`, 'ERROR');
-    if (e.stack) console.error(e.stack);
-    process.exit(1);
-});
+process.on('SIGINT',  () => { cleanupWorkers2(_workers2); process.exit(130); });
+process.on('SIGTERM', () => { cleanupWorkers2(_workers2); process.exit(143); });
+
+module.exports = { runStage2, acceptInvite };
+
+if (require.main === module) {
+    runStage2({ runId: null, concurrency: 1 })
+        .then(() => process.exit(0))
+        .catch(e => { log(`Fatal: ${e.message}`, 'ERROR'); process.exit(1); });
+}
