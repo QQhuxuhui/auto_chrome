@@ -38,7 +38,7 @@
         </template>
     </section>
 
-    <section class="grid grid-cols-2 gap-4">
+    <section class="grid grid-cols-3 gap-4">
         <div class="card p-4">
             <h3 class="font-semibold mb-2">子号状态</h3>
             <ul class="text-sm space-y-1">
@@ -58,6 +58,23 @@
                 <li class="flex justify-between"><span>有空位</span><span x-text="status.hosts.withFreeSlot"></span></li>
                 <li class="flex justify-between"><span>空位总数</span><span x-text="status.hosts.freeSlotsTotal"></span></li>
             </ul>
+        </div>
+        <div class="card p-4">
+            <h3 class="font-semibold mb-2">Antigravity 平台</h3>
+            <ul class="text-sm space-y-1">
+                <li class="flex justify-between"><span>平台总账号</span><span x-text="ag.total || 0"></span></li>
+                <li class="flex justify-between"><span>disabled</span><span x-text="ag.disabled || 0" class="text-red-400"></span></li>
+                <li class="flex justify-between"><span>需验证</span><span x-text="ag.validation_blocked || 0" class="text-yellow-400"></span></li>
+                <li class="flex justify-between"><span>quota 禁用</span><span x-text="ag.is_forbidden || 0" class="text-orange-400"></span></li>
+                <li class="flex justify-between"><span>未关联本地</span><span x-text="ag.orphans || 0"></span></li>
+                <li class="flex justify-between text-xs text-slate-400 pt-1 border-t border-slate-700/50 mt-1">
+                    <span>最近同步</span><span x-text="ag.last_sync || '从未'"></span>
+                </li>
+            </ul>
+            <div class="flex gap-2 mt-3">
+                <button @click="agSync()" class="px-2 py-1 bg-blue-800 hover:bg-blue-700 rounded text-xs">立即同步</button>
+                <button @click="agCleanup()" class="px-2 py-1 bg-orange-800 hover:bg-orange-700 rounded text-xs">执行清理</button>
+            </div>
         </div>
     </section>
 
@@ -125,6 +142,7 @@
 function dashboard() {
     return {
         status: { byStatus: {}, hosts: { total: 0, disabled: 0, withFreeSlot: 0, freeSlotsTotal: 0 }, currentRun: null },
+        ag: { total: 0, disabled: 0, validation_blocked: 0, is_forbidden: 0, orphans: 0, last_sync: null },
         openStart: false,
         hostsList: [],
         form: { stages1: true, stages2: true, stages3: true, hostMode: 'auto', selectedHosts: [], concurrency: 1 },
@@ -147,6 +165,10 @@ function dashboard() {
             try {
                 this.status = await App.api('GET', '/api/status');
             } catch (e) { console.error(e); }
+            try {
+                const s = await App.api('GET', '/api/antigravity/stats');
+                this.ag = { ...s, last_sync: this.ag.last_sync };
+            } catch (_) { /* platform 不可达时静默跳过 */ }
         },
         async reloadHosts() {
             try {
@@ -192,6 +214,22 @@ function dashboard() {
                 await App.api('POST', `/api/pipeline/runs/${id}/cancel`);
                 this.load();
             } catch (e) { alert(e.message); }
+        },
+        async agSync() {
+            try {
+                const r = await App.api('POST', '/api/antigravity/sync');
+                this.ag.last_sync = new Date().toLocaleTimeString();
+                alert(`同步完成：匹配 ${r.matched}，新 disabled ${r.newly_disabled.length}，orphan ${r.orphans.length}`);
+                this.load();
+            } catch (e) { alert('同步失败：' + e.message); }
+        },
+        async agCleanup() {
+            if (!confirm('执行清理会登录 host、扫描 family 页并移除 disabled 成员。确认？')) return;
+            try {
+                const r = await App.api('POST', '/api/reconcile');
+                alert(`清理流程已启动（run #${r.runId}）。打开运行历史看进度。`);
+                this.load();
+            } catch (e) { alert('启动清理失败：' + e.message); }
         },
     };
 }

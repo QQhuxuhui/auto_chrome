@@ -36,4 +36,17 @@ module.exports = async function routes(app) {
             .map(a => ({ id: a.id, email: a.email, disabled: a.disabled, validation_blocked: a.validation_blocked }));
         return orphans;
     });
+
+    app.get('/api/antigravity/stats', async () => {
+        const { accounts = [] } = await antigravityClient.listAccounts();
+        const total = accounts.length;
+        const disabled = accounts.filter(a => a.disabled).length;
+        const validation_blocked = accounts.filter(a => a.validation_blocked).length;
+        const is_forbidden = accounts.filter(a => a.quota && a.quota.is_forbidden).length;
+        const emails = accounts.map(a => a.email).filter(Boolean);
+        const locals = await membersDb.listMembersByEmailLower(emails);
+        const localSet = new Set(locals.map(m => m.email.toLowerCase()));
+        const orphans = accounts.filter(a => !localSet.has(String(a.email).toLowerCase())).length;
+        return { total, disabled, validation_blocked, is_forbidden, orphans };
+    });
 };
