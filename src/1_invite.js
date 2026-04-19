@@ -1017,84 +1017,63 @@ async function inviteGroup(groupState, hostAccount, memberEmails, browser, worke
 
 // ============ 浏览器清理（支持 KEEP_BROWSER_OPEN） ============
 const keepBrowserOpen = (process.env.KEEP_BROWSER_OPEN || '').toLowerCase() === 'true';
-let _workers = [];
+// ============ main — DB-backed orchestrator entry ============
+const hostsDb = require('./db/hosts');
+const membersDb = require('./db/members');
+const eventsDb = require('./db/events');
+const { pickHost } = require('./orchestrator/pick-host');
 
+let _workers = [];
 function cleanupWorkers(workers) {
+    const keep = (process.env.KEEP_BROWSER_OPEN || '').toLowerCase() === 'true';
     for (const w of workers) {
-        if (keepBrowserOpen) {
-            try { w.browser.disconnect(); } catch (_) { }
-        } else {
-            try { w.browser.close(); } catch (_) { }
-            try { w.proc.kill(); } catch (_) { }
-        }
+        if (keep) { try { w.browser.disconnect(); } catch (_) { } }
+        else { try { w.browser.close(); } catch (_) { } try { w.proc.kill(); } catch (_) { } }
     }
-    if (keepBrowserOpen && workers.length > 0) log('Browsers kept open (KEEP_BROWSER_OPEN=true)');
 }
 
-process.on('SIGINT', () => {
-    log('\nInterrupted (Ctrl+C). Cleaning up...', 'WARN');
-    cleanupWorkers(_workers);
-    process.exit();
-});
-
-// ============ main ============
-async function main() {
-    const hostsFile = path.resolve(__dirname, '..', 'hosts.txt');
-    const membersFile = path.resolve(__dirname, '..', 'members.txt');
-
+async function runStage1({ runId, hostFilter = [], concurrency = 1 }) {
     const chromePath = findChrome();
-    if (!chromePath) { console.error('Chrome not found'); process.exit(1); }
+    if (!chromePath) throw new Error('Chrome not found');
 
-    log('');
-    log(`${'='.repeat(60)}`);
-    log(`  Stage 1: Send Family Invitations`);
-    log(`${'='.repeat(60)}`);
-    log(`  Chrome:      ${chromePath}`);
-    log(`  Hosts:       ${hostsFile}`);
-    log(`  Members:     ${membersFile}`);
-    log(`  Concurrency: ${concurrency}`);
-    log(`${'='.repeat(60)}`);
-    log('');
+    const [work, allHosts] = await Promise.all([
+        membersDb.listMembersForStage(1),
+        hostsDb.listHosts({ pageSize: 10000 }),
+    ]);
 
-    const hosts = parseAccounts(hostsFile);
-    const members = parseAccounts(membersFile);
-    log(`Parsed: ${hosts.length} hosts, ${members.length} members`);
+    log(`Stage1: ${work.length} pending members, ${allHosts.length} hosts`);
+    if (!work.length) return { ok: 0, ng: 0 };
 
-    if (hosts.length === 0) { log('No host accounts found', 'ERROR'); process.exit(1); }
-    if (members.length === 0) { log('No member accounts found', 'ERROR'); process.exit(1); }
+    // Assign members to hosts up-front (single-pass, respecting slot_free).
+    // pickHost mutates slot_used ephemerally so we clone.
+    const cloned = allHosts.map(h => ({ ...h }));
+    const assignments = [];
+    for (const m of work) {
+        const h = pickHost(cloned, hostFilter);
+        if (!h) break;
+        assignments.push({ member: m, host: h });
+        h.slot_used += 1;
+        h.slot_free -= 1;
+    }
+    log(`Stage1: assigned ${assignments.length} invitations`);
+    if (!assignments.length) return { ok: 0, ng: 0 };
 
-    const groups = buildGroups(hosts, members);
-    log(`Built ${groups.length} groups`);
-
-    // 每个组转换为 worker 消费的扁平结构（host email + member emails）
-    const pendingGroups = groups.map(g => ({
-        groupId: g.groupId,
-        host: g.host.email,
-        members: g.members.map(m => m.email),
-    }));
-
-    if (pendingGroups.length === 0) {
-        log('No groups to process. Exiting.', 'SUCCESS');
-        return;
+    // Group assignments by host for batch inviteGroup() calls.
+    const byHost = new Map();
+    for (const a of assignments) {
+        if (!byHost.has(a.host.id)) byHost.set(a.host.id, { host: a.host, members: [] });
+        byHost.get(a.host.id).members.push(a.member);
     }
 
-    // 启动 Chrome
+    // Launch workers (one Chrome per worker).
     const workers = _workers = [];
-    for (let w = 0; w < Math.min(concurrency, pendingGroups.length); w++) {
-        try {
-            const chrome = await launchRealChrome(chromePath, w);
-            workers.push({ id: w, ...chrome });
-            if (w < concurrency - 1) await sleep(rand(2000, 3000));
-        } catch (e) {
-            log(`Worker${w} launch failed: ${e.message}`, 'ERROR');
-        }
+    for (let w = 0; w < Math.min(concurrency, byHost.size); w++) {
+        const chrome = await launchRealChrome(chromePath, w);
+        workers.push({ id: w, ...chrome });
+        if (w < concurrency - 1) await sleep(rand(2000, 3000));
     }
 
-    if (workers.length === 0) {
-        console.error('All Chrome instances failed to start');
-        process.exit(1);
-    }
-
+    const groupQueue = Array.from(byHost.values());
     let groupIdx = 0;
     const stats = { ok: 0, ng: 0 };
 
@@ -1102,59 +1081,64 @@ async function main() {
         const wlog = createWorkerLogger(worker.id);
         while (true) {
             const idx = groupIdx++;
-            if (idx >= pendingGroups.length) break;
+            if (idx >= groupQueue.length) break;
+            const { host, members } = groupQueue[idx];
+            const memberEmails = members.map(m => m.email);
 
-            const groupState = pendingGroups[idx];
-            const hostAccount = hosts.find(h => h.email === groupState.host);
-            if (!hostAccount) {
-                wlog.error(`Host account not found: ${groupState.host}`);
-                stats.ng++;
-                continue;
+            // Mark invite_pending up-front so UI sees progress
+            for (const m of members) {
+                await membersDb.transitionToInvitePending(m.id, host.id);
+                await eventsDb.logEvent({ memberId: m.id, hostId: host.id, runId, stage: 'stage1', eventType: 'start' });
             }
 
             try {
                 const alive = await isChromeAlive(worker);
                 if (!alive) await restartChrome(chromePath, worker);
 
-                const memberEmails = groupState.members;
-                const success = await inviteGroup(groupState, hostAccount, memberEmails, worker.browser, worker.id);
+                const hostAccount = {
+                    idx: host.id, email: host.email, pass: host.password,
+                    recovery: host.recovery_email || '',
+                    totp_secret: host.totp_secret || undefined,
+                };
+                const groupState = { groupId: host.id, host: hostAccount, members: members.map(m => ({ email: m.email, pass: m.password })) };
+                const ok = await inviteGroup(groupState, hostAccount, memberEmails, worker.browser, worker.id);
 
-                if (success) {
-                    stats.ok++;
-                    // 成员的登录 + 接受邀请全部交给 Stage 2 自动完成
-                    // 清理 host 会话，避免下一个 group 复用浏览器时残留旧登录态
-                    await clearBrowserSession(worker.browser, wlog);
+                if (ok) {
+                    stats.ok += members.length;
+                    for (const m of members) {
+                        await eventsDb.logEvent({ memberId: m.id, hostId: host.id, runId, stage: 'stage1', eventType: 'success' });
+                    }
+                } else {
+                    throw new Error('inviteGroup returned falsy');
                 }
             } catch (e) {
-                wlog.error(`Group ${groupState.groupId} failed: ${e.message}`, e);
-                stats.ng++;
-                await addFailedRecord({
-                    stage: 1,
-                    groupId: groupState.groupId,
-                    hostEmail: groupState.host,
-                    reason: e.message,
-                });
+                wlog.error(`Stage1 host=${host.email} failed: ${e.message}`);
+                stats.ng += members.length;
+                for (const m of members) {
+                    await membersDb.transitionToFailed(m.id, { newStatus: 'invite_failed', error: e.message, releaseHost: true });
+                    await eventsDb.logEvent({ memberId: m.id, hostId: host.id, runId, stage: 'stage1', eventType: 'fail', message: e.message });
+                }
+                if (/Protocol error|Target closed|Session closed/i.test(e.message || '')) {
+                    try { await restartChrome(chromePath, worker); } catch (_) { }
+                }
             }
-
             await sleep(rand(1000, 2000));
         }
     }
 
     await Promise.all(workers.map(w => workerFn(w)));
-
-    // 清理
     cleanupWorkers(workers);
-
-    log('');
-    log(`${'='.repeat(60)}`);
-    log(`  Stage 1 Complete`, 'SUCCESS');
-    log(`  OK: ${stats.ok}  FAIL: ${stats.ng}`);
-    log(`${'='.repeat(60)}`);
-    log('');
+    log(`Stage1 done: OK=${stats.ok} FAIL=${stats.ng}`, 'SUCCESS');
+    return stats;
 }
 
-main().catch(e => {
-    log(`Fatal: ${e.message}`, 'ERROR');
-    if (e.stack) console.error(e.stack);
-    process.exit(1);
-});
+process.on('SIGINT', () => { cleanupWorkers(_workers); process.exit(130); });
+process.on('SIGTERM', () => { cleanupWorkers(_workers); process.exit(143); });
+
+module.exports = { runStage1 };
+
+if (require.main === module) {
+    runStage1({ runId: null, concurrency: 1 })
+        .then(() => process.exit(0))
+        .catch(e => { log(`Fatal: ${e.message}`, 'ERROR'); process.exit(1); });
+}
