@@ -297,7 +297,7 @@ async function acceptInvite(memberAccount, browser, workerId) {
             // 方法2：直接在页面中查找邀请邮件（排除标签栏等非邮件元素）
             const emailFound = await page.evaluate((keywords) => {
                 // Gmail email rows have specific structure
-                const rows = document.querySelectorAll('tr.zA, tr.zE, div[role="row"], tr[draggable="true"]');
+                const rows = document.querySelectorAll('tr.zA, tr.zE, tr[role="row"], div[role="row"], tr[draggable="true"]');
                 for (const row of rows) {
                     const r = row.getBoundingClientRect();
                     if (r.width < 200 || r.height < 20) continue;
@@ -317,7 +317,7 @@ async function acceptInvite(memberAccount, browser, workerId) {
                 // 点击邮件行打开邮件 — 使用 gjy 的精确选择器过滤 + dev 的多层 fallback
                 // 策略 1: evaluate 点击邮件行（带尺寸和标签栏过滤）
                 const openedByEval = await page.evaluate((keywords) => {
-                    const rows = document.querySelectorAll('tr.zA, tr.zE, div[role="row"], tr[draggable="true"]');
+                    const rows = document.querySelectorAll('tr.zA, tr.zE, tr[role="row"], div[role="row"], tr[draggable="true"]');
                     for (const row of rows) {
                         const r = row.getBoundingClientRect();
                         if (r.width < 200 || r.height < 20) continue;
@@ -551,21 +551,57 @@ async function acceptInvite(memberAccount, browser, workerId) {
                 }, 10000);
             });
 
-            // 点击匹配到的 <a> 元素（按 href 或 data-saferedirecturl 定位）
-            const clickOk = await page.evaluate((url) => {
+            // 点击匹配到的 <a> 元素。
+            // 关键：不能用 `a.click()` —— Gmail 的邮件链接是 target="_blank"，
+            // 打开新 tab 依赖 window.open 被 user-gesture 允许。合成 JS click
+            // 不算 user gesture，弹窗会被浏览器拦截，结果就是 href 匹配成功
+            // 但 tab 没开、也没 navigation。必须走 CDP 真实鼠标事件（ElementHandle.click）。
+            const MARK_ATTR = 'data-accept-link-target';
+            const marked = await page.evaluate((url, attr) => {
+                document.querySelectorAll(`[${attr}]`).forEach(el => el.removeAttribute(attr));
                 const links = document.querySelectorAll('a[href]');
                 for (const a of links) {
                     const h = a.getAttribute('data-saferedirecturl') || a.href || '';
                     if (h === url || h.includes(url.substring(0, 60))) {
                         const r = a.getBoundingClientRect();
                         if (r.width > 0 && r.height > 0) {
-                            a.click();
+                            a.setAttribute(attr, '1');
                             return true;
                         }
                     }
                 }
                 return false;
-            }, acceptLink).catch(() => false);
+            }, acceptLink, MARK_ATTR).catch(() => false);
+
+            let clickOk = false;
+            if (marked) {
+                const linkHandle = await page.$(`[${MARK_ATTR}]`).catch(() => null);
+                if (linkHandle) {
+                    try {
+                        // ElementHandle.click 通过 CDP 发真实 pointerdown/pointerup，
+                        // 才能让 Gmail 的 jsaction + window.open(target=_blank) 正常触发。
+                        await linkHandle.click({ delay: 30 });
+                        clickOk = true;
+                    } catch (e) {
+                        wlog.debug(`  ElementHandle click failed: ${e.message}, falling back to JS click`);
+                    } finally {
+                        await linkHandle.dispose().catch(() => { });
+                    }
+                }
+
+                // CDP 点击失败时退回 JS click（至少让链接 onClick handler 跑，有时还能同 tab 跳走）
+                if (!clickOk) {
+                    clickOk = await page.evaluate((attr) => {
+                        const el = document.querySelector(`[${attr}]`);
+                        if (el) { el.click(); return true; }
+                        return false;
+                    }, MARK_ATTR).catch(() => false);
+                }
+
+                await page.evaluate((attr) => {
+                    document.querySelectorAll(`[${attr}]`).forEach(el => el.removeAttribute(attr));
+                }, MARK_ATTR).catch(() => { });
+            }
 
             if (clickOk) {
                 wlog.info('  Clicked accept link inside Gmail');
