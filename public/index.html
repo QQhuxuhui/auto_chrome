@@ -1,1 +1,158 @@
-<!doctype html><title>placeholder</title><h1>dashboard placeholder</h1>
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gemini Family Pipeline — Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
+    <link rel="stylesheet" href="/public/css/app.css">
+</head>
+<body class="p-6">
+<nav class="mb-6 flex gap-3 items-center">
+    <span class="text-lg font-semibold">Gemini Family Pipeline</span>
+    <div class="flex-1"></div>
+    <a href="/" class="px-3 py-1 rounded hover:bg-slate-800 font-medium">Dashboard</a>
+    <a href="/accounts" class="px-3 py-1 rounded hover:bg-slate-800">Accounts</a>
+    <a href="/runs" class="px-3 py-1 rounded hover:bg-slate-800">Runs</a>
+</nav>
+
+<main x-data="dashboard()" x-init="load(); interval = setInterval(load, 3000)"
+      @beforeunload.window="clearInterval(interval)" class="space-y-6">
+
+    <section class="card p-4" x-show="status.currentRun">
+        <h2 class="text-lg font-semibold mb-2">Current Run</h2>
+        <template x-if="status.currentRun">
+            <div class="space-y-2">
+                <div class="text-sm">
+                    #<span x-text="status.currentRun.id"></span>
+                    · stages <span x-text="status.currentRun.stages"></span>
+                    · pid <span x-text="status.currentRun.pid || '—'"></span>
+                    · started <span x-text="App.timeago(status.currentRun.started_at)"></span>
+                </div>
+                <pre class="mono text-xs p-2 bg-black/40 rounded"
+                     x-text="JSON.stringify(status.currentRun.stats || {}, null, 2)"></pre>
+                <button @click="cancelRun(status.currentRun.id)"
+                        class="px-3 py-1 bg-red-900 hover:bg-red-800 rounded text-sm">Cancel</button>
+            </div>
+        </template>
+    </section>
+
+    <section class="grid grid-cols-2 gap-4">
+        <div class="card p-4">
+            <h3 class="font-semibold mb-2">Member Status</h3>
+            <ul class="text-sm space-y-1">
+                <template x-for="s in ['new','invite_pending','joined','done','invite_failed','accept_failed','oauth_failed','abandoned','removed_from_family']" :key="s">
+                    <li class="flex justify-between">
+                        <span x-text="s" class="mono"></span>
+                        <span x-text="status.byStatus[s] || 0"></span>
+                    </li>
+                </template>
+            </ul>
+        </div>
+        <div class="card p-4">
+            <h3 class="font-semibold mb-2">Host Capacity</h3>
+            <ul class="text-sm space-y-1">
+                <li class="flex justify-between"><span>total</span><span x-text="status.hosts.total"></span></li>
+                <li class="flex justify-between"><span>disabled</span><span x-text="status.hosts.disabled"></span></li>
+                <li class="flex justify-between"><span>with free slot</span><span x-text="status.hosts.withFreeSlot"></span></li>
+                <li class="flex justify-between"><span>free slots total</span><span x-text="status.hosts.freeSlotsTotal"></span></li>
+            </ul>
+        </div>
+    </section>
+
+    <section class="card p-4">
+        <button @click="openStart = true"
+                class="px-4 py-2 bg-emerald-700 hover:bg-emerald-600 rounded font-medium">
+            ▶ Start Pipeline
+        </button>
+    </section>
+
+    <!-- Start dialog -->
+    <div x-show="openStart" class="backdrop open" @click="openStart = false"></div>
+    <div x-show="openStart" class="drawer open" @click.stop>
+        <h2 class="text-lg font-semibold mb-4">Start Pipeline</h2>
+        <div class="space-y-4">
+            <div>
+                <div class="text-sm mb-1">Stages</div>
+                <label class="mr-3"><input type="checkbox" x-model="form.stages1"> 1 Invite</label>
+                <label class="mr-3"><input type="checkbox" x-model="form.stages2"> 2 Accept</label>
+                <label><input type="checkbox" x-model="form.stages3"> 3 OAuth</label>
+            </div>
+            <div>
+                <div class="text-sm mb-1">Hosts</div>
+                <label class="block"><input type="radio" name="hm" x-model="form.hostMode" value="auto"> Auto (all hosts with free slot)</label>
+                <label class="block"><input type="radio" name="hm" x-model="form.hostMode" value="select"> Select specific</label>
+                <div x-show="form.hostMode === 'select'" class="ml-4 mt-2 max-h-40 overflow-y-auto text-sm">
+                    <template x-for="h in hostsList" :key="h.id">
+                        <label class="block"><input type="checkbox" :value="h.email" x-model="form.selectedHosts">
+                            <span x-text="h.email" class="mono"></span>
+                            (<span x-text="h.slot_free"></span>/5)
+                        </label>
+                    </template>
+                </div>
+            </div>
+            <div>
+                <label class="text-sm">Concurrency
+                    <select x-model.number="form.concurrency" class="ml-2 bg-slate-800 px-2 py-1 rounded">
+                        <option>1</option><option>2</option><option>3</option><option>4</option><option>5</option>
+                    </select>
+                </label>
+            </div>
+            <div class="flex gap-2 pt-2">
+                <button @click="openStart = false" class="px-3 py-1 bg-slate-700 rounded">Cancel</button>
+                <button @click="submitStart()" class="px-3 py-1 bg-emerald-700 rounded">Start</button>
+            </div>
+            <div x-show="error" class="text-red-400 text-sm" x-text="error"></div>
+        </div>
+    </div>
+</main>
+
+<script>
+function dashboard() {
+    return {
+        status: { byStatus: {}, hosts: { total: 0, disabled: 0, withFreeSlot: 0, freeSlotsTotal: 0 }, currentRun: null },
+        openStart: false,
+        hostsList: [],
+        form: { stages1: true, stages2: true, stages3: true, hostMode: 'auto', selectedHosts: [], concurrency: 1 },
+        error: '',
+        interval: null,
+        async load() {
+            try {
+                this.status = await App.api('GET', '/api/status');
+                if (this.openStart && !this.hostsList.length) {
+                    this.hostsList = await App.api('GET', '/api/hosts?disabled=0');
+                }
+            } catch (e) { console.error(e); }
+        },
+        async submitStart() {
+            this.error = '';
+            const stages = [];
+            if (this.form.stages1) stages.push('1');
+            if (this.form.stages2) stages.push('2');
+            if (this.form.stages3) stages.push('3');
+            if (!stages.length) { this.error = 'select at least one stage'; return; }
+            const hostFilter = this.form.hostMode === 'select' ? this.form.selectedHosts : [];
+            try {
+                await App.api('POST', '/api/pipeline/start', {
+                    stages: stages.join(','),
+                    hostFilter,
+                    concurrency: this.form.concurrency,
+                });
+                this.openStart = false;
+                this.load();
+            } catch (e) { this.error = e.message; }
+        },
+        async cancelRun(id) {
+            if (!confirm(`Cancel run #${id}?`)) return;
+            try {
+                await App.api('POST', `/api/pipeline/runs/${id}/cancel`);
+                this.load();
+            } catch (e) { alert(e.message); }
+        },
+    };
+}
+</script>
+<script src="/public/js/app.js"></script>
+</body>
+</html>
