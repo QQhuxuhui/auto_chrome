@@ -322,7 +322,7 @@ async function clickRemoveAndConfirm(page, tag, wlog, hostAccount) {
             return false;
         }
         await sleep(2000);
-        return true;
+        return await clickFinalRemoveConfirmIfAny(page, tag, hostAccount, wlog);
     }
 
     // ========== Step 3: 确认对话框（仅当 step 2.5 未导航离开时） ==========
@@ -362,7 +362,8 @@ async function clickRemoveAndConfirm(page, tag, wlog, hostAccount) {
         await takeScreenshot(page, `remove_noconfirm`, wlog);
         // 即使这里找不到 dialog，也尝试继续 solve challenge —— 万一导航延迟了
         const solved = await solveMidflowChallenge(page, hostAccount, tag, wlog);
-        return solved;
+        if (!solved) return false;
+        return await clickFinalRemoveConfirmIfAny(page, tag, hostAccount, wlog);
     }
     log(`confirmed in dialog: "${step3.text}"`);
 
@@ -378,7 +379,99 @@ async function clickRemoveAndConfirm(page, tag, wlog, hostAccount) {
         return false;
     }
     await sleep(2000);
-    return true;
+
+    // 到这里可能在 /family/remove/g/{id} 最终确认页，还要点一次 Remove
+    const finalOk = await clickFinalRemoveConfirmIfAny(page, tag, hostAccount, wlog);
+    return finalOk;
+}
+
+/**
+ * TOTP 验证通过后有时会落到 /family/remove/g/{id}?rapt=... 页面，这是 Google 的
+ * 最终二次确认页，上面还有一个单独的 Remove 按钮。不点它成员就不会真正被移除。
+ *
+ * 此函数循环处理：只要当前 URL 还是 /family/remove/ 就找按钮 + CDP 点 + 等导航；
+ * 最多循环 2 次（防止死循环）。
+ */
+async function clickFinalRemoveConfirmIfAny(page, tag, hostAccount, wlog) {
+    const warn = (m) => wlog && wlog.warn && wlog.warn(`${tag} ${m}`);
+    const log = (m) => wlog && wlog.info && wlog.info(`${tag} ${m}`);
+
+    for (let attempt = 0; attempt < 3; attempt++) {
+        const url = page.url();
+        if (!/\/family\/remove\//i.test(url)) {
+            log(`final-confirm: already past /family/remove/ (url=${url.substring(0, 100)})`);
+            return true;
+        }
+        log(`final-confirm page detected (attempt ${attempt + 1}): ${url.substring(0, 120)}`);
+        await takeScreenshot(page, `remove_final_before_${attempt}`, wlog);
+
+        const MARK = 'data-final-remove-btn';
+        const marked = await page.evaluate((attr) => {
+            document.querySelectorAll(`[${attr}]`).forEach(el => el.removeAttribute(attr));
+            const PATTERNS = [
+                /^\s*remove\s*$/i,
+                /^\s*remove\s*member\s*$/i,
+                /^\s*confirm\s*$/i,
+                /remove.*family.*member/i,
+                /remove from family/i,
+                /^移除$/,
+                /^确认$/, /^确定$/,
+                /^移除成员$/, /^移除家庭成员$/,
+            ];
+            const visible = (el) => {
+                const r = el.getBoundingClientRect();
+                const s = window.getComputedStyle(el);
+                return r.width > 20 && r.height > 10 &&
+                       s.display !== 'none' && s.visibility !== 'hidden' && s.opacity !== '0';
+            };
+            for (const el of document.querySelectorAll('button, a, [role="button"]')) {
+                if (!visible(el)) continue;
+                const t = (el.textContent || '').trim();
+                if (!t) continue;
+                if (PATTERNS.some(p => p.test(t))) {
+                    el.setAttribute(attr, '1');
+                    el.scrollIntoView({ block: 'center' });
+                    return { ok: true, text: t.substring(0, 80) };
+                }
+            }
+            return { ok: false };
+        }, MARK).catch(e => ({ ok: false, error: e.message }));
+
+        if (!marked.ok) {
+            warn(`final-confirm no button found: ${JSON.stringify(marked)}`);
+            await takeScreenshot(page, `remove_final_nobtn_${attempt}`, wlog);
+            return false;
+        }
+
+        const h = await page.$(`[${MARK}]`).catch(() => null);
+        if (!h) {
+            warn(`final-confirm handle lost`);
+            return false;
+        }
+        try { await h.click({ delay: 50 }); }
+        catch (e) {
+            warn(`final-confirm CDP click failed: ${e.message}; falling back to DOM click`);
+            await page.evaluate((attr) => document.querySelector(`[${attr}]`)?.click(), MARK).catch(() => { });
+        } finally {
+            await h.dispose().catch(() => { });
+        }
+        log(`final-confirm clicked: "${marked.text}"`);
+        await sleep(3500);
+
+        // 点完可能再次跳到 challenge（极少但防御性）或直接到 /family/details
+        const afterUrl = page.url();
+        log(`final-confirm post-click url=${afterUrl.substring(0, 120)}`);
+        if (/\/challenge\/|verifyit|verify-account|\/2sv/i.test(afterUrl)) {
+            log(`final-confirm triggered another challenge; solving`);
+            const solved = await solveMidflowChallenge(page, hostAccount, tag, wlog);
+            if (!solved) return false;
+            await sleep(2000);
+        }
+        // 回到循环顶 check URL —— 如果不再是 /family/remove/ 就退出
+    }
+
+    warn(`final-confirm loop exceeded max attempts, still on /family/remove/`);
+    return false;
 }
 
 const EMAIL_RE = /([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/g;
