@@ -21,7 +21,6 @@
 require('dotenv').config({ path: require('path').resolve(__dirname, '.env') });
 const fs = require('fs');
 const path = require('path');
-const http = require('http');
 const { randomUUID } = require('crypto');
 
 // Node 内置 fetch (undici) 默认不读 HTTPS_PROXY 环境变量。
@@ -43,6 +42,11 @@ const {
 } = require('./common/chrome');
 const { parseAccounts, addFailedRecord, AsyncMutex } = require('./common/state');
 const { googleLogin } = require('./common/google-login');
+const {
+    buildAuthUrl: _buildAuthUrl,
+    exchangeCode: _exchangeCode,
+    startCbServer: _startCbServer,
+} = require('./common/oauth');
 const {
     accountName,
     extractValidationUrl,
@@ -133,39 +137,16 @@ function shouldForceReauth(memberEmail, opts) {
 // ============ OAuth 回调服务器 ============
 
 function buildAuthUrl(port) {
-    return `${AUTH_URL}?${new URLSearchParams({
-        client_id: CLIENT_ID,
-        redirect_uri: `http://localhost:${port}/callback`,
-        response_type: 'code',
-        scope: SCOPES,
-        access_type: 'offline',
-        prompt: 'consent',
-    }).toString()}`;
+    return _buildAuthUrl({ clientId: CLIENT_ID, scopes: SCOPES.split(' '), port });
 }
 
 async function exchangeCode(code, port) {
-    const resp = await fetch(TOKEN_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({
-            code,
-            client_id: CLIENT_ID,
-            client_secret: CLIENT_SECRET,
-            redirect_uri: `http://localhost:${port}/callback`,
-            grant_type: 'authorization_code',
-        }).toString(),
+    return _exchangeCode({
+        code,
+        clientId: CLIENT_ID,
+        clientSecret: CLIENT_SECRET,
+        redirectUri: `http://localhost:${port}/callback`,
     });
-    const text = await resp.text();
-    let data;
-    try { data = JSON.parse(text); }
-    catch (_) { throw new Error(`Token exchange: non-JSON response (${resp.status}): ${text.slice(0, 200)}`); }
-    if (data.error) {
-        throw new Error(`Token exchange failed: ${data.error}: ${data.error_description || ''}`);
-    }
-    if (!data.refresh_token) {
-        throw new Error('Token exchange succeeded but no refresh_token (prompt=consent required?)');
-    }
-    return data;
 }
 
 /**
@@ -173,48 +154,7 @@ async function exchangeCode(code, port) {
  * codePromise 在收到 /callback?code=... 时 resolve 为 { code } 或 { error }。
  */
 function startCbServer(startPort, wlog) {
-    return new Promise((resolve, reject) => {
-        let done;
-        const codePromise = new Promise(r => { done = r; });
-        let attempts = 0;
-
-        function tryListen(port) {
-            if (port > startPort + PORT_RANGE_PER_WORKER) {
-                reject(new Error(`no available port in range ${startPort}~${port}`));
-                return;
-            }
-            attempts++;
-            const server = http.createServer((req, res) => {
-                try {
-                    const u = new URL(req.url, `http://localhost:${port}`);
-                    if (u.pathname === '/callback') {
-                        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-                        const code = u.searchParams.get('code');
-                        const err = u.searchParams.get('error');
-                        res.end(code
-                            ? '<h1>OK. You can close this tab.</h1>'
-                            : `<h1>FAIL: ${err || 'unknown'}</h1>`);
-                        done(code ? { code } : { error: err || 'unknown' });
-                    } else {
-                        res.writeHead(404); res.end('Not Found');
-                    }
-                } catch (_) {
-                    try { res.writeHead(500); res.end('err'); } catch (_2) { }
-                }
-            });
-            server.on('error', (e) => {
-                if (e.code === 'EADDRINUSE') {
-                    if (wlog) wlog.debug(`  port ${port} in use, trying ${port + 1}`);
-                    tryListen(port + 1);
-                } else { reject(e); }
-            });
-            server.listen(port, () => {
-                if (attempts > 1 && wlog) wlog.debug(`  cb server bound on ${port} (${attempts} tries)`);
-                resolve({ server, port, codePromise });
-            });
-        }
-        tryListen(startPort);
-    });
+    return _startCbServer(startPort, wlog);
 }
 
 // ============ 通过已登录的 page 拿 OAuth code ============
