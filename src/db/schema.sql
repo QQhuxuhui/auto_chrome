@@ -45,6 +45,7 @@ CREATE TABLE IF NOT EXISTS members (
 
   token           TEXT,
   token_meta      JSONB,
+  antigravity     JSONB,
 
   created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
