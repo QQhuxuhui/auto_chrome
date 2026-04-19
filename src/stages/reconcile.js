@@ -54,7 +54,9 @@ async function scrapeFamilyMembers(page, wlog) {
             const href = a.getAttribute('href') || '';
             if (!href || seen.has(href)) continue;
             // 过滤无关链接（如 Family Group 侧栏、Learn more 等）
-            if (!/family\/(member|invit)/i.test(href)) continue;
+            // 只要真成员行（family/member/...）和 pending 邀请（family/invitation/...）
+            // 排除 family/invitemembers（= "Send invitations" 按钮，不是成员）
+            if (!/family\/(member|invitation)\//i.test(href)) continue;
             seen.add(href);
             const text = (a.textContent || '').trim();
             // 跳过 host 自己（"Family manager" 标记）
@@ -360,10 +362,39 @@ async function clickRemoveAndConfirm(page, tag, wlog, hostAccount) {
     }).catch(e => ({ ok: false, error: e.message }));
 
     if (!step3.ok) {
-        // step 2.5 没导航 + 没 dialog = 点击没触发任何反应，或者页面结构变了
+        // Click 后既没导航也没 dialog —— 点击没触发任何反应。
+        // 对 Family Link 受监护账号（detail 页有"Give parental permissions"按钮）
+        // Puppeteer CDP click 有时不起效，改用 page.mouse 原生鼠标事件重试。
         warn(`step 3 no confirm dialog: ${JSON.stringify(step3)} (url=${page.url().substring(0, 100)})`);
         await takeScreenshot(page, `remove_noconfirm`, wlog);
-        // 即使这里找不到 dialog，也尝试继续 solve challenge —— 万一导航延迟了
+
+        // Retry via page.mouse.click at button's center
+        const retryInfo = await page.evaluate((attr) => {
+            const el = document.querySelector(`[${attr}]`);
+            if (!el) return null;
+            const r = el.getBoundingClientRect();
+            return { x: r.left + r.width / 2, y: r.top + r.height / 2, text: (el.textContent || '').trim().substring(0, 60) };
+        }, REMOVE_BTN_MARK).catch(() => null);
+
+        if (retryInfo) {
+            log(`retrying click via page.mouse at (${Math.round(retryInfo.x)}, ${Math.round(retryInfo.y)})`);
+            await page.mouse.click(retryInfo.x, retryInfo.y, { delay: 80 });
+            await sleep(3000);
+            const retryUrl = page.url();
+            const retryNav = /\/challenge\/|\/family\/remove\/|verifyit|verify-account|\/2sv/i.test(retryUrl);
+            log(`retry post-click url=${retryUrl.substring(0, 120)} navigatedAway=${retryNav}`);
+            if (retryNav) {
+                const solved = await solveMidflowChallenge(page, hostAccount, tag, wlog);
+                if (!solved) return false;
+                return await clickFinalRemoveConfirmIfAny(page, tag, hostAccount, wlog);
+            }
+            // retry 后还没动 → 确认点击根本没被接受
+            warn(`retry click also didn't trigger navigation — abandoning this member (may be Family Link parent-managed account requiring different flow)`);
+            await takeScreenshot(page, `remove_click_ignored`, wlog);
+            return false;
+        }
+
+        // 最后兜底：尝试 solve challenge 路径（万一导航延迟中）
         const solved = await solveMidflowChallenge(page, hostAccount, tag, wlog);
         if (!solved) return false;
         return await clickFinalRemoveConfirmIfAny(page, tag, hostAccount, wlog);
@@ -556,15 +587,50 @@ async function clickFamilyAnchorByHref(page, href, wlog) {
 /**
  * 抓取当前 detail 页面上显示的成员 email（带 data-email 属性或 text node）。
  */
-async function extractDetailEmail(page) {
-    return page.evaluate((emailPattern) => {
-        const re = new RegExp(emailPattern);
-        // 优先从 main content 区域找
-        const main = document.querySelector('main, [role="main"]') || document.body;
-        const text = main.innerText || '';
-        const m = text.match(re);
-        return m ? m[0].toLowerCase() : null;
-    }, EMAIL_RE.source).catch(() => null);
+async function extractDetailEmail(page, wlog) {
+    const result = await page.evaluate((emailPattern) => {
+        const re = new RegExp(emailPattern, 'g');
+        const main = document.querySelector('main, [role="main"]');
+        const mainText = (main && main.innerText) || '';
+        const bodyText = (document.body && document.body.innerText) || '';
+        const mainMatches = [];
+        const bodyMatches = [];
+        let m;
+        re.lastIndex = 0;
+        while ((m = re.exec(mainText)) !== null) mainMatches.push(m[1].toLowerCase());
+        re.lastIndex = 0;
+        while ((m = re.exec(bodyText)) !== null) bodyMatches.push(m[1].toLowerCase());
+        return {
+            mainText: mainText.substring(0, 500),
+            bodyText: bodyText.substring(0, 500),
+            mainMatches,
+            bodyMatches,
+            mainFound: !!main,
+        };
+    }, EMAIL_RE.source).catch((e) => ({ error: e.message }));
+
+    if (result && result.error) {
+        wlog && wlog.warn && wlog.warn(`extractDetailEmail evaluate error: ${result.error}`);
+        return null;
+    }
+
+    // 优先 main，否则 body
+    const first = (result.mainMatches && result.mainMatches[0])
+        || (result.bodyMatches && result.bodyMatches[0])
+        || null;
+
+    if (!first) {
+        wlog && wlog.warn && wlog.warn(
+            `extractDetailEmail: no email in page. ` +
+            `main=${result.mainFound ? 'yes' : 'missing'} ` +
+            `mainTextLen=${(result.mainText || '').length} ` +
+            `bodyTextLen=${(result.bodyText || '').length} ` +
+            `mainMatches=${JSON.stringify(result.mainMatches || [])} ` +
+            `bodyMatches=${JSON.stringify(result.bodyMatches || [])} ` +
+            `bodyHead="${(result.bodyText || '').substring(0, 200).replace(/\n/g, ' | ')}"`
+        );
+    }
+    return first;
 }
 
 /**
@@ -738,7 +804,9 @@ async function reconcileHost(hostRecord, browser, runId, wlog, options = {}) {
             for (const a of document.querySelectorAll('a[href*="family/"]')) {
                 const href = a.getAttribute('href') || '';
                 if (!href || seen.has(href)) continue;
-                if (!/family\/(member|invit)/i.test(href)) continue;
+                // 只要真成员行（family/member/...）和 pending 邀请（family/invitation/...）
+            // 排除 family/invitemembers（= "Send invitations" 按钮，不是成员）
+            if (!/family\/(member|invitation)\//i.test(href)) continue;
                 seen.add(href);
                 const text = (a.textContent || '').trim();
                 if (/family manager|家庭管理员/i.test(text)) continue;
@@ -823,7 +891,20 @@ async function reconcileHost(hostRecord, browser, runId, wlog, options = {}) {
             }
 
             wlog && wlog.info && wlog.info(`${tag} on detail page ${page.url().substring(0,100)}, invoking clickRemoveAndConfirm`);
-            const ok = await clickRemoveAndConfirm(page, tag, wlog, hostAccount);
+            let ok = await clickRemoveAndConfirm(page, tag, wlog, hostAccount);
+
+            // 移除后强制刷列表页 + **验证** anchor 是否真的消失
+            // （防止 clickRemoveAndConfirm 误报 true）
+            if (ok) {
+                await page.goto(FAMILY_URL, { waitUntil: 'networkidle2', timeout: 20000 }).catch(() => { });
+                await sleep(2000);
+                const stillThere = await page.evaluate((h) =>
+                    !!document.querySelector(`a[href*="${h}"]`), info.href).catch(() => false);
+                if (stillThere) {
+                    wlog && wlog.warn && wlog.warn(`${tag} remove reported success but anchor still on list — treating as failed`);
+                    ok = false;
+                }
+            }
 
             if (!ok) {
                 wlog && wlog.warn && wlog.warn(`${tag} remove UI failed, will retry next round`);
@@ -853,10 +934,11 @@ async function reconcileHost(hostRecord, browser, runId, wlog, options = {}) {
                 removedCount.unknown++;
             }
 
-            // 保证下一轮迭代从列表页开始
-            if (!/\/family\/details/.test(page.url())) {
+            // 迭代前已经 goto FAMILY_URL 过（成功路径）；失败路径这里再保险一次
+            const url = page.url();
+            if (!/\/family\/details(\?|$)/.test(url) || /rapt=/.test(url)) {
                 await page.goto(FAMILY_URL, { waitUntil: 'networkidle2', timeout: 20000 }).catch(() => { });
-                await sleep(1500);
+                await sleep(2000);
             }
         }
 
