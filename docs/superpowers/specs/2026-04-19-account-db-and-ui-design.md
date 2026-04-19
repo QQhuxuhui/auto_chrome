@@ -348,10 +348,11 @@ Start Pipeline
 
 | ☐ | email | status | host | fail | token | actions |
 |---|---|---|---|---|---|---|
-| ☐ | foo@gmail.com | joined | huxuhui123@... | 0 | — | [Detail] [Reset] [Abandon] |
+| ☐ | foo@gmail.com | joined | — | 0 | — | [Detail] [Reset] [Abandon] |
 | ☐ | bar@gmail.com | done | huxuhui123@... | 0 | `abc12345…` `[Copy]` | [Detail] |
 
 - `token` 列**默认只显示前 8 字符** + Copy 按钮；详情抽屉里显示全部
+- **`host` 列只在 `status='done'` 时显示绑定**；其他状态（`invite_pending`、`joined`、各种 `_failed` 等）一律显示 `—`。绑定关系 = "最终产出 token 的 host ↔ member"，中间态对用户不暴露。DB 底层 `host_id` 从 stage 1 就写入（pipeline 需要用它做 slot 计算和调度），只是 UI 不显示。调试时可在详情抽屉的"Current host (internal)"小字看真实 `host_id`。
 - 顶部过滤器：`status: [全部 ▼]  host: [全部 ▼]  search: ___`
 - 批量操作：`[Reset 选中] [Abandon 选中] [Delete 选中]`
 
@@ -493,9 +494,8 @@ for each member m in work (按 created_at ASC):
    - `your new family group member`
    - `you've been added to`
    - `你已加入` / `加入了你的家庭组`
-3. 若扫完收件箱没找到 family/join 的邀请邮件，**先做一次"对该 member 的 reconcile"**（即用 host 账号登录，看 Google family 页是否已有该 member）：
-   - 若已在家庭里 → 更新 `status=joined`、`joined_at=NOW()`、写 `events(event_type='skip', message='already in family, skipped stage2')`、return success（orchestrator 会在 stage 3 阶段把它捡起）
-   - 若不在家庭里 → 视为邀请邮件尚未到达，继续轮询直到 `INVITE_WAIT_TIMEOUT`，超时抛 `invite_email_timeout` → `accept_failed`
+3. 扫完收件箱仍找不到邀请邮件 → 继续轮询直到 `INVITE_WAIT_TIMEOUT` 超时 → `accept_failed`。
+   **不做**per-member reconcile（§6 步骤 1 的 upfront reconcile 已经覆盖"member 已在家庭"场景：若 reconcile 已把该 member 推进到 `joined`，orchestrator 的 stage 2 工作项过滤 `status='invite_pending'` 自动会跳过它）。极端情况（run 启动后 member 才加入家庭）由下一次 run 的 reconcile 自动捕获，最终一致。
 
 ### Events 写入时机
 
