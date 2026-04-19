@@ -84,12 +84,17 @@ async function scrapeFamilyMembers(page, wlog) {
             });
             continue;
         }
-        // joined member：visit detail 页抽邮箱
-        const absUrl = info.href.startsWith('http')
-            ? info.href
-            : `https://myaccount.google.com/${info.href.replace(/^\/+/, '')}`;
-        await page.goto(absUrl, { waitUntil: 'networkidle2', timeout: 20000 }).catch(() => { });
-        await sleep(2500);
+        // joined member：click 进入详情页（而不是直接 goto，避免 Google 反 bot）
+        if (!/\/family\/details/.test(page.url())) {
+            await page.goto(FAMILY_URL, { waitUntil: 'networkidle2', timeout: 20000 }).catch(() => { });
+            await sleep(1500);
+        }
+        const clicked = await clickFamilyAnchorByHref(page, info.href, wlog);
+        if (!clicked) {
+            wlog && wlog.warn && wlog.warn(`scrape: failed to click anchor for ${info.href}`);
+            continue;
+        }
+        await sleep(3000);
         const email = await extractDetailEmail(page);
         if (email) {
             results.push({
@@ -100,13 +105,12 @@ async function scrapeFamilyMembers(page, wlog) {
             });
             wlog && wlog.info && wlog.info(`scrape: joined ${email} (${info.text})`);
         } else {
-            wlog && wlog.warn && wlog.warn(`scrape: could not parse email on detail ${absUrl}`);
+            wlog && wlog.warn && wlog.warn(`scrape: could not parse email on detail ${info.href}`);
         }
+        // 回列表页，下次 click 用
+        await page.goto(FAMILY_URL, { waitUntil: 'networkidle2', timeout: 20000 }).catch(() => { });
+        await sleep(1500);
     }
-
-    // 回到列表页，下一次 evaluate 拿到的是最新 DOM
-    await page.goto(FAMILY_URL, { waitUntil: 'networkidle2', timeout: 20000 }).catch(() => { });
-    await sleep(1500);
 
     return results;
 }
@@ -477,6 +481,44 @@ async function clickFinalRemoveConfirmIfAny(page, tag, hostAccount, wlog) {
 const EMAIL_RE = /([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/g;
 
 /**
+ * 在当前 page（应在 /family/details 列表页）上按 href 找到 anchor，
+ * 用 CDP 真实点击导航到成员详情页。比直接 page.goto 更接近真人操作
+ * （带 referrer chain，不容易触发 Google 的防 bot 检测）。
+ *
+ * 返回 true 表示 click 成功，false 表示 anchor 找不到或 click 失败。
+ */
+async function clickFamilyAnchorByHref(page, href, wlog) {
+    const MARK = 'data-family-nav-anchor';
+    const marked = await page.evaluate((targetHref, attr) => {
+        document.querySelectorAll(`[${attr}]`).forEach(el => el.removeAttribute(attr));
+        for (const a of document.querySelectorAll('a[href*="family/"]')) {
+            if ((a.getAttribute('href') || '') === targetHref) {
+                a.setAttribute(attr, '1');
+                a.scrollIntoView({ block: 'center' });
+                return true;
+            }
+        }
+        return false;
+    }, href, MARK).catch(() => false);
+
+    if (!marked) {
+        wlog && wlog.warn && wlog.warn(`clickFamilyAnchorByHref: anchor not found for href=${href}`);
+        return false;
+    }
+    const h = await page.$(`[${MARK}]`).catch(() => null);
+    if (!h) return false;
+    try {
+        await h.click({ delay: 40 });
+    } catch (e) {
+        wlog && wlog.warn && wlog.warn(`clickFamilyAnchorByHref: CDP click failed: ${e.message}; falling back to DOM click`);
+        await page.evaluate((attr) => document.querySelector(`[${attr}]`)?.click(), MARK).catch(() => { });
+    } finally {
+        await h.dispose().catch(() => { });
+    }
+    return true;
+}
+
+/**
  * 抓取当前 detail 页面上显示的成员 email（带 data-email 属性或 text node）。
  */
 async function extractDetailEmail(page) {
@@ -683,14 +725,21 @@ async function reconcileHost(hostRecord, browser, runId, wlog, options = {}) {
         for (const info of anchorInfo) {
             let email = info.listPageEmail;
             let onDetailPage = false;
-            const absUrl = info.href.startsWith('http')
-                ? info.href
-                : `https://myaccount.google.com/${info.href.replace(/^\/+/, '')}`;
 
             if (!email) {
-                // joined member: 必须 visit detail 拿邮箱
-                await page.goto(absUrl, { waitUntil: 'networkidle2', timeout: 20000 }).catch(() => { });
-                await sleep(2500);
+                // joined member: 需要 visit detail 拿邮箱。用**点击 anchor** 而不是
+                // 直接 page.goto，让导航带上自然的 referrer chain（比较像真人）。
+                // 前置：如果当前 page 不在 list，先回到 list。
+                if (!/\/family\/details/.test(page.url())) {
+                    await page.goto(FAMILY_URL, { waitUntil: 'networkidle2', timeout: 20000 }).catch(() => { });
+                    await sleep(2000);
+                }
+                const clicked = await clickFamilyAnchorByHref(page, info.href, wlog);
+                if (!clicked) {
+                    wlog && wlog.warn && wlog.warn(`reconcile: failed to click anchor for ${info.href}`);
+                    continue;
+                }
+                await sleep(3000);
                 email = await extractDetailEmail(page);
                 onDetailPage = true;
             }
@@ -711,7 +760,7 @@ async function reconcileHost(hostRecord, browser, runId, wlog, options = {}) {
             const isUnknown = knownSet && !knownSet.has(emailLower);
 
             if (!disabledLocal && !isUnknown) {
-                // 保留：不需要动。如果在详情页就回去列表
+                // 保留：不需要动。回列表页供下一个 click 用
                 if (onDetailPage) {
                     await page.goto(FAMILY_URL, { waitUntil: 'networkidle2', timeout: 20000 }).catch(() => { });
                     await sleep(1500);
@@ -725,8 +774,18 @@ async function reconcileHost(hostRecord, browser, runId, wlog, options = {}) {
             wlog && wlog.info && wlog.info(`${tag} will remove from ${hostRecord.email}'s family`);
 
             if (!onDetailPage) {
-                await page.goto(absUrl, { waitUntil: 'networkidle2', timeout: 20000 }).catch(() => { });
-                await sleep(2500);
+                // pending invite 的情况：email 已从 listPageEmail 拿到，还没到详情页
+                // 同样用 click 导航（不用 goto）
+                if (!/\/family\/details/.test(page.url())) {
+                    await page.goto(FAMILY_URL, { waitUntil: 'networkidle2', timeout: 20000 }).catch(() => { });
+                    await sleep(2000);
+                }
+                const clicked = await clickFamilyAnchorByHref(page, info.href, wlog);
+                if (!clicked) {
+                    wlog && wlog.warn && wlog.warn(`${tag} failed to click into detail`);
+                    continue;
+                }
+                await sleep(3000);
             }
 
             const ok = await clickRemoveAndConfirm(page, tag, wlog, hostAccount);
