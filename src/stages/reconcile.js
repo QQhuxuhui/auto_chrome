@@ -514,9 +514,15 @@ async function clickFamilyAnchorByHref(page, href, wlog) {
         warn('marked handle lost before click');
         return false;
     }
+
+    // 关键修复：page.url() 在 CDP click 后会立刻变，但 DOM 还没加载。
+    // 必须用 waitForNavigation 等真正的 load 事件（并行于 click）。
     try {
-        await h.click({ delay: 40 });
-        info('CDP click dispatched');
+        await Promise.all([
+            page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => null),
+            h.click({ delay: 40 }),
+        ]);
+        info('CDP click dispatched + waitForNavigation settled');
     } catch (e) {
         warn(`CDP click failed: ${e.message}; falling back to DOM click`);
         await page.evaluate((attr) => document.querySelector(`[${attr}]`)?.click(), MARK).catch(() => { });
@@ -524,18 +530,26 @@ async function clickFamilyAnchorByHref(page, href, wlog) {
         await h.dispose().catch(() => { });
     }
 
-    // 等 URL 变化 —— click navigation 是异步的，轮询最多 12 秒
-    for (let i = 0; i < 48; i++) {
-        const u = page.url();
-        if (u !== beforeUrl) {
-            info(`navigated to ${u.substring(0, 120)} after ${i * 250}ms`);
-            // 额外等 DOM 稳定
-            await sleep(1500);
-            return true;
-        }
-        await sleep(250);
+    // 进一步等页面正文实际出现（Google SPA 可能 domcontentloaded 后还要填 DOM）
+    // 条件：body.innerText 包含一个 "@" 或 "Member" / "Family manager" / "Remove"
+    const contentReady = await page.waitForFunction(
+        () => {
+            const t = document.body ? document.body.innerText : '';
+            if (!t) return false;
+            // 详情页通常含邮箱 + Remove 文本；列表页含成员姓名列表
+            return /@|Member|Family manager|Remove|移除|成员/i.test(t) && t.length > 200;
+        },
+        { timeout: 10000, polling: 300 }
+    ).catch(() => null);
+
+    const finalUrl = page.url();
+    if (finalUrl !== beforeUrl) {
+        info(`navigated to ${finalUrl.substring(0, 120)}${contentReady ? ' (content ready)' : ' (content not confirmed)'}`);
+        // 再留一小段稳定时间
+        await sleep(1000);
+        return true;
     }
-    warn(`URL unchanged after 12s — click may not have triggered navigation`);
+    warn(`URL unchanged after navigation wait — click may not have triggered navigation`);
     return false;
 }
 
