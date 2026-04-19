@@ -11,16 +11,22 @@
 async function detectCaptchaChallenge(page) {
     try {
         const url = page.url() || '';
-        // Google 已知的验证拦截 URL 片段
-        if (/\/challenge\/(ipp|rp|recaptcha)/i.test(url)) return true;
+        // 只匹配 **明确是 reCAPTCHA 的** URL 路径。
+        // 注意：/challenge/ipp 是手机身份验证、/challenge/rp 是 recovery phone —— 都不是 captcha
+        // 由 google-login.js 的 verify_phone/challenge 分支处理。
+        if (/\/challenge\/recaptcha/i.test(url)) return true;
 
         const byText = await page.evaluate(() => {
             const t = (document.body && document.body.innerText) || '';
             if (!t) return false;
-            const re = /confirm you['\u2019]?re not a robot|i['\u2019]?m not a robot|not a robot|prove you are human|verify you are human|请证明您不是机器人|不是机器人|请确认您是真人/i;
+            // 收窄到「机器人/robot」专用短语。避免 "verify you are human"（某些手机验证页
+            // 和设备验证页可能出现类似"verify"关键词，会误判）。
+            const re = /confirm you['\u2019]?re not a robot|i['\u2019]?m not a robot|prove you['\u2019]?re not a robot|请证明您不是机器人|确认您不是机器人|请确认您是真人/i;
             if (re.test(t)) return true;
-            // 有 reCAPTCHA iframe
-            const rcFrame = document.querySelector('iframe[src*="recaptcha"], iframe[title*="reCAPTCHA" i]');
+            // reCAPTCHA iframe 是强信号
+            const rcFrame = document.querySelector(
+                'iframe[src*="google.com/recaptcha"], iframe[title*="reCAPTCHA" i], iframe[title*="recaptcha" i]'
+            );
             if (rcFrame) return true;
             return false;
         }).catch(() => false);
