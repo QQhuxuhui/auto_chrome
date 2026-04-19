@@ -16,8 +16,14 @@ const heroSms = require(path.join(COMMON_PATH, 'sms'));
  * which calls smsProvider.getNumberAndWaitCode({service, country}) directly.
  */
 function create(config) {
-    if (!config.heroSmsApiKey) {
-        throw new Error('HERO_SMS_API_KEY env required for hero-sms provider');
+    // API key check deferred to first actual SMS call — accounts that don't
+    // hit SMS (already-verified, cookie-cached sessions) shouldn't be blocked
+    // at provider instantiation. Eager check made smsBehavior='auto' fail
+    // even when no SMS challenge appeared.
+    function requireKey() {
+        if (!config.heroSmsApiKey) {
+            throw new Error('HERO_SMS_API_KEY env required for hero-sms provider');
+        }
     }
     // common/sms.js reads HERO_SMS_API_KEY from env internally — no extra wiring needed.
 
@@ -27,9 +33,13 @@ function create(config) {
         name: 'hero-sms',
 
         // Pass-through for google-login.js which calls getNumberAndWaitCode directly
-        getNumberAndWaitCode: heroSms.getNumberAndWaitCode.bind(heroSms),
+        getNumberAndWaitCode(...args) {
+            requireKey();
+            return heroSms.getNumberAndWaitCode(...args);
+        },
 
         async getPhone({ service, country }) {
+            requireKey();
             // Kick off the combined call; stash promise for waitCode to await.
             const id = `hero_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
             const p = heroSms.getNumberAndWaitCode({ service, country });
