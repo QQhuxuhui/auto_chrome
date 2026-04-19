@@ -7,6 +7,8 @@
     "start": "node auth.js",
     "start:verbose": "node auth.js --verbose",
     "start:test": "node auth.js --test 2 --verbose",
+    "server": "node server.js",
+    "db:init": "node ../scripts/init-db.js",
     "test:stage3": "node --test 3_sub2api.test.js",
     "test:stage3-local": "node --test 3_local_oauth.test.js",
     "test": "node --test 3_sub2api.test.js 3_local_oauth.test.js"
