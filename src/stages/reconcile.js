@@ -84,7 +84,7 @@ async function scrapeFamilyMembers(page, wlog) {
             });
             continue;
         }
-        // joined member：click 进入详情页（而不是直接 goto，避免 Google 反 bot）
+        // joined member：click 进入详情页（clickFamilyAnchorByHref 会等 URL 变化）
         if (!/\/family\/details/.test(page.url())) {
             await page.goto(FAMILY_URL, { waitUntil: 'networkidle2', timeout: 20000 }).catch(() => { });
             await sleep(1500);
@@ -94,7 +94,6 @@ async function scrapeFamilyMembers(page, wlog) {
             wlog && wlog.warn && wlog.warn(`scrape: failed to click anchor for ${info.href}`);
             continue;
         }
-        await sleep(3000);
         const email = await extractDetailEmail(page);
         if (email) {
             results.push({
@@ -488,7 +487,12 @@ const EMAIL_RE = /([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/g;
  * 返回 true 表示 click 成功，false 表示 anchor 找不到或 click 失败。
  */
 async function clickFamilyAnchorByHref(page, href, wlog) {
+    const info = (m) => wlog && wlog.info && wlog.info(`[anchor ${href}] ${m}`);
+    const warn = (m) => wlog && wlog.warn && wlog.warn(`[anchor ${href}] ${m}`);
+
     const MARK = 'data-family-nav-anchor';
+    const beforeUrl = page.url();
+
     const marked = await page.evaluate((targetHref, attr) => {
         document.querySelectorAll(`[${attr}]`).forEach(el => el.removeAttribute(attr));
         for (const a of document.querySelectorAll('a[href*="family/"]')) {
@@ -502,20 +506,37 @@ async function clickFamilyAnchorByHref(page, href, wlog) {
     }, href, MARK).catch(() => false);
 
     if (!marked) {
-        wlog && wlog.warn && wlog.warn(`clickFamilyAnchorByHref: anchor not found for href=${href}`);
+        warn(`anchor not found on current page`);
         return false;
     }
     const h = await page.$(`[${MARK}]`).catch(() => null);
-    if (!h) return false;
+    if (!h) {
+        warn('marked handle lost before click');
+        return false;
+    }
     try {
         await h.click({ delay: 40 });
+        info('CDP click dispatched');
     } catch (e) {
-        wlog && wlog.warn && wlog.warn(`clickFamilyAnchorByHref: CDP click failed: ${e.message}; falling back to DOM click`);
+        warn(`CDP click failed: ${e.message}; falling back to DOM click`);
         await page.evaluate((attr) => document.querySelector(`[${attr}]`)?.click(), MARK).catch(() => { });
     } finally {
         await h.dispose().catch(() => { });
     }
-    return true;
+
+    // 等 URL 变化 —— click navigation 是异步的，轮询最多 12 秒
+    for (let i = 0; i < 48; i++) {
+        const u = page.url();
+        if (u !== beforeUrl) {
+            info(`navigated to ${u.substring(0, 120)} after ${i * 250}ms`);
+            // 额外等 DOM 稳定
+            await sleep(1500);
+            return true;
+        }
+        await sleep(250);
+    }
+    warn(`URL unchanged after 12s — click may not have triggered navigation`);
+    return false;
 }
 
 /**
@@ -727,21 +748,21 @@ async function reconcileHost(hostRecord, browser, runId, wlog, options = {}) {
             let onDetailPage = false;
 
             if (!email) {
-                // joined member: 需要 visit detail 拿邮箱。用**点击 anchor** 而不是
-                // 直接 page.goto，让导航带上自然的 referrer chain（比较像真人）。
-                // 前置：如果当前 page 不在 list，先回到 list。
+                // joined member: 用 click 进详情页拿邮箱（不用 goto — 带自然 referrer）
                 if (!/\/family\/details/.test(page.url())) {
                     await page.goto(FAMILY_URL, { waitUntil: 'networkidle2', timeout: 20000 }).catch(() => { });
                     await sleep(2000);
                 }
                 const clicked = await clickFamilyAnchorByHref(page, info.href, wlog);
                 if (!clicked) {
-                    wlog && wlog.warn && wlog.warn(`reconcile: failed to click anchor for ${info.href}`);
+                    wlog && wlog.warn && wlog.warn(`reconcile: click navigation failed for ${info.href}, skipping`);
                     continue;
                 }
-                await sleep(3000);
                 email = await extractDetailEmail(page);
                 onDetailPage = true;
+                if (!email) {
+                    wlog && wlog.warn && wlog.warn(`reconcile: on ${page.url().substring(0,80)} but no email extractable`);
+                }
             }
 
             if (!email) {
@@ -774,20 +795,20 @@ async function reconcileHost(hostRecord, browser, runId, wlog, options = {}) {
             wlog && wlog.info && wlog.info(`${tag} will remove from ${hostRecord.email}'s family`);
 
             if (!onDetailPage) {
-                // pending invite 的情况：email 已从 listPageEmail 拿到，还没到详情页
-                // 同样用 click 导航（不用 goto）
+                // pending invite：email 已从列表 listPageEmail 拿到，还没进 detail
+                // 也用 click 导航（保持 referrer 自然）
                 if (!/\/family\/details/.test(page.url())) {
                     await page.goto(FAMILY_URL, { waitUntil: 'networkidle2', timeout: 20000 }).catch(() => { });
                     await sleep(2000);
                 }
                 const clicked = await clickFamilyAnchorByHref(page, info.href, wlog);
                 if (!clicked) {
-                    wlog && wlog.warn && wlog.warn(`${tag} failed to click into detail`);
+                    wlog && wlog.warn && wlog.warn(`${tag} failed to click into detail, skipping`);
                     continue;
                 }
-                await sleep(3000);
             }
 
+            wlog && wlog.info && wlog.info(`${tag} on detail page ${page.url().substring(0,100)}, invoking clickRemoveAndConfirm`);
             const ok = await clickRemoveAndConfirm(page, tag, wlog, hostAccount);
 
             if (!ok) {
