@@ -142,10 +142,42 @@ async function reconcileAgainstDB(hostRecord, googleEmails, runId) {
 }
 
 /**
+ * 检测当前页是否跳到了 "verify it's you" / 2FA 挑战页，若是则
+ * 调用 googleLogin 走一遍状态机（它能读 hostAccount.totp_secret 自动
+ * 填 TOTP 验证码）。失败返回 false。
+ */
+async function solveMidflowChallenge(page, hostAccount, tag, wlog) {
+    const url = page.url();
+    const isChallenge = /\/signin\/challenge\//i.test(url)
+        || /\/v3\/signin\/challenge\//i.test(url)
+        || /\/signin\/v2\/challenge\//i.test(url);
+    if (!isChallenge) return true;
+    wlog && wlog.info && wlog.info(`${tag} mid-flow challenge detected at ${url}; invoking googleLogin`);
+    if (!hostAccount) {
+        wlog && wlog.warn && wlog.warn(`${tag} challenge detected but no hostAccount passed — cannot auto-solve`);
+        return false;
+    }
+    try {
+        await googleLogin(page, {
+            email: hostAccount.email,
+            pass: hostAccount.password,
+            recovery: hostAccount.recovery_email || '',
+            totp_secret: hostAccount.totp_secret || undefined,
+        }, wlog);
+        wlog && wlog.info && wlog.info(`${tag} mid-flow challenge solved`);
+        return true;
+    } catch (e) {
+        wlog && wlog.warn && wlog.warn(`${tag} challenge solving failed: ${e.message}`);
+        return false;
+    }
+}
+
+/**
  * 在 Google Family 详情页点「Remove member」按钮并确认。
  * 前提：当前 page URL 已经是 /family/member/g/{id} 详情页。
+ * 确认后如遇 2FA 挑战会自动用 hostAccount.totp_secret 解开。
  */
-async function clickRemoveAndConfirm(page, tag, wlog) {
+async function clickRemoveAndConfirm(page, tag, wlog, hostAccount) {
     const warn = (m) => wlog && wlog.warn && wlog.warn(`${tag} ${m}`);
     const log = (m) => wlog && wlog.info && wlog.info(`${tag} ${m}`);
 
@@ -240,6 +272,15 @@ async function clickRemoveAndConfirm(page, tag, wlog) {
     }
     log(`confirmed: "${step3.text}" (in dialog: ${step3.inDialog})`);
     await sleep(3500);
+
+    // 点完确认可能触发 Google 的 "Verify it's you" 二次验证（尤其是敏感操作如移除家庭成员）
+    // 用 hostAccount.totp_secret 走一遍 login 状态机解开
+    const solved = await solveMidflowChallenge(page, hostAccount, tag, wlog);
+    if (!solved) {
+        await takeScreenshot(page, `remove_challenge_unsolved`, wlog);
+        return false;
+    }
+    await sleep(1500);
     return true;
 }
 
@@ -283,7 +324,7 @@ async function removeFamilyMember(page, memberEmail, wlog, opts = {}) {
         log(`fast path via cached href: ${opts.href}`);
         await page.goto(absUrl, { waitUntil: 'networkidle2', timeout: 20000 }).catch(() => { });
         await sleep(2500);
-        const ok = await clickRemoveAndConfirm(page, tag, wlog);
+        const ok = await clickRemoveAndConfirm(page, tag, wlog, opts.hostAccount);
         await page.goto(FAMILY_URL, { waitUntil: 'networkidle2', timeout: 20000 }).catch(() => { });
         await sleep(1500);
         return ok;
@@ -319,7 +360,7 @@ async function removeFamilyMember(page, memberEmail, wlog, opts = {}) {
             await h.dispose().catch(() => { });
         }
         await sleep(3500);
-        const ok = await clickRemoveAndConfirm(page, tag, wlog);
+        const ok = await clickRemoveAndConfirm(page, tag, wlog, opts.hostAccount);
         await page.goto(FAMILY_URL, { waitUntil: 'networkidle2', timeout: 20000 }).catch(() => { });
         await sleep(2000);
         return ok;
@@ -365,7 +406,7 @@ async function removeFamilyMember(page, memberEmail, wlog, opts = {}) {
             continue;
         }
         log(`  detail email matches target — removing`);
-        const ok = await clickRemoveAndConfirm(page, tag, wlog);
+        const ok = await clickRemoveAndConfirm(page, tag, wlog, opts.hostAccount);
         await page.goto(FAMILY_URL, { waitUntil: 'networkidle2', timeout: 20000 }).catch(() => { });
         await sleep(2000);
         if (ok) log('removal succeeded');
@@ -394,12 +435,8 @@ async function reconcileHost(hostRecord, browser, runId, wlog, options = {}) {
             totp_secret: hostRecord.totp_secret || undefined,
         }, wlog);
         await sleep(2000);
-        const familyMembers = await scrapeFamilyMembers(page, wlog);
-        const emails = familyMembers.map(m => m.email).filter(Boolean);
-        const emailToHref = new Map(familyMembers.map(m => [m.email.toLowerCase(), m.href]));
-        wlog && wlog.info && wlog.info(`reconcile: host ${hostRecord.email} has ${familyMembers.length} family member(s): ${emails.join(', ') || '(none)'}`);
 
-        // 先把远程状态同步到本地，确保下一步 listMembersNeedingFamilyRemoval 用最新数据
+        // ========== 1. 预加载决策输入（避免每个成员重复查 DB） ==========
         try {
             const syncResult = await antigravitySync.syncFromRemote();
             wlog && wlog.info && wlog.info(`reconcile sync: matched=${syncResult.matched} newly_disabled=${syncResult.newly_disabled.length}`);
@@ -407,61 +444,142 @@ async function reconcileHost(hostRecord, browser, runId, wlog, options = {}) {
             wlog && wlog.warn && wlog.warn(`reconcile sync failed: ${e.message}`);
         }
 
-        // 对 host 下面所有 antigravity.disabled=true 的成员执行移除
-        const toRemove = await membersDb.listMembersNeedingFamilyRemoval(hostRecord.id);
-        const emailLowerSet = new Set(emails.map(e => e.toLowerCase()));
-        for (const member of toRemove) {
-            const stillInFamily = emailLowerSet.has(member.email.toLowerCase());
-            if (!stillInFamily) {
-                wlog && wlog.info && wlog.info(`${member.email} already absent from family, cleaning local state`);
-            } else {
-                wlog && wlog.info && wlog.info(`removing ${member.email} from ${hostRecord.email}'s family (disabled on platform)`);
-                const href = emailToHref.get(member.email.toLowerCase());
-                const ok = await removeFamilyMember(page, member.email, wlog, { href });
-                if (!ok) {
-                    wlog && wlog.warn && wlog.warn(`skip ${member.email}: removal UI failed, will retry next round`);
-                    continue;
-                }
-            }
-            const agId = member.antigravity && member.antigravity.id;
-            if (agId) {
-                try {
-                    await antigravityClient.deleteAccount(agId);
-                } catch (e) {
-                    wlog && wlog.warn && wlog.warn(`DELETE platform ${agId} failed: ${e.message}`);
-                }
-            }
-            await membersDb.markRemovedFromFamily(member.id);
-            await membersDb.updateAntigravity(member.id, { id: null, disabled: false, disabled_reason: null });
-            await eventsDb.logEvent({
-                memberId: member.id, hostId: hostRecord.id, runId,
-                stage: 'reconcile', eventType: 'note',
-                message: `removed from family + antigravity (platform disabled: ${member.antigravity?.disabled_reason || 'unknown'})`,
-            });
-        }
+        const toRemoveByDisabled = await membersDb.listMembersNeedingFamilyRemoval(hostRecord.id);
+        const disabledByEmail = new Map(toRemoveByDisabled.map(m => [m.email.toLowerCase(), m]));
 
-        // 可选：删除「未知」家庭成员（不在本地 DB 的、也不是 host 自己的）
+        let knownSet = null;
         if (options.removeUnknown) {
             const localMembers = await membersDb.listMembers({ hostId: hostRecord.id, pageSize: 10000 });
-            const unknown = computeUnknownEmails(emails, localMembers, hostRecord.email);
-            wlog && wlog.info && wlog.info(`removeUnknown: ${unknown.length} unknown email(s) on ${hostRecord.email}'s family: ${unknown.join(', ') || '(none)'}`);
-            for (const email of unknown) {
-                wlog && wlog.info && wlog.info(`removing unknown member ${email} from ${hostRecord.email}'s family`);
-                const href = emailToHref.get(email.toLowerCase());
-                const ok = await removeFamilyMember(page, email, wlog, { href });
-                if (ok) {
-                    await eventsDb.logEvent({
-                        memberId: null, hostId: hostRecord.id, runId,
-                        stage: 'reconcile', eventType: 'note',
-                        message: `removed unknown family member: ${email}`,
-                    });
-                } else {
-                    wlog && wlog.warn && wlog.warn(`failed to remove unknown member ${email}`);
+            knownSet = new Set([hostRecord.email.toLowerCase(), ...localMembers.map(m => m.email.toLowerCase())]);
+        }
+
+        // hostAccount 供 clickRemoveAndConfirm 遇到 2FA 挑战时用
+        const hostAccount = {
+            email: hostRecord.email,
+            password: hostRecord.password,
+            recovery_email: hostRecord.recovery_email || '',
+            totp_secret: hostRecord.totp_secret || undefined,
+        };
+
+        // ========== 2. 列表页枚举所有 anchor ==========
+        await page.goto(FAMILY_URL, { waitUntil: 'networkidle2', timeout: 30000 }).catch(() => { });
+        await sleep(2000);
+
+        const anchorInfo = await page.evaluate(() => {
+            const out = [];
+            const seen = new Set();
+            for (const a of document.querySelectorAll('a[href*="family/"]')) {
+                const href = a.getAttribute('href') || '';
+                if (!href || seen.has(href)) continue;
+                if (!/family\/(member|invit)/i.test(href)) continue;
+                seen.add(href);
+                const text = (a.textContent || '').trim();
+                if (/family manager|家庭管理员/i.test(text)) continue;
+                const emailMatch = text.match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
+                out.push({
+                    href, text: text.substring(0, 120),
+                    listPageEmail: emailMatch ? emailMatch[1].toLowerCase() : null,
+                });
+            }
+            return out;
+        }).catch(() => []);
+
+        wlog && wlog.info && wlog.info(`reconcile: ${anchorInfo.length} family anchor(s) on list page`);
+
+        // ========== 3. 一次性遍历：visit detail → 决策 → 当场移除 ==========
+        const seenEmails = [];  // 用于末尾 reconcileAgainstDB
+        const removedCount = { disabled: 0, unknown: 0, failed: 0 };
+
+        for (const info of anchorInfo) {
+            let email = info.listPageEmail;
+            let onDetailPage = false;
+            const absUrl = info.href.startsWith('http')
+                ? info.href
+                : `https://myaccount.google.com/${info.href.replace(/^\/+/, '')}`;
+
+            if (!email) {
+                // joined member: 必须 visit detail 拿邮箱
+                await page.goto(absUrl, { waitUntil: 'networkidle2', timeout: 20000 }).catch(() => { });
+                await sleep(2500);
+                email = await extractDetailEmail(page);
+                onDetailPage = true;
+            }
+
+            if (!email) {
+                wlog && wlog.warn && wlog.warn(`reconcile: could not extract email for ${info.href} (text="${info.text}")`);
+                if (onDetailPage) {
+                    await page.goto(FAMILY_URL, { waitUntil: 'networkidle2', timeout: 20000 }).catch(() => { });
+                    await sleep(1500);
                 }
+                continue;
+            }
+
+            seenEmails.push(email);
+
+            const emailLower = email.toLowerCase();
+            const disabledLocal = disabledByEmail.get(emailLower);
+            const isUnknown = knownSet && !knownSet.has(emailLower);
+
+            if (!disabledLocal && !isUnknown) {
+                // 保留：不需要动。如果在详情页就回去列表
+                if (onDetailPage) {
+                    await page.goto(FAMILY_URL, { waitUntil: 'networkidle2', timeout: 20000 }).catch(() => { });
+                    await sleep(1500);
+                }
+                continue;
+            }
+
+            // 需要移除
+            const reason = disabledLocal ? 'platform disabled' : 'unknown';
+            const tag = `[remove ${email}/${reason}]`;
+            wlog && wlog.info && wlog.info(`${tag} will remove from ${hostRecord.email}'s family`);
+
+            if (!onDetailPage) {
+                await page.goto(absUrl, { waitUntil: 'networkidle2', timeout: 20000 }).catch(() => { });
+                await sleep(2500);
+            }
+
+            const ok = await clickRemoveAndConfirm(page, tag, wlog, hostAccount);
+
+            if (!ok) {
+                wlog && wlog.warn && wlog.warn(`${tag} remove UI failed, will retry next round`);
+                removedCount.failed++;
+            } else if (disabledLocal) {
+                // 删平台记录 + 更新本地 DB
+                const agId = disabledLocal.antigravity && disabledLocal.antigravity.id;
+                if (agId) {
+                    try { await antigravityClient.deleteAccount(agId); }
+                    catch (e) { wlog && wlog.warn && wlog.warn(`DELETE platform ${agId} failed: ${e.message}`); }
+                }
+                await membersDb.markRemovedFromFamily(disabledLocal.id);
+                await membersDb.updateAntigravity(disabledLocal.id, { id: null, disabled: false, disabled_reason: null });
+                await eventsDb.logEvent({
+                    memberId: disabledLocal.id, hostId: hostRecord.id, runId,
+                    stage: 'reconcile', eventType: 'note',
+                    message: `removed from family + antigravity (platform disabled: ${disabledLocal.antigravity?.disabled_reason || 'unknown'})`,
+                });
+                removedCount.disabled++;
+            } else {
+                // unknown
+                await eventsDb.logEvent({
+                    memberId: null, hostId: hostRecord.id, runId,
+                    stage: 'reconcile', eventType: 'note',
+                    message: `removed unknown family member: ${email}`,
+                });
+                removedCount.unknown++;
+            }
+
+            // 保证下一轮迭代从列表页开始
+            if (!/\/family\/details/.test(page.url())) {
+                await page.goto(FAMILY_URL, { waitUntil: 'networkidle2', timeout: 20000 }).catch(() => { });
+                await sleep(1500);
             }
         }
 
-        return reconcileAgainstDB(hostRecord, emails, runId);
+        wlog && wlog.info && wlog.info(`reconcile: host ${hostRecord.email} — saw ${seenEmails.length} member(s), removed disabled=${removedCount.disabled} unknown=${removedCount.unknown} failed=${removedCount.failed}`);
+
+        // 4. 对本地 DB 做最终 reconcile（本地有但 Google 没有的 joined/done → removed_from_family）
+        return reconcileAgainstDB(hostRecord, seenEmails, runId);
     } finally {
         await page.close().catch(() => { });
         await clearBrowserSession(browser, wlog);
