@@ -23,9 +23,9 @@ function resetMock() {
 
 test('listAccounts issues GET with Bearer auth', async () => {
     resetMock();
-    mockResponse = { ok: true, status: 200, headers: new Map([['content-type', 'application/json']]),
+    mockResponse = { ok: true, status: 200,
+        headers: { get: (k) => k === 'content-type' ? 'application/json' : null },
         json: async () => ({ accounts: [{ id: 'u1', email: 'a@x' }], current_id: null }) };
-    mockResponse.headers.get = function (k) { return this.get(k); };
     const r = await listAccounts();
     assert.equal(calls.length, 1);
     assert.equal(calls[0].url, 'http://test-platform:9999/api/accounts');
