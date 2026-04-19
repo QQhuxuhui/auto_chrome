@@ -58,11 +58,15 @@ async function scrapeFamilyMembers(page, wlog) {
             // 排除 family/invitemembers（= "Send invitations" 按钮，不是成员）
             if (!/family\/(member|invitation)\//i.test(href)) continue;
             seen.add(href);
-            const text = (a.textContent || '').trim();
+            // innerText 比 textContent 多一点好处：保留 block-level 换行，避免
+            // 把姓名/邮箱/"Invitation sent" 拼成一个没有分隔符的长字符串（曾经
+            // 导致 regex 把 "gmail.cominvitation" 当作一整个 TLD）
+            const text = (a.innerText || a.textContent || '').trim();
             // 跳过 host 自己（"Family manager" 标记）
             if (/family manager|家庭管理员/i.test(text)) continue;
             // 列表页可见邮箱（pending invite 的情况）
-            const emailMatch = text.match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
+            // (?![a-zA-Z]) 防止 TLD 贪婪吃掉后续文本（双重保险）
+            const emailMatch = text.match(/(?<![a-zA-Z])([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,10})(?![a-zA-Z])/);
             out.push({
                 href,
                 text: text.substring(0, 120),
@@ -508,7 +512,12 @@ async function clickFinalRemoveConfirmIfAny(page, tag, hostAccount, wlog) {
     return false;
 }
 
-const EMAIL_RE = /([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/g;
+// 边界要求：
+//   - (?<![a-zA-Z]) 前面不能是字母 → 避免 "Memberxxx@gmail.com" 把 "Member" 当 local 前缀
+//   - {2,10} TLD 长度上界 → "cominvitation"(13) 不会被当 TLD
+//   - (?![a-zA-Z]) 后面不能是字母 → 双重保险
+// 任一条件不满足时，regex 不匹配 → 上层 fall through 到详情页提取（clean text）
+const EMAIL_RE = /(?<![a-zA-Z])([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,10})(?![a-zA-Z])/g;
 
 /**
  * 在当前 page（应在 /family/details 列表页）上按 href 找到 anchor，
@@ -808,9 +817,11 @@ async function reconcileHost(hostRecord, browser, runId, wlog, options = {}) {
             // 排除 family/invitemembers（= "Send invitations" 按钮，不是成员）
             if (!/family\/(member|invitation)\//i.test(href)) continue;
                 seen.add(href);
-                const text = (a.textContent || '').trim();
+                // innerText 保留 block 换行，避免 textContent 把 "email" + "Invitation sent"
+                // 拼成 "gmail.cominvitation" 这种误导 regex 的长串
+                const text = (a.innerText || a.textContent || '').trim();
                 if (/family manager|家庭管理员/i.test(text)) continue;
-                const emailMatch = text.match(/([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/);
+                const emailMatch = text.match(/(?<![a-zA-Z])([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,10})(?![a-zA-Z])/);
                 out.push({
                     href, text: text.substring(0, 120),
                     listPageEmail: emailMatch ? emailMatch[1].toLowerCase() : null,
@@ -942,7 +953,7 @@ async function reconcileHost(hostRecord, browser, runId, wlog, options = {}) {
             }
         }
 
-        wlog && wlog.info && wlog.info(`reconcile: host ${hostRecord.email} — saw ${seenEmails.length} member(s), removed disabled=${removedCount.disabled} unknown=${removedCount.unknown} failed=${removedCount.failed}`);
+        wlog && wlog.info && wlog.info(`reconcile: host ${hostRecord.email} — saw ${seenEmails.length} member(s): [${seenEmails.join(', ')}], removed disabled=${removedCount.disabled} unknown=${removedCount.unknown} failed=${removedCount.failed}`);
 
         // 4. 对本地 DB 做最终 reconcile（本地有但 Google 没有的 joined/done → removed_from_family）
         return reconcileAgainstDB(hostRecord, seenEmails, runId);
