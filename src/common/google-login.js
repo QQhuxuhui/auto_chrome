@@ -106,7 +106,8 @@ async function googleLogin(page, account, wlog, opts = {}) {
                     });
                     return visible.length >= 1;
                 }, { timeout: 5000 }).catch(() => { /* 超时也继续，让下面的诊断暴露 */ });
-                await sleep(500);
+                // 200ms 给 React 处理 input 事件绑定；500ms 过度保守。
+                await sleep(200);
 
                 // 诊断日志：URL / 可见密码框数量 / 累计进入次数，定位"密码框反复刷新"
                 const pwDiag = await page.evaluate(() => {
@@ -576,8 +577,10 @@ async function googleLogin(page, account, wlog, opts = {}) {
                     wlog.info(`  Code: ${code} (valid for ${remainingSeconds}s)`);
                     wlog.info('  ============================================');
 
-                    // 如果剩余时间太短，等待下一个周期
-                    if (remainingSeconds < 5) {
+                    // 只有剩余时间 < 3s 才等下一周期 —— 输入 + Enter + 提交约 1-2s，
+                    // 留 1s 缓冲足够。阈值从 5 降到 3 能平均每次 TOTP 少等 1-2s，
+                    // 且撞上等待的概率从 17% (5/30) 降到 10% (3/30)。
+                    if (remainingSeconds < 3) {
                         wlog.info(`  Code expiring soon, waiting ${remainingSeconds + 1}s for new code...`);
                         await sleep((remainingSeconds + 1) * 1000);
                         const fresh = getTOTPWithTTL(account.totp_secret);
