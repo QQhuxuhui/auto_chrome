@@ -12,6 +12,7 @@ gpt_plus_state.json
 *.bak.[0-9]*
 
 # Sensitive files
+.env
 src/.env
 hosts.txt
 members.txt
