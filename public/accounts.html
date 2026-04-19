@@ -1,1 +1,256 @@
-<!doctype html><title>placeholder</title><h1>accounts placeholder</h1>
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>Accounts — Gemini Family Pipeline</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
+    <link rel="stylesheet" href="/public/css/app.css">
+</head>
+<body class="p-6">
+<nav class="mb-6 flex gap-3 items-center">
+    <span class="text-lg font-semibold">Gemini Family Pipeline</span>
+    <div class="flex-1"></div>
+    <a href="/" class="px-3 py-1 rounded hover:bg-slate-800">Dashboard</a>
+    <a href="/accounts" class="px-3 py-1 rounded hover:bg-slate-800 font-medium">Accounts</a>
+    <a href="/runs" class="px-3 py-1 rounded hover:bg-slate-800">Runs</a>
+</nav>
+
+<main x-data="accounts()" x-init="load()" class="space-y-4">
+    <!-- Migration banner -->
+    <div x-show="migrate && (migrate.hosts?.shouldImport || migrate.members?.shouldImport)"
+         class="card p-4 border-amber-500/50 bg-amber-950/30">
+        🔔 检测到本地 txt 文件 &nbsp;(hosts: <span x-text="migrate?.hosts?.fileCount ?? 0"></span>,
+        members: <span x-text="migrate?.members?.fileCount ?? 0"></span>)
+        <button @click="doImport()" class="ml-3 px-3 py-1 bg-amber-700 hover:bg-amber-600 rounded">从 txt 导入</button>
+    </div>
+
+    <div class="flex gap-2 border-b border-slate-700">
+        <button @click="tab='hosts'" :class="tab==='hosts' ? 'text-white font-semibold border-b-2 border-emerald-500' : 'text-slate-400'" class="px-4 py-2">Hosts</button>
+        <button @click="tab='members'" :class="tab==='members' ? 'text-white font-semibold border-b-2 border-emerald-500' : 'text-slate-400'" class="px-4 py-2">Members</button>
+    </div>
+
+    <!-- Hosts tab -->
+    <section x-show="tab==='hosts'">
+        <div class="flex gap-2 mb-3">
+            <button @click="openBulk='hosts'" class="px-3 py-1 bg-slate-700 rounded">+ 批量导入</button>
+            <input x-model="hostSearch" @input.debounce.300ms="loadHosts()" placeholder="搜索 email"
+                   class="px-3 py-1 bg-slate-800 rounded flex-1">
+        </div>
+        <table class="data card">
+            <thead><tr><th>email</th><th>slot</th><th>disabled</th><th>actions</th></tr></thead>
+            <tbody>
+                <template x-for="h in hosts" :key="h.id">
+                    <tr>
+                        <td class="mono" x-text="h.email"></td>
+                        <td><span x-text="`${h.slot_used} / 5`"></span></td>
+                        <td>
+                            <input type="checkbox" :checked="h.disabled" @change="toggleDisabled(h)">
+                        </td>
+                        <td>
+                            <button @click="deleteHost(h)" class="text-red-400 text-sm">Delete</button>
+                        </td>
+                    </tr>
+                </template>
+                <tr x-show="!hosts.length"><td colspan="4" class="text-center text-slate-500 py-4">no hosts</td></tr>
+            </tbody>
+        </table>
+    </section>
+
+    <!-- Members tab -->
+    <section x-show="tab==='members'">
+        <div class="flex gap-2 mb-3">
+            <button @click="openBulk='members'" class="px-3 py-1 bg-slate-700 rounded">+ 批量导入</button>
+            <select x-model="memberStatusFilter" @change="loadMembers()" class="px-2 py-1 bg-slate-800 rounded">
+                <option value="">全部状态</option>
+                <template x-for="s in ['new','invite_pending','invite_failed','joined','accept_failed','oauth_failed','done','abandoned','removed_from_family']" :key="s">
+                    <option :value="s" x-text="s"></option>
+                </template>
+            </select>
+            <input x-model="memberSearch" @input.debounce.300ms="loadMembers()" placeholder="搜索 email"
+                   class="px-3 py-1 bg-slate-800 rounded flex-1">
+        </div>
+        <table class="data card">
+            <thead><tr><th>email</th><th>status</th><th>host</th><th>fail</th><th>token</th><th>actions</th></tr></thead>
+            <tbody>
+                <template x-for="m in members" :key="m.id">
+                    <tr>
+                        <td class="mono" x-text="m.email"></td>
+                        <td><span class="pill" :class="m.status" x-text="m.status"></span></td>
+                        <td class="mono text-xs">
+                            <span x-text="m.status === 'done' ? hostEmailById(m.host_id) : '—'"></span>
+                        </td>
+                        <td x-text="m.fail_count"></td>
+                        <td>
+                            <template x-if="m.token">
+                                <span>
+                                    <span class="mono text-xs" x-text="App.shortToken(m.token)"></span>
+                                    <button @click="copyToken(m)" class="ml-1 text-xs text-blue-400">Copy</button>
+                                </span>
+                            </template>
+                            <template x-if="!m.token"><span>—</span></template>
+                        </td>
+                        <td class="space-x-2 text-sm">
+                            <button @click="openDetail(m)" class="text-blue-400">Detail</button>
+                            <button @click="resetMember(m)" class="text-yellow-400">Reset</button>
+                            <button @click="abandonMember(m)" class="text-orange-400">Abandon</button>
+                            <button @click="deleteMember(m)" class="text-red-400">Delete</button>
+                        </td>
+                    </tr>
+                </template>
+                <tr x-show="!members.length"><td colspan="6" class="text-center text-slate-500 py-4">no members</td></tr>
+            </tbody>
+        </table>
+    </section>
+
+    <!-- Bulk upload modal -->
+    <div x-show="openBulk" class="backdrop open" @click="openBulk=''"></div>
+    <div x-show="openBulk" class="drawer open" @click.stop>
+        <h2 class="text-lg font-semibold mb-4">批量导入 <span class="mono text-base" x-text="openBulk"></span></h2>
+        <p class="text-sm text-slate-400 mb-2">格式: <span class="mono">email:pass:recovery:totp</span>（recovery / totp 可选）。重复 email 跳过。</p>
+        <textarea x-model="bulkText" rows="12" class="w-full bg-slate-900 p-2 mono text-sm rounded"
+                  placeholder="abc@gmail.com:pw1:rec@example.com:TOTP123..."></textarea>
+        <div class="mt-3 flex gap-2">
+            <button @click="openBulk=''" class="px-3 py-1 bg-slate-700 rounded">Cancel</button>
+            <button @click="submitBulk()" class="px-3 py-1 bg-emerald-700 rounded">上传</button>
+        </div>
+        <div x-show="bulkResult" class="mt-3 text-sm">
+            <pre class="mono text-xs p-2 bg-black/40 rounded" x-text="JSON.stringify(bulkResult, null, 2)"></pre>
+        </div>
+    </div>
+
+    <!-- Member detail drawer -->
+    <div x-show="detailOpen" class="backdrop open" @click="detailOpen=false"></div>
+    <div x-show="detailOpen" class="drawer open" @click.stop>
+        <template x-if="detail">
+            <div class="space-y-3">
+                <h2 class="text-lg font-semibold mono" x-text="detail.email"></h2>
+                <div class="text-sm space-y-1">
+                    <div>status: <span class="pill" :class="detail.status" x-text="detail.status"></span></div>
+                    <div>fail_count: <span x-text="detail.fail_count"></span></div>
+                    <div>invited_at: <span class="mono" x-text="detail.invited_at || '—'"></span></div>
+                    <div>joined_at: <span class="mono" x-text="detail.joined_at || '—'"></span></div>
+                    <div>done_at: <span class="mono" x-text="detail.done_at || '—'"></span></div>
+                    <div>last_error: <span class="mono text-red-400" x-text="detail.last_error || '—'"></span></div>
+                    <div class="text-xs text-slate-500">Current host (internal): <span class="mono" x-text="hostEmailById(detail.host_id)"></span></div>
+                </div>
+                <div>
+                    <div class="text-sm font-semibold mb-1">Token</div>
+                    <textarea readonly class="w-full bg-slate-900 p-2 mono text-xs rounded" rows="3" x-text="detail.token || ''"></textarea>
+                </div>
+                <div>
+                    <div class="text-sm font-semibold mb-1">Events</div>
+                    <ul class="text-xs space-y-1 max-h-80 overflow-y-auto">
+                        <template x-for="e in detail.events" :key="e.id">
+                            <li class="mono">
+                                <span x-text="new Date(e.created_at).toLocaleString()"></span>
+                                · <span x-text="e.stage || '-'"></span>
+                                · <span x-text="e.event_type"></span>
+                                · <span class="text-slate-400" x-text="e.message || ''"></span>
+                            </li>
+                        </template>
+                    </ul>
+                </div>
+                <div class="flex gap-2 pt-2">
+                    <button @click="detailOpen=false" class="px-3 py-1 bg-slate-700 rounded">Close</button>
+                </div>
+            </div>
+        </template>
+    </div>
+</main>
+
+<script>
+function accounts() {
+    return {
+        tab: 'hosts',
+        hosts: [],
+        hostMap: {},
+        members: [],
+        migrate: null,
+        hostSearch: '',
+        memberSearch: '',
+        memberStatusFilter: '',
+        openBulk: '',
+        bulkText: '',
+        bulkResult: null,
+        detailOpen: false,
+        detail: null,
+        async load() {
+            await Promise.all([this.loadHosts(), this.loadMembers(), this.loadMigrate()]);
+        },
+        async loadHosts() {
+            const q = this.hostSearch ? `?search=${encodeURIComponent(this.hostSearch)}` : '';
+            this.hosts = await App.api('GET', `/api/hosts${q}`);
+            this.hostMap = {};
+            for (const h of this.hosts) this.hostMap[h.id] = h.email;
+        },
+        async loadMembers() {
+            const q = new URLSearchParams();
+            if (this.memberSearch) q.set('search', this.memberSearch);
+            if (this.memberStatusFilter) q.set('status', this.memberStatusFilter);
+            const qs = q.toString() ? `?${q.toString()}` : '';
+            this.members = await App.api('GET', `/api/members${qs}`);
+        },
+        async loadMigrate() {
+            try { this.migrate = await App.api('GET', '/api/migrate/detect'); }
+            catch (_) { this.migrate = null; }
+        },
+        hostEmailById(id) {
+            if (!id) return '—';
+            return this.hostMap[id] || `#${id}`;
+        },
+        async submitBulk() {
+            const url = this.openBulk === 'hosts' ? '/api/hosts/bulk' : '/api/members/bulk';
+            try {
+                this.bulkResult = await App.api('POST', url, { lines: this.bulkText });
+                await (this.openBulk === 'hosts' ? this.loadHosts() : this.loadMembers());
+                this.bulkText = '';
+            } catch (e) { alert(e.message); }
+        },
+        async doImport() {
+            try {
+                const r = await App.api('POST', '/api/migrate/txt', {});
+                alert(`hosts: ${JSON.stringify(r.hosts)}\nmembers: ${JSON.stringify(r.members)}`);
+                await this.load();
+            } catch (e) { alert(e.message); }
+        },
+        async toggleDisabled(h) {
+            try { await App.api('PATCH', `/api/hosts/${h.id}`, { disabled: !h.disabled }); await this.loadHosts(); }
+            catch (e) { alert(e.message); }
+        },
+        async deleteHost(h) {
+            if (!confirm(`Delete host ${h.email}?`)) return;
+            try { await App.api('DELETE', `/api/hosts/${h.id}`); await this.loadHosts(); }
+            catch (e) { alert(e.message); }
+        },
+        async openDetail(m) {
+            try {
+                this.detail = await App.api('GET', `/api/members/${m.id}`);
+                this.detailOpen = true;
+            } catch (e) { alert(e.message); }
+        },
+        async copyToken(m) {
+            const ok = await App.copyText(m.token);
+            alert(ok ? 'copied' : 'copy failed');
+        },
+        async resetMember(m) {
+            if (!confirm(`Reset ${m.email}?`)) return;
+            try { await App.api('PATCH', `/api/members/${m.id}?action=reset`, {}); await this.loadMembers(); }
+            catch (e) { alert(e.message); }
+        },
+        async abandonMember(m) {
+            if (!confirm(`Abandon ${m.email}?`)) return;
+            try { await App.api('PATCH', `/api/members/${m.id}?action=abandon`, {}); await this.loadMembers(); }
+            catch (e) { alert(e.message); }
+        },
+        async deleteMember(m) {
+            if (!confirm(`Delete ${m.email}?`)) return;
+            try { await App.api('DELETE', `/api/members/${m.id}`); await this.loadMembers(); }
+            catch (e) { alert(e.message); }
+        },
+    };
+}
+</script>
+<script src="/public/js/app.js"></script>
+</body>
+</html>
