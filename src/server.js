@@ -22,6 +22,7 @@ async function build() {
 
     await app.register(require('./routes/hosts'));
     await app.register(require('./routes/members'));
+    await app.register(require('./routes/status'));
 
     app.get('/', async (_req, reply) => reply.sendFile('index.html'));
     app.get('/accounts', async (_req, reply) => reply.sendFile('accounts.html'));
