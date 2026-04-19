@@ -1,0 +1,36 @@
+/* App-level overrides on top of Tailwind CDN */
+body {
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    background: #0a0a0f;
+    color: #e5e7eb;
+}
+.card {
+    background: linear-gradient(135deg, rgba(30,30,50,0.8), rgba(20,20,35,0.9));
+    border: 1px solid rgba(100,100,150,0.2);
+    backdrop-filter: blur(10px);
+    border-radius: 12px;
+}
+.card:hover {
+    border-color: rgba(100,100,200,0.4);
+}
+.mono { font-family: 'JetBrains Mono', ui-monospace, monospace; }
+.pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; }
+.pill.new { background: #1e293b; color: #94a3b8; }
+.pill.invite_pending { background: #1e40af; color: #bfdbfe; }
+.pill.invite_failed, .pill.accept_failed, .pill.oauth_failed { background: #7f1d1d; color: #fecaca; }
+.pill.joined { background: #166534; color: #bbf7d0; }
+.pill.done { background: #14532d; color: #a7f3d0; }
+.pill.abandoned { background: #44403c; color: #d6d3d1; }
+.pill.removed_from_family { background: #581c87; color: #e9d5ff; }
+.drawer {
+    position: fixed; top: 0; right: 0; height: 100vh; width: min(560px, 100%);
+    background: #0a0a0f; border-left: 1px solid rgba(100,100,150,0.3);
+    transform: translateX(100%); transition: transform 240ms ease;
+    overflow-y: auto; z-index: 50; padding: 16px;
+}
+.drawer.open { transform: translateX(0); }
+.backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 40; display: none; }
+.backdrop.open { display: block; }
+table.data { width: 100%; border-collapse: collapse; }
+table.data th, table.data td { padding: 8px 10px; text-align: left; border-bottom: 1px solid rgba(100,100,150,0.15); font-size: 14px; }
+table.data th { color: #9ca3af; font-weight: 600; }
