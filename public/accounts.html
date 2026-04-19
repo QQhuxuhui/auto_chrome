@@ -166,6 +166,37 @@
                     <div>完成时间：<span class="mono" x-text="detail.done_at || '—'"></span></div>
                     <div>最后错误：<span class="mono text-red-400" x-text="detail.last_error || '—'"></span></div>
                     <div class="text-xs text-slate-500">当前绑定母号（内部字段）：<span class="mono" x-text="hostEmailById(detail.host_id)"></span></div>
+                    <div class="pt-2 border-t border-slate-700/50 mt-2">
+                        <div class="text-sm font-semibold mb-1">Antigravity 平台</div>
+                        <template x-if="!detail.antigravity || !detail.antigravity.id">
+                            <div class="text-xs text-slate-400">未推送</div>
+                        </template>
+                        <template x-if="detail.antigravity && detail.antigravity.id">
+                            <div class="text-xs space-y-1">
+                                <div>平台 ID: <span class="mono" x-text="detail.antigravity.id"></span></div>
+                                <div>推送时间: <span class="mono" x-text="detail.antigravity.pushed_at || '—'"></span></div>
+                                <div>最近同步: <span class="mono" x-text="detail.antigravity.last_synced_at || '—'"></span></div>
+                                <div>disabled: <span :class="detail.antigravity.disabled ? 'text-red-400' : ''" x-text="detail.antigravity.disabled ? `是 (${detail.antigravity.disabled_reason || '未知'})` : '否'"></span></div>
+                                <div>需验证: <span :class="detail.antigravity.validation_blocked ? 'text-yellow-400' : ''" x-text="detail.antigravity.validation_blocked ? '是' : '否'"></span></div>
+                                <div>quota 禁用: <span :class="detail.antigravity.is_forbidden ? 'text-orange-400' : ''" x-text="detail.antigravity.is_forbidden ? `是 (${detail.antigravity.forbidden_reason || '未知'})` : '否'"></span></div>
+                            </div>
+                        </template>
+                        <template x-if="detail.antigravity && detail.antigravity.push_error">
+                            <div class="text-xs text-red-400 mt-1">
+                                推送错误 [<span x-text="detail.antigravity.push_error.status"></span>]:
+                                <span x-text="detail.antigravity.push_error.message"></span>
+                                <span class="text-slate-400">(at <span x-text="detail.antigravity.push_error.at"></span>)</span>
+                            </div>
+                        </template>
+                        <div class="flex gap-2 mt-2">
+                            <template x-if="detail.status === 'done' && (!detail.antigravity || !detail.antigravity.id)">
+                                <button @click="pushMemberById(detail.id); detailOpen=false" class="px-2 py-1 bg-green-800 hover:bg-green-700 rounded text-xs">推送到平台</button>
+                            </template>
+                            <template x-if="detail.antigravity && detail.antigravity.id">
+                                <button @click="deleteFromPlatform(detail.id); detailOpen=false" class="px-2 py-1 bg-red-900 hover:bg-red-800 rounded text-xs">从平台删除</button>
+                            </template>
+                        </div>
+                    </div>
                 </div>
                 <div>
                     <div class="text-sm font-semibold mb-1">凭证</div>
@@ -324,6 +355,21 @@ function accounts() {
                     (r.failed ? '\n失败详情：\n' + r.errors.map(e => `${e.email}: ${e.error}`).join('\n') : ''));
                 await this.loadMembers();
             } catch (e) { alert('批量推送失败：' + e.message); }
+        },
+        async pushMemberById(id) {
+            try {
+                const r = await App.api('POST', `/api/antigravity/push/${id}`);
+                alert(r.success ? '推送成功' : '推送失败：' + r.error);
+                await this.loadMembers();
+            } catch (e) { alert('推送失败：' + e.message); }
+        },
+        async deleteFromPlatform(id) {
+            if (!confirm('从 Antigravity 平台删除此账号（本地保留）？')) return;
+            try {
+                const r = await App.api('DELETE', `/api/antigravity/account/${id}`);
+                alert(r.success ? '已从平台删除' : '删除失败：' + r.error);
+                await this.loadMembers();
+            } catch (e) { alert('删除失败：' + e.message); }
         },
     };
 }
