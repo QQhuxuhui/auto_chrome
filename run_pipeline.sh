@@ -78,57 +78,50 @@ if [[ ! -d "$SRC/node_modules/puppeteer-core" ]]; then
     (cd "$SRC" && npm install --no-fund --no-audit)
 fi
 
-# ==== Run stages ====
-cd "$SRC"
-
-run_stage() {
-    case "$1" in
-        1)
-            echo " ---- Stage 1: Send Family Invitations ----"
-            node 1_invite.js "${EXTRA_ARGS[@]}"
-            ;;
-        2)
-            echo " ---- Stage 2: Accept Family Invitations ----"
-            node 2_accept.js "${EXTRA_ARGS[@]}"
-            ;;
-        3)
-            echo " ---- Stage 3: Local OAuth + Antigravity Validation ----"
-            node 3_local_oauth.js "${EXTRA_ARGS[@]}"
-            ;;
-        3-legacy)
-            echo " ---- Stage 3 (legacy): Register Accounts in sub2api ----"
-            node 3_sub2api.js "${EXTRA_ARGS[@]}"
-            ;;
-        4)
-            echo " ---- Stage 4 (legacy): Verify Accounts on sub2api ----"
-            node 4_verify.js "${EXTRA_ARGS[@]}"
-            ;;
-        *)
-            echo " WARNING: unknown stage '$1'"
-            return 1
-            ;;
-    esac
-}
-
-if [[ "$RUN_ALL" == "1" ]]; then
-    echo " Running all 3 stages..."
-    echo
-    run_stage 1 || echo " WARNING: Stage 1 had errors"
-    echo
-    run_stage 2 || echo " WARNING: Stage 2 had errors"
-    echo
-    run_stage 3 || echo " WARNING: Stage 3 had errors"
-else
-    for s in $STAGE; do
-        echo " ---- Running Stage $s ----"
-        run_stage "$s" || true
-        echo
-    done
+# ==== Build stages argument for orchestrator ====
+STAGES_ARG="1,2,3"
+if [[ "$RUN_ALL" != "1" ]]; then
+    # join requested stages with commas; trim whitespace
+    STAGES_ARG="$(echo "$STAGE" | tr ' ' ',' | sed 's/,,*/,/g; s/^,//; s/,$//')"
 fi
+
+# ==== Read DB creds from .env ====
+if [[ ! -f "$ROOT/.env" ]]; then
+    echo " ERROR: $ROOT/.env not found (need PG_* keys)"
+    exit 1
+fi
+
+# shellcheck disable=SC2046
+export $(grep -E '^PG_(HOST|PORT|USER|PASSWORD|DATABASE)=' "$ROOT/.env" | xargs)
+
+if [[ -z "${PG_HOST:-}" || -z "${PG_USER:-}" || -z "${PG_DATABASE:-}" || -z "${PG_PASSWORD:-}" ]]; then
+    echo " ERROR: .env missing one of PG_HOST/PG_USER/PG_DATABASE/PG_PASSWORD"
+    exit 1
+fi
+
+# ==== Insert pipeline_runs row; capture id ====
+RUN_ID="$(
+    PGPASSWORD="$PG_PASSWORD" psql \
+        -h "$PG_HOST" -p "${PG_PORT:-5432}" -U "$PG_USER" -d "$PG_DATABASE" \
+        -t -A -v ON_ERROR_STOP=1 \
+        -c "INSERT INTO pipeline_runs (launched_by, stages, host_filter, concurrency) VALUES ('cli', '$STAGES_ARG', '[]'::jsonb, 1) RETURNING id;" 2>/dev/null \
+    | grep -E '^[0-9]+$' | head -1
+)"
+RC=$?
+if [[ $RC -ne 0 || -z "$RUN_ID" || ! "$RUN_ID" =~ ^[0-9]+$ ]]; then
+    echo " ERROR: could not create pipeline_runs row (rc=$RC id='$RUN_ID')"
+    exit 1
+fi
+
+echo " Created pipeline_runs id=$RUN_ID"
+echo " ---- Running Orchestrator: stages=$STAGES_ARG ----"
+node src/orchestrator.js --run-id "$RUN_ID" --stages "$STAGES_ARG" --concurrency 1 "${EXTRA_ARGS[@]}"
+RC=$?
 
 cd "$ROOT"
 echo
 echo " ==========================================================="
-echo "   Pipeline finished."
+echo "   Pipeline finished (exit $RC)."
 echo " ==========================================================="
 echo
+exit $RC
