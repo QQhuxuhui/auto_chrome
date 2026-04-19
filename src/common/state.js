@@ -1,12 +1,9 @@
 /**
- * 账号解析、分组逻辑、failed.json 读写
+ * 账号解析、分组逻辑
  */
 
 const fs = require('fs');
-const path = require('path');
 const { log } = require('./logger');
-
-const FAILED_FILE = path.resolve(__dirname, '..', '..', 'failed.json');
 
 // ============ AsyncMutex ============
 class AsyncMutex {
@@ -41,8 +38,6 @@ class AsyncMutex {
         }
     }
 }
-
-const failedMutex = new AsyncMutex();
 
 // ============ 账号解析 ============
 function parseAccounts(f) {
@@ -180,35 +175,8 @@ function buildGroups(hosts, members) {
     return groups;
 }
 
-// ============ failed.json 操作 ============
-function loadFailedUnsafe() {
-    if (!fs.existsSync(FAILED_FILE)) return [];
-    try {
-        const arr = JSON.parse(fs.readFileSync(FAILED_FILE, 'utf-8').trim());
-        return Array.isArray(arr) ? arr : [];
-    } catch (_) { return []; }
-}
-
-function saveFailedUnsafe(data) {
-    fs.writeFileSync(FAILED_FILE, JSON.stringify(data, null, 2), 'utf-8');
-}
-
-async function addFailedRecord(record) {
-    return failedMutex.runExclusive(() => {
-        const fail = loadFailedUnsafe();
-        fail.push({
-            ...record,
-            time: new Date().toISOString(),
-        });
-        saveFailedUnsafe(fail);
-        return fail.length;
-    });
-}
-
 module.exports = {
     AsyncMutex,
     parseAccounts,
     buildGroups,
-    addFailedRecord,
-    FAILED_FILE,
 };

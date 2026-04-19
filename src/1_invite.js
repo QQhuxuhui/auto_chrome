@@ -12,7 +12,7 @@ const {
     isChromeAlive, clearBrowserSession, newPage, fastType,
     tryClickStrategies, takeScreenshot, detectPageState,
 } = require('./common/chrome');
-const { parseAccounts, buildGroups, addFailedRecord } = require('./common/state');
+const { parseAccounts, buildGroups } = require('./common/state');
 const { googleLogin } = require('./common/google-login');
 
 // ============ CLI 参数 ============

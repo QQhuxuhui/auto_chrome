@@ -40,7 +40,7 @@ const {
     sleep, rand, findChrome, launchRealChrome, restartChrome,
     isChromeAlive, clearBrowserSession, newPage, takeScreenshot,
 } = require('./common/chrome');
-const { parseAccounts, addFailedRecord, AsyncMutex } = require('./common/state');
+const { parseAccounts, AsyncMutex } = require('./common/state');
 const { googleLogin } = require('./common/google-login');
 const {
     buildAuthUrl: _buildAuthUrl,
