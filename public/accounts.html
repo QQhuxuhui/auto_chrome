@@ -61,6 +61,9 @@
     <section x-show="tab==='members'">
         <div class="flex gap-2 mb-3">
             <button @click="openBulk='members'" class="px-3 py-1 bg-slate-700 rounded">+ 批量导入</button>
+            <button @click="pushAllPending()" class="px-3 py-1 bg-emerald-700 hover:bg-emerald-600 rounded">
+                批量推送待推送（<span x-text="pendingPushCount"></span>）
+            </button>
             <select x-model="memberStatusFilter" @change="loadMembers()" class="px-2 py-1 bg-slate-800 rounded">
                 <option value="">全部状态</option>
                 <template x-for="s in ['new','invite_pending','invite_failed','joined','accept_failed','oauth_failed','done','abandoned','removed_from_family']" :key="s">
@@ -71,7 +74,7 @@
                    class="px-3 py-1 bg-slate-800 rounded flex-1">
         </div>
         <table class="data card">
-            <thead><tr><th>邮箱</th><th>状态</th><th>母号</th><th>失败次数</th><th>凭证</th><th>操作</th></tr></thead>
+            <thead><tr><th>邮箱</th><th>状态</th><th>母号</th><th>失败次数</th><th>凭证</th><th>平台状态</th><th>操作</th></tr></thead>
             <tbody>
                 <template x-for="m in members" :key="m.id">
                     <tr>
@@ -90,15 +93,45 @@
                             </template>
                             <template x-if="!m.token"><span>—</span></template>
                         </td>
+                        <td>
+                            <template x-if="!m.antigravity || !m.antigravity.id">
+                                <template x-if="m.antigravity && m.antigravity.push_error">
+                                    <span class="pill invite_failed" title="点击 操作 列的 推送 重试">❗ 推送失败</span>
+                                </template>
+                                <template x-if="!m.antigravity || !m.antigravity.push_error">
+                                    <span class="pill new">— 未推送</span>
+                                </template>
+                            </template>
+                            <template x-if="m.antigravity && m.antigravity.id">
+                                <template x-if="m.antigravity.disabled">
+                                    <span class="pill invite_failed">❌ 已封禁</span>
+                                </template>
+                                <template x-if="!m.antigravity.disabled && m.antigravity.validation_blocked">
+                                    <span class="pill oauth_failed">⚠️ 需验证</span>
+                                </template>
+                                <template x-if="!m.antigravity.disabled && !m.antigravity.validation_blocked && m.antigravity.is_forbidden">
+                                    <span class="pill accept_failed">⚠️ quota 禁</span>
+                                </template>
+                                <template x-if="!m.antigravity.disabled && !m.antigravity.validation_blocked && !m.antigravity.is_forbidden">
+                                    <span class="pill done">✅ 正常</span>
+                                </template>
+                            </template>
+                        </td>
                         <td class="space-x-2 text-sm">
                             <button @click="openDetail(m)" class="text-blue-400">详情</button>
+                            <template x-if="m.status === 'done' && (!m.antigravity || !m.antigravity.id)">
+                                <button @click="pushMember(m)" class="text-green-400">推送</button>
+                            </template>
+                            <template x-if="m.antigravity && m.antigravity.id && m.antigravity.disabled">
+                                <button @click="pushMember(m)" class="text-green-400" title="重新推送">重推</button>
+                            </template>
                             <button @click="resetMember(m)" class="text-yellow-400">重置</button>
                             <button @click="abandonMember(m)" class="text-orange-400">放弃</button>
                             <button @click="deleteMember(m)" class="text-red-400">删除</button>
                         </td>
                     </tr>
                 </template>
-                <tr x-show="!members.length"><td colspan="6" class="text-center text-slate-500 py-4">暂无子号</td></tr>
+                <tr x-show="!members.length"><td colspan="7" class="text-center text-slate-500 py-4">暂无子号</td></tr>
             </tbody>
         </table>
     </section>
@@ -175,6 +208,7 @@ function accounts() {
         bulkResult: null,
         detailOpen: false,
         detail: null,
+        pendingPushCount: 0,
         statusLabel(s) {
             return {
                 'new': '待处理',
@@ -203,6 +237,9 @@ function accounts() {
             if (this.memberStatusFilter) q.set('status', this.memberStatusFilter);
             const qs = q.toString() ? `?${q.toString()}` : '';
             this.members = await App.api('GET', `/api/members${qs}`);
+            this.pendingPushCount = this.members.filter(m =>
+                m.status === 'done' && (!m.antigravity || !m.antigravity.id)
+            ).length;
         },
         async loadMigrate() {
             try { this.migrate = await App.api('GET', '/api/migrate/detect'); }
@@ -269,6 +306,24 @@ function accounts() {
             if (!confirm(`确定删除 ${m.email}？`)) return;
             try { await App.api('DELETE', `/api/members/${m.id}`); await this.loadMembers(); }
             catch (e) { alert(e.message); }
+        },
+        async pushMember(m) {
+            if (!confirm(`推送 ${m.email} 到 Antigravity 平台？`)) return;
+            try {
+                const r = await App.api('POST', `/api/antigravity/push/${m.id}`);
+                alert(r.success ? '推送成功' : '推送失败：' + r.error);
+                await this.loadMembers();
+            } catch (e) { alert('推送失败：' + e.message); }
+        },
+        async pushAllPending() {
+            if (!this.pendingPushCount) { alert('没有待推送的账号'); return; }
+            if (!confirm(`批量推送 ${this.pendingPushCount} 个账号到 Antigravity？`)) return;
+            try {
+                const r = await App.api('POST', '/api/antigravity/push-all');
+                alert(`推送完成：成功 ${r.pushed} / 失败 ${r.failed} / 总计 ${r.total}` +
+                    (r.failed ? '\n失败详情：\n' + r.errors.map(e => `${e.email}: ${e.error}`).join('\n') : ''));
+                await this.loadMembers();
+            } catch (e) { alert('批量推送失败：' + e.message); }
         },
     };
 }
