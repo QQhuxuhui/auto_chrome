@@ -1,0 +1,237 @@
+/**
+ * Member (子号) query module.
+ * Implements the state-machine transitions from spec §3.
+ */
+const db = require('./index');
+
+const ABANDON_THRESHOLD = 3;
+
+function mapRow(row) {
+    if (!row) return null;
+    return { ...row };
+}
+
+async function listMembers({ status, hostId, search, hasToken, page = 1, pageSize = 500 } = {}) {
+    const params = [];
+    const where = ['TRUE'];
+    if (status) {
+        const arr = Array.isArray(status) ? status : String(status).split(',').map(s => s.trim()).filter(Boolean);
+        params.push(arr);
+        where.push(`status = ANY($${params.length})`);
+    }
+    if (hostId) {
+        params.push(hostId);
+        where.push(`host_id = $${params.length}`);
+    }
+    if (search) {
+        params.push(`%${search}%`);
+        where.push(`email ILIKE $${params.length}`);
+    }
+    if (hasToken !== undefined) {
+        if (hasToken === true || hasToken === 1 || hasToken === '1') {
+            where.push(`token IS NOT NULL`);
+        } else {
+            where.push(`token IS NULL`);
+        }
+    }
+    const offset = (page - 1) * pageSize;
+    params.push(pageSize, offset);
+    const sql = `
+        SELECT * FROM members
+        WHERE ${where.join(' AND ')}
+        ORDER BY id ASC
+        LIMIT $${params.length - 1} OFFSET $${params.length}
+    `;
+    const { rows } = await db.query(sql, params);
+    return rows.map(mapRow);
+}
+
+async function getMemberById(id) {
+    const { rows } = await db.query('SELECT * FROM members WHERE id = $1', [id]);
+    return rows[0] ? mapRow(rows[0]) : null;
+}
+
+async function upsertMember({ email, password, recovery_email, totp_secret, notes }) {
+    const sql = `
+        INSERT INTO members (email, password, recovery_email, totp_secret, notes)
+        VALUES ($1, $2, $3, $4, $5)
+        ON CONFLICT (email) DO NOTHING
+        RETURNING *
+    `;
+    const { rows } = await db.query(sql, [
+        email, password, recovery_email || null, totp_secret || null, notes || null,
+    ]);
+    if (rows.length === 0) {
+        const existing = await db.query('SELECT * FROM members WHERE email = $1', [email]);
+        return { inserted: false, skipped: true, member: mapRow(existing.rows[0]) };
+    }
+    return { inserted: true, skipped: false, member: mapRow(rows[0]) };
+}
+
+async function updateMember(id, patch) {
+    const allowed = ['password', 'recovery_email', 'totp_secret', 'notes'];
+    const sets = [];
+    const params = [];
+    for (const k of allowed) {
+        if (patch[k] !== undefined) {
+            params.push(patch[k]);
+            sets.push(`${k} = $${params.length}`);
+        }
+    }
+    if (sets.length === 0) return getMemberById(id);
+    sets.push(`updated_at = NOW()`);
+    params.push(id);
+    const sql = `UPDATE members SET ${sets.join(', ')} WHERE id = $${params.length} RETURNING *`;
+    const { rows } = await db.query(sql, params);
+    return rows[0] ? mapRow(rows[0]) : null;
+}
+
+async function deleteMember(id) {
+    await db.query('DELETE FROM members WHERE id = $1', [id]);
+}
+
+async function transitionToInvitePending(memberId, hostId) {
+    const sql = `
+        UPDATE members
+        SET status = 'invite_pending', host_id = $2, invited_at = NOW(), updated_at = NOW()
+        WHERE id = $1
+        RETURNING *
+    `;
+    const { rows } = await db.query(sql, [memberId, hostId]);
+    return mapRow(rows[0]);
+}
+
+async function transitionToJoined(memberId) {
+    const sql = `
+        UPDATE members
+        SET status = 'joined', joined_at = NOW(), updated_at = NOW()
+        WHERE id = $1
+        RETURNING *
+    `;
+    const { rows } = await db.query(sql, [memberId]);
+    return mapRow(rows[0]);
+}
+
+async function transitionToDone(memberId, token, tokenMeta) {
+    const sql = `
+        UPDATE members
+        SET status = 'done', token = $2, token_meta = $3, done_at = NOW(), updated_at = NOW()
+        WHERE id = $1
+        RETURNING *
+    `;
+    const { rows } = await db.query(sql, [memberId, token, tokenMeta || {}]);
+    return mapRow(rows[0]);
+}
+
+async function transitionToFailed(memberId, { newStatus, error, releaseHost }) {
+    const sql = `
+        UPDATE members
+        SET status = CASE WHEN fail_count + 1 >= $4 THEN 'abandoned' ELSE $2 END,
+            fail_count = fail_count + 1,
+            last_error = $3,
+            last_error_at = NOW(),
+            host_id = CASE WHEN $5 THEN NULL ELSE host_id END,
+            updated_at = NOW()
+        WHERE id = $1
+        RETURNING *
+    `;
+    const { rows } = await db.query(sql, [memberId, newStatus, error || null, ABANDON_THRESHOLD, !!releaseHost]);
+    return mapRow(rows[0]);
+}
+
+async function markRemovedFromFamily(memberId) {
+    const sql = `
+        UPDATE members
+        SET status = 'removed_from_family', host_id = NULL, updated_at = NOW()
+        WHERE id = $1
+        RETURNING *
+    `;
+    const { rows } = await db.query(sql, [memberId]);
+    return mapRow(rows[0]);
+}
+
+async function resetMember(memberId) {
+    const sql = `
+        UPDATE members
+        SET status = 'new',
+            host_id = NULL,
+            fail_count = 0,
+            last_error = NULL,
+            last_error_at = NULL,
+            invited_at = NULL,
+            joined_at = NULL,
+            done_at = NULL,
+            updated_at = NOW()
+        WHERE id = $1
+        RETURNING *
+    `;
+    const { rows } = await db.query(sql, [memberId]);
+    return mapRow(rows[0]);
+}
+
+async function abandonMember(memberId) {
+    const sql = `
+        UPDATE members
+        SET status = 'abandoned', host_id = NULL, updated_at = NOW()
+        WHERE id = $1
+        RETURNING *
+    `;
+    const { rows } = await db.query(sql, [memberId]);
+    return mapRow(rows[0]);
+}
+
+async function listMembersForStage(stage) {
+    const s = String(stage);
+    let sql;
+    if (s === '1') {
+        sql = `
+            SELECT * FROM members
+            WHERE status IN ('new','invite_failed') AND fail_count < $1
+            ORDER BY created_at ASC
+        `;
+    } else if (s === '2') {
+        sql = `
+            SELECT * FROM members
+            WHERE status = 'invite_pending' AND host_id IS NOT NULL
+            ORDER BY invited_at ASC NULLS FIRST
+        `;
+    } else if (s === '3') {
+        sql = `
+            SELECT * FROM members
+            WHERE status IN ('joined','oauth_failed') AND fail_count < $1
+            ORDER BY joined_at ASC NULLS LAST, updated_at ASC
+        `;
+    } else {
+        throw new Error(`listMembersForStage: invalid stage ${stage}`);
+    }
+    const params = (s === '2') ? [] : [ABANDON_THRESHOLD];
+    const { rows } = await db.query(sql, params);
+    return rows.map(mapRow);
+}
+
+async function countByStatus() {
+    const { rows } = await db.query(
+        'SELECT status, COUNT(*)::int AS n FROM members GROUP BY status'
+    );
+    const out = {};
+    for (const r of rows) out[r.status] = r.n;
+    return out;
+}
+
+module.exports = {
+    listMembers,
+    getMemberById,
+    upsertMember,
+    updateMember,
+    deleteMember,
+    transitionToInvitePending,
+    transitionToJoined,
+    transitionToDone,
+    transitionToFailed,
+    markRemovedFromFamily,
+    resetMember,
+    abandonMember,
+    listMembersForStage,
+    countByStatus,
+    ABANDON_THRESHOLD,
+};
