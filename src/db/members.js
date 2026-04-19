@@ -68,15 +68,31 @@ async function upsertMember({ email, password, recovery_email, totp_secret, note
     return { inserted: true, skipped: false, member: mapRow(rows[0]) };
 }
 
+const VALID_STATUSES = new Set([
+    'new', 'invite_pending', 'invite_failed', 'joined',
+    'accept_failed', 'oauth_failed', 'done', 'abandoned', 'removed_from_family',
+]);
+
 async function updateMember(id, patch) {
-    const allowed = ['password', 'recovery_email', 'totp_secret', 'notes'];
+    const allowed = ['password', 'recovery_email', 'totp_secret', 'notes', 'status', 'host_id'];
     const sets = [];
     const params = [];
     for (const k of allowed) {
-        if (patch[k] !== undefined) {
-            params.push(patch[k]);
-            sets.push(`${k} = $${params.length}`);
+        if (patch[k] === undefined) continue;
+        let v = patch[k];
+        if (k === 'status') {
+            if (!VALID_STATUSES.has(v)) {
+                throw new Error(`invalid status: ${v}`);
+            }
         }
+        if (k === 'host_id') {
+            v = v === null || v === '' ? null : parseInt(v, 10);
+            if (v !== null && (!Number.isInteger(v) || v <= 0)) {
+                throw new Error(`invalid host_id: ${patch[k]}`);
+            }
+        }
+        params.push(v);
+        sets.push(`${k} = $${params.length}`);
     }
     if (sets.length === 0) return getMemberById(id);
     sets.push(`updated_at = NOW()`);

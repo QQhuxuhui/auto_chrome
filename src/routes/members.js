@@ -57,8 +57,38 @@ module.exports = async function routes(app) {
         const action = req.query.action;
         if (action === 'reset') return members.resetMember(id);
         if (action === 'abandon') return members.abandonMember(id);
-        const row = await members.updateMember(id, req.body || {});
+
+        const before = await members.getMemberById(id);
+        if (!before) return reply.code(404).send({ error: 'not found' });
+
+        let row;
+        try {
+            row = await members.updateMember(id, req.body || {});
+        } catch (e) {
+            return reply.code(400).send({ error: e.message });
+        }
         if (!row) return reply.code(404).send({ error: 'not found' });
+
+        // 手动改 status / host_id 时写一条 audit 事件，便于在详情页时间线看到
+        const patch = req.body || {};
+        const notes = [];
+        if (patch.status !== undefined && patch.status !== before.status) {
+            notes.push(`status: ${before.status} → ${row.status}`);
+        }
+        if (patch.host_id !== undefined && Number(patch.host_id || 0) !== Number(before.host_id || 0)) {
+            notes.push(`host_id: ${before.host_id || '—'} → ${row.host_id || '—'}`);
+        }
+        if (notes.length) {
+            try {
+                await events.logEvent({
+                    memberId: id,
+                    hostId: row.host_id || null,
+                    stage: 'manual',
+                    eventType: 'note',
+                    message: `manual edit: ${notes.join('; ')}`,
+                });
+            } catch (_) { /* 审计事件写失败不影响主请求 */ }
+        }
         return row;
     });
 

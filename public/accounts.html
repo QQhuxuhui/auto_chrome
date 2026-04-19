@@ -81,7 +81,7 @@
                         <td class="mono" x-text="m.email"></td>
                         <td><span class="pill" :class="m.status" x-text="statusLabel(m.status)"></span></td>
                         <td class="mono text-xs">
-                            <span x-text="m.status === 'done' ? hostEmailById(m.host_id) : '—'"></span>
+                            <span x-text="m.host_id ? hostEmailById(m.host_id) : '—'"></span>
                         </td>
                         <td x-text="m.fail_count"></td>
                         <td>
@@ -119,6 +119,7 @@
                         </td>
                         <td class="space-x-2 text-sm">
                             <button @click="openDetail(m)" class="text-blue-400">详情</button>
+                            <button @click="openEdit(m)" class="text-cyan-400">编辑</button>
                             <template x-if="m.status === 'done' && (!m.antigravity || !m.antigravity.id)">
                                 <button @click="pushMember(m)" class="text-green-400">推送</button>
                             </template>
@@ -150,6 +151,40 @@
         <div x-show="bulkResult" class="mt-3 text-sm">
             <pre class="mono text-xs p-2 bg-black/40 rounded" x-text="JSON.stringify(bulkResult, null, 2)"></pre>
         </div>
+    </div>
+
+    <!-- Member edit drawer: 手动改 status / host 绑定 -->
+    <div x-show="editOpen" class="backdrop open" @click="editOpen=false"></div>
+    <div x-show="editOpen" class="drawer open" @click.stop>
+        <template x-if="editForm">
+            <div class="space-y-4">
+                <h2 class="text-lg font-semibold">编辑子号 <span class="mono text-base" x-text="editForm.email"></span></h2>
+                <div>
+                    <div class="text-sm mb-1">状态</div>
+                    <select x-model="editForm.status" class="bg-slate-800 px-2 py-1 rounded w-full">
+                        <template x-for="s in ['new','invite_pending','invite_failed','joined','accept_failed','oauth_failed','done','abandoned','removed_from_family']" :key="s">
+                            <option :value="s" x-text="`${statusLabel(s)} (${s})`"></option>
+                        </template>
+                    </select>
+                </div>
+                <div>
+                    <div class="text-sm mb-1">绑定母号</div>
+                    <select x-model="editForm.host_id" class="bg-slate-800 px-2 py-1 rounded w-full">
+                        <option value="">（不绑定）</option>
+                        <template x-for="h in hosts" :key="h.id">
+                            <option :value="h.id" x-text="`${h.email} (占用 ${h.slot_used}/5${h.disabled ? ', 已停用' : ''})`"></option>
+                        </template>
+                    </select>
+                </div>
+                <div class="text-xs text-slate-500 border-t border-slate-700/50 pt-2">
+                    说明：手动改 status / host 主要用于修正被流程误判的账号（如 Google 侧已接受但 DB 还是 invite_pending）。每次改动会写一条 manual 事件。
+                </div>
+                <div class="flex gap-2 pt-2">
+                    <button @click="editOpen=false" class="px-3 py-1 bg-slate-700 rounded">取消</button>
+                    <button @click="submitEdit()" class="px-3 py-1 bg-emerald-700 rounded">保存</button>
+                </div>
+            </div>
+        </template>
     </div>
 
     <!-- Member detail drawer -->
@@ -239,6 +274,8 @@ function accounts() {
         bulkResult: null,
         detailOpen: false,
         detail: null,
+        editOpen: false,
+        editForm: null,
         pendingPushCount: 0,
         statusLabel(s) {
             return {
@@ -318,6 +355,25 @@ function accounts() {
                 this.detail = await App.api('GET', `/api/members/${m.id}`);
                 this.detailOpen = true;
             } catch (e) { alert(e.message); }
+        },
+        openEdit(m) {
+            this.editForm = {
+                id: m.id,
+                email: m.email,
+                status: m.status,
+                host_id: m.host_id == null ? '' : String(m.host_id),
+            };
+            this.editOpen = true;
+        },
+        async submitEdit() {
+            const f = this.editForm;
+            const body = { status: f.status, host_id: f.host_id === '' ? null : parseInt(f.host_id, 10) };
+            try {
+                await App.api('PATCH', `/api/members/${f.id}`, body);
+                this.editOpen = false;
+                this.editForm = null;
+                await this.loadMembers();
+            } catch (e) { alert('保存失败：' + e.message); }
         },
         async copyToken(m) {
             const ok = await App.copyText(m.token);
