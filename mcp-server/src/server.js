@@ -11,6 +11,7 @@ const { McpError, CODES } = require('./errors');
 const { registerChromeTools } = require('./tools/chrome');
 const { registerGoogleTools } = require('./tools/google');
 const { registerOauthTools } = require('./tools/oauth');
+const { registerSmsTools } = require('./tools/sms');
 
 // Configure Node fetch to honor HTTPS_PROXY (matches 3_local_oauth.js pattern)
 {
@@ -35,6 +36,7 @@ async function startServer() {
         ...registerChromeTools({ registry, logger, config }),
         ...registerGoogleTools({ registry, logger, config }),
         ...registerOauthTools({ logger, config }),
+        ...registerSmsTools({ logger, config }),
     };
 
     const server = new Server(
