@@ -62,7 +62,7 @@
     </section>
 
     <section class="card p-4">
-        <button @click="openStart = true"
+        <button @click="openStartDialog()"
                 class="px-4 py-2 bg-emerald-700 hover:bg-emerald-600 rounded font-medium">
             ▶ 启动流程
         </button>
@@ -80,16 +80,29 @@
                 <label><input type="checkbox" x-model="form.stages3"> 3 授权</label>
             </div>
             <div>
-                <div class="text-sm mb-1">母号</div>
+                <div class="text-sm mb-1 flex items-center gap-2">
+                    母号
+                    <button type="button" @click="reloadHosts()" class="text-xs text-blue-400 hover:text-blue-300">刷新列表</button>
+                </div>
                 <label class="block"><input type="radio" name="hm" x-model="form.hostMode" value="auto"> 自动（使用所有有空位的母号）</label>
-                <label class="block"><input type="radio" name="hm" x-model="form.hostMode" value="select"> 指定母号</label>
-                <div x-show="form.hostMode === 'select'" class="ml-4 mt-2 max-h-40 overflow-y-auto text-sm">
-                    <template x-for="h in hostsList" :key="h.id">
-                        <label class="block"><input type="checkbox" :value="h.email" x-model="form.selectedHosts">
-                            <span x-text="h.email" class="mono"></span>
-                            (<span x-text="h.slot_free"></span>/5)
-                        </label>
-                    </template>
+                <label class="block"><input type="radio" name="hm" x-model="form.hostMode" value="select"> 指定母号（仅被选中的母号进入流程）</label>
+                <div x-show="form.hostMode === 'select'" class="ml-4 mt-2 text-sm space-y-1">
+                    <div class="flex gap-3 items-center text-xs mb-2">
+                        <button type="button" @click="selectAllHosts()" class="text-blue-400 hover:text-blue-300">全选</button>
+                        <button type="button" @click="form.selectedHosts = []" class="text-blue-400 hover:text-blue-300">全不选</button>
+                        <span class="text-slate-500">已选 <span x-text="form.selectedHosts.length"></span> / <span x-text="hostsList.length"></span></span>
+                    </div>
+                    <div class="max-h-48 overflow-y-auto border border-slate-700 rounded p-2 space-y-1">
+                        <template x-for="h in hostsList" :key="h.id">
+                            <label class="block hover:bg-slate-800/50 rounded px-1 py-0.5" :class="h.slot_free === 0 ? 'opacity-50' : ''">
+                                <input type="checkbox" :value="h.email" x-model="form.selectedHosts" :disabled="h.slot_free === 0">
+                                <span x-text="h.email" class="mono"></span>
+                                <span class="text-xs text-slate-400 ml-1" x-text="`(空位 ${h.slot_free}/5)`"></span>
+                                <span x-show="h.slot_free === 0" class="text-xs text-red-400 ml-1">已满</span>
+                            </label>
+                        </template>
+                        <div x-show="!hostsList.length" class="text-slate-500 text-xs py-2 text-center">暂无可用母号，请先去「账号管理」页面添加</div>
+                    </div>
                 </div>
             </div>
             <div>
@@ -133,10 +146,23 @@ function dashboard() {
         async load() {
             try {
                 this.status = await App.api('GET', '/api/status');
-                if (this.openStart && !this.hostsList.length) {
-                    this.hostsList = await App.api('GET', '/api/hosts?disabled=0');
-                }
             } catch (e) { console.error(e); }
+        },
+        async reloadHosts() {
+            try {
+                this.hostsList = await App.api('GET', '/api/hosts?disabled=0');
+            } catch (e) { console.error(e); }
+        },
+        async openStartDialog() {
+            // 重置表单，每次打开都拉最新 hosts 列表
+            this.error = '';
+            this.form.selectedHosts = [];
+            this.form.hostMode = 'auto';
+            this.openStart = true;
+            await this.reloadHosts();
+        },
+        selectAllHosts() {
+            this.form.selectedHosts = this.hostsList.filter(h => h.slot_free > 0).map(h => h.email);
         },
         async submitStart() {
             this.error = '';
@@ -145,6 +171,10 @@ function dashboard() {
             if (this.form.stages2) stages.push('2');
             if (this.form.stages3) stages.push('3');
             if (!stages.length) { this.error = '请至少选择一个阶段'; return; }
+            if (this.form.hostMode === 'select' && !this.form.selectedHosts.length) {
+                this.error = '请至少选择一个母号（或切换为「自动」模式）';
+                return;
+            }
             const hostFilter = this.form.hostMode === 'select' ? this.form.selectedHosts : [];
             try {
                 await App.api('POST', '/api/pipeline/start', {
