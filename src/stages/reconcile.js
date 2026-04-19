@@ -94,64 +94,120 @@ async function removeFamilyMember(page, memberEmail, wlog) {
     const warn = (m) => wlog && wlog.warn && wlog.warn(`${tag} ${m}`);
 
     // ========== Step 1: 打开该成员的详情视图 ==========
-    // 优先找 <a href="/family/..."> 链接（Google SPA 通常这样），否则回退到点行/可点区域
-    const step1 = await page.evaluate((targetEmail) => {
+    // Google Family 的成员行通常是普通 <div>（无 role / 无 href），点击靠外层
+    // 事件委托。用 DOM .click() 不可靠（只触发合成事件），要用 Puppeteer
+    // ElementHandle.click() 走 CDP 派发真实 mousedown/mouseup。
+    //
+    // 策略：在 evaluate 里按 email 文本定位到**最内层**包含该邮箱的「卡片行」
+    //   （避免匹配到整个文档），给它打 data-auto-remove-target 标记，
+    //   然后回到 Node 侧用 page.$() + handle.click() 真实点击。
+    const REMOVE_MARK = 'data-auto-remove-target';
+    const beforeUrl = page.url();
+
+    const step1mark = await page.evaluate((targetEmail, markAttr) => {
+        // 清掉上轮残留
+        document.querySelectorAll(`[${markAttr}]`).forEach(el => el.removeAttribute(markAttr));
+
         const lower = targetEmail.toLowerCase();
 
-        // 策略 A: 明确是指向 family 子页面的链接
-        for (const a of document.querySelectorAll('a[href*="/family/"]')) {
-            const t = (a.textContent || '').toLowerCase();
+        // 找所有文本里直接含该 email 的元素，然后取「最深」的那个（即最具体的行）
+        // 避免选中整个 document.body 之类的祖先
+        const hits = [];
+        const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+        let node;
+        while ((node = walker.nextNode())) {
+            const t = String(node.nodeValue || '').toLowerCase();
             if (t.includes(lower)) {
-                a.scrollIntoView({ block: 'center' });
-                a.click();
-                return { ok: true, strategy: 'anchor', href: a.getAttribute('href') };
+                // 找能代表"一行"的祖先：向上走到有明显尺寸的元素
+                let el = node.parentElement;
+                while (el && el !== document.body) {
+                    const r = el.getBoundingClientRect();
+                    // 典型成员行：宽度 > 200, 高度 40-120
+                    if (r.width > 200 && r.height >= 40 && r.height <= 200) {
+                        hits.push({ el, width: r.width, height: r.height, depth: getDepth(el) });
+                        break;
+                    }
+                    el = el.parentElement;
+                }
             }
         }
-
-        // 策略 B: 任意可点元素文本包含该 email
-        const selectors = [
-            '[role="link"]', '[role="button"]',
-            'li', 'tr', 'div[role="listitem"]', 'div[role="row"]',
-        ];
-        for (const sel of selectors) {
-            for (const el of document.querySelectorAll(sel)) {
-                const t = (el.textContent || '').toLowerCase();
-                if (!t.includes(lower)) continue;
-                const r = el.getBoundingClientRect();
-                if (r.width < 80 || r.height < 30 || r.height > 300) continue;
-                el.scrollIntoView({ block: 'center' });
-                el.click();
-                return { ok: true, strategy: `clickable-${sel}`, w: r.width, h: r.height };
-            }
+        function getDepth(el) {
+            let d = 0; let cur = el;
+            while (cur && cur !== document.body) { d++; cur = cur.parentElement; }
+            return d;
         }
-        return { ok: false };
-    }, memberEmail).catch(e => ({ ok: false, error: e.message }));
+        if (!hits.length) return { ok: false, reason: 'no_row_with_email' };
+        // 取最深的（最内层，= 最精确的那个卡片）
+        hits.sort((a, b) => b.depth - a.depth);
+        const chosen = hits[0];
+        chosen.el.setAttribute(markAttr, '1');
+        chosen.el.scrollIntoView({ block: 'center' });
+        return { ok: true, width: chosen.width, height: chosen.height, depth: chosen.depth };
+    }, memberEmail, REMOVE_MARK).catch(e => ({ ok: false, error: e.message }));
 
-    if (!step1.ok) {
-        warn(`step 1 failed (open detail): ${JSON.stringify(step1)}`);
+    if (!step1mark.ok) {
+        warn(`step 1 mark failed: ${JSON.stringify(step1mark)}`);
         await takeScreenshot(page, `remove_step1_notfound_${memberEmail}`, wlog);
         return false;
     }
-    log(`step 1 opened detail via ${step1.strategy}`);
-    await sleep(3000);
+    log(`step 1 marked row: ${step1mark.width}x${step1mark.height} @ depth=${step1mark.depth}`);
 
-    // ========== Step 2: 点「从家庭组中移除」按钮 ==========
+    // 用 ElementHandle.click 走 CDP 真实点击
+    const handle = await page.$(`[${REMOVE_MARK}]`).catch(() => null);
+    if (!handle) {
+        warn('step 1 handle lost (mark removed during reflow?)');
+        await takeScreenshot(page, `remove_step1_handlemiss_${memberEmail}`, wlog);
+        return false;
+    }
+    try {
+        await handle.click({ delay: 40 });
+    } catch (e) {
+        warn(`step 1 CDP click failed: ${e.message}`);
+        // 兜底 DOM click
+        await page.evaluate((attr) => {
+            const el = document.querySelector(`[${attr}]`);
+            if (el) el.click();
+        }, REMOVE_MARK).catch(() => { });
+    } finally {
+        await handle.dispose().catch(() => { });
+    }
+    await sleep(3500);
+
+    // 验证点击有效：URL 或 DOM 应该变了
+    const afterUrl = page.url();
+    const urlChanged = afterUrl !== beforeUrl;
+    log(`step 1 clicked, url ${urlChanged ? 'changed' : 'unchanged'}: ${afterUrl}`);
+    if (!urlChanged) {
+        // URL 没变也可能是侧滑 drawer，再等一会看看有没有 remove/cancel 按钮出现
+        await sleep(1500);
+    }
+
+    // ========== Step 2: 点「从家庭组中移除」或「取消邀请」按钮 ==========
+    // pending invite 的按钮是 "Cancel invitation" / "取消邀请"；
+    // full member 的按钮是 "Remove from family group" / "从家庭组中移除"
     const step2 = await page.evaluate(() => {
-        // 强匹配优先：含"remove...family"/"移除...家庭"等短语
+        // 强匹配优先：含明确短语
         const STRONG = [
             /remove.*from.*family/i,
             /remove.*family.*group/i,
             /remove.*member/i,
+            /cancel.*invit/i,             // "Cancel invitation"
+            /revoke.*invit/i,
+            /withdraw.*invit/i,
             /从家庭.*(移除|移出|删除)/,
             /(移除|移出|删除).*家庭.*成员/,
             /将.*(移除|移出)/,
+            /取消邀请/,
+            /撤销邀请/,
         ];
-        // 弱匹配：单独的 "Remove" / "移除成员" 等
+        // 弱匹配：单独的 "Remove" / "Cancel" / "移除" 等
         const WEAK = [
             /^\s*remove\s*$/i,
+            /^\s*cancel\s*$/i,
             /^移除$/,
             /^移除成员$/,
             /^删除成员$/,
+            /^取消$/,
         ];
 
         const clickables = document.querySelectorAll('button, a, [role="button"], [role="menuitem"]');
@@ -205,7 +261,9 @@ async function removeFamilyMember(page, memberEmail, wlog) {
         const buttons = scope.querySelectorAll('button, [role="button"]');
         const CONFIRM = [
             /^\s*remove\s*$/i, /^\s*delete\s*$/i, /^\s*confirm\s*$/i, /^\s*ok\s*$/i, /^\s*yes\s*$/i,
+            /^\s*cancel.*invit/i,  // "Cancel invitation" 作为确认按钮
             /^移除$/, /^删除$/, /^确认$/, /^确定$/, /^是$/,
+            /^取消邀请$/,
             /remove from family/i,
         ];
         const visible = (el) => {
