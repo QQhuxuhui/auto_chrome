@@ -475,126 +475,96 @@ async function processMember({ member, host, browser, workerId, opts }) {
     }
 }
 
-// ============ main ============
+// ============ main — DB-backed ============
+const membersDb = require('./db/members');
+const hostsDb   = require('./db/hosts');
+const eventsDb  = require('./db/events');
 
-const keepBrowserOpen = (process.env.KEEP_BROWSER_OPEN || '').toLowerCase() === 'true';
-let _workers = [];
-
-function cleanupWorkers(workers) {
+let _workers3 = [];
+function cleanupWorkers3(workers) {
+    const keep = (process.env.KEEP_BROWSER_OPEN || '').toLowerCase() === 'true';
     for (const w of workers) {
-        if (keepBrowserOpen) {
-            try { w.browser.disconnect(); } catch (_) { }
-        } else {
-            try { w.browser.close(); } catch (_) { }
-            try { w.proc.kill(); } catch (_) { }
-        }
+        if (keep) { try { w.browser.disconnect(); } catch (_) { } }
+        else { try { w.browser.close(); } catch (_) { } try { w.proc.kill(); } catch (_) { } }
     }
-    if (keepBrowserOpen && workers.length > 0) log('Browsers kept open (KEEP_BROWSER_OPEN=true)');
 }
 
-process.on('SIGINT', () => {
-    log('\nInterrupted (Ctrl+C). Cleaning up...', 'WARN');
-    cleanupWorkers(_workers);
-    process.exit();
-});
-
-function pairMembersWithHosts(hosts, members) {
-    const pairs = [];
-    for (let i = 0; i < members.length; i++) {
-        const hostIdx = Math.floor(i / 5);
-        if (hostIdx >= hosts.length) {
-            log(`  Dropping member[${i}] ${members[i].email}: no host (members > 5 * hosts.length)`, 'WARN');
-            continue;
-        }
-        pairs.push({ member: members[i], host: hosts[hostIdx] });
-    }
-    return pairs;
-}
-
-async function main() {
-    const hostsFile = path.join(REPO_ROOT, 'hosts.txt');
-    const membersFile = path.join(REPO_ROOT, 'members.txt');
-
-    const hosts = parseAccounts(hostsFile);
-    const members = parseAccounts(membersFile);
-    const pending = pairMembersWithHosts(hosts, members);
-
+async function runStage3({ runId, concurrency = 1 } = {}) {
     const chromePath = findChrome();
-    if (!chromePath) { console.error('Chrome not found'); process.exit(1); }
+    if (!chromePath) throw new Error('Chrome not found');
 
-    log('');
-    log('='.repeat(60));
-    log('  Stage 3 (local): Local OAuth + Antigravity Validation');
-    log('='.repeat(60));
-    log(`  Hosts:        ${hostsFile}`);
-    log(`  Members:      ${membersFile}`);
-    log(`  Pending:      ${pending.length}`);
-    log(`  Concurrency:  ${CLI_OPTS.concurrency}`);
-    log(`  Cred file:    ${CRED_FILE}`);
-    log(`  Probe model:  ${PROBE_MODEL}`);
-    log(`  Antigravity:  ${ANTIGRAVITY_BASE}`);
-    log(`  Reauth all:   ${CLI_OPTS.reauthAll}`);
-    log(`  Reauth list:  ${CLI_OPTS.reauthList.length ? CLI_OPTS.reauthList.join(',') : '(none)'}`);
-    log(`  Skip val:     ${CLI_OPTS.skipValidation}`);
-    log('='.repeat(60));
-    log('');
+    const work = await membersDb.listMembersForStage(3);
+    log(`Stage3: ${work.length} pending oauth`);
+    if (!work.length) return { ok: 0, ng: 0 };
 
-    if (pending.length === 0) { log('No members to process.', 'SUCCESS'); return; }
-
-    const workers = _workers = [];
-    for (let w = 0; w < Math.min(CLI_OPTS.concurrency, pending.length); w++) {
-        try {
-            const chrome = await launchRealChrome(chromePath, w);
-            workers.push({ id: w, ...chrome });
-            if (w < CLI_OPTS.concurrency - 1) await sleep(rand(2000, 3000));
-        } catch (e) {
-            log(`Worker${w} launch failed: ${e.message}`, 'ERROR');
-        }
-    }
-    if (workers.length === 0) {
-        console.error('All Chrome instances failed to start'); process.exit(1);
+    const workers = _workers3 = [];
+    for (let w = 0; w < Math.min(concurrency, work.length); w++) {
+        const chrome = await launchRealChrome(chromePath, w);
+        workers.push({ id: w, ...chrome });
+        if (w < concurrency - 1) await sleep(rand(2000, 3000));
     }
 
     let idx = 0;
-    const stats = { ok: 0, saved_unverified: 0, skipped: 0, failed: 0 };
+    const stats = { ok: 0, ng: 0 };
 
     async function workerFn(worker) {
         const wlog = createWorkerLogger(worker.id);
         while (true) {
-            const myIdx = idx++;
-            if (myIdx >= pending.length) break;
-            const { member, host } = pending[myIdx];
-            try {
-                const alive = await isChromeAlive(worker);
-                if (!alive) await restartChrome(chromePath, worker);
+            const i = idx++;
+            if (i >= work.length) break;
+            const m = work[i];
 
-                const result = await Promise.race([
-                    processMember({
-                        member, host, browser: worker.browser,
-                        workerId: worker.id, opts: CLI_OPTS,
-                    }),
-                    new Promise((_, rej) => setTimeout(
-                        () => rej(new Error(`stage3_hard_timeout: exceeded ${HARD_TIMEOUT_MS / 1000}s`)),
-                        HARD_TIMEOUT_MS
-                    )),
-                ]);
-                if (result.status === 'ok') stats.ok++;
-                else if (result.status === 'saved_unverified') stats.saved_unverified++;
-                else if (result.status === 'skipped') stats.skipped++;
-            } catch (e) {
-                wlog.error(`processMember failed [${member.email}]: ${e.message}`);
-                stats.failed++;
-                await addFailedRecord({
-                    stage: 3,
-                    memberEmail: member.email,
-                    hostEmail: host.email,
-                    reason: e.message,
+            // Fetch host record for processMember (needs host.email)
+            const hostRow = await hostsDb.getHostById(m.host_id);
+            if (!hostRow) {
+                wlog.error(`Stage3 [${m.email}]: host_id=${m.host_id} not found in DB, skipping`);
+                stats.ng++;
+                continue;
+            }
+
+            // Normalise DB row to the shape processMember / googleLogin expect
+            const memberAccount = {
+                idx: m.id,
+                email: m.email,
+                pass: m.password,
+                recovery: m.recovery_email || '',
+                totp_secret: m.totp_secret || undefined,
+            };
+            const hostAccount = {
+                idx: hostRow.id,
+                email: hostRow.email,
+                pass: hostRow.password,
+                recovery: hostRow.recovery_email || '',
+                totp_secret: hostRow.totp_secret || undefined,
+            };
+
+            await eventsDb.logEvent({ memberId: m.id, hostId: m.host_id, runId, stage: 'stage3', eventType: 'start' });
+            try {
+                const result = await processMember({
+                    member: memberAccount,
+                    host: hostAccount,
+                    browser: worker.browser,
+                    workerId: worker.id,
+                    opts: CLI_OPTS,
                 });
-                if (/hard_timeout|Protocol error|Session closed|Target closed/i.test(e.message || '')) {
-                    wlog.warn('  Restarting Chrome after hard failure...');
-                    try { await restartChrome(chromePath, worker); } catch (re) {
-                        wlog.error(`  Chrome restart failed: ${re.message}`);
-                    }
+
+                // processMember upserts the credential internally; retrieve it for DB persistence
+                const credName = result.name || require('./3_sub2api').accountName(hostRow.email, m.email);
+                const cred = findCredentialByName(credName);
+                const token = cred && cred.refresh_token;
+                if (!token) throw new Error('no refresh_token found after processMember');
+
+                const { refresh_token: _rt, ...tokenMeta } = cred;
+                await membersDb.transitionToDone(m.id, token, tokenMeta);
+                await eventsDb.logEvent({ memberId: m.id, hostId: m.host_id, runId, stage: 'stage3', eventType: 'success' });
+                stats.ok++;
+            } catch (e) {
+                wlog.error(`Stage3 [${m.email}]: ${e.message}`);
+                await membersDb.transitionToFailed(m.id, { newStatus: 'oauth_failed', error: e.message, releaseHost: false });
+                await eventsDb.logEvent({ memberId: m.id, hostId: m.host_id, runId, stage: 'stage3', eventType: 'fail', message: e.message });
+                stats.ng++;
+                if (/Protocol error|Session closed|Target closed/i.test(e.message || '')) {
+                    try { await restartChrome(chromePath, worker); } catch (_) { }
                 }
             }
             await sleep(rand(1000, 2000));
@@ -602,28 +572,16 @@ async function main() {
     }
 
     await Promise.all(workers.map(w => workerFn(w)));
-    cleanupWorkers(workers);
-
-    log('');
-    log('='.repeat(60));
-    log('  Stage 3 (local) Complete', 'SUCCESS');
-    log(`  ok (verified):    ${stats.ok}`);
-    log(`  saved_unverified: ${stats.saved_unverified}`);
-    log(`  skipped:          ${stats.skipped}`);
-    log(`  failed:           ${stats.failed}`);
-    log('='.repeat(60));
-    log('');
+    cleanupWorkers3(workers);
+    log(`Stage3 done: OK=${stats.ok} FAIL=${stats.ng}`, 'SUCCESS');
+    return stats;
 }
 
-if (require.main === module) {
-    main().catch(e => {
-        log(`Fatal: ${e.message}`, 'ERROR');
-        if (e.stack) console.error(e.stack);
-        process.exit(1);
-    });
-}
+process.on('SIGINT',  () => { cleanupWorkers3(_workers3); process.exit(130); });
+process.on('SIGTERM', () => { cleanupWorkers3(_workers3); process.exit(143); });
 
 module.exports = {
+    runStage3,
     buildAuthUrl,
     exchangeCode,
     startCbServer,
@@ -639,3 +597,9 @@ module.exports = {
     PROBE_MODEL,
     CRED_FILE,
 };
+
+if (require.main === module) {
+    runStage3({ runId: null, concurrency: 1 })
+        .then(() => process.exit(0))
+        .catch(e => { log(`Fatal: ${e.message}`, 'ERROR'); process.exit(1); });
+}
