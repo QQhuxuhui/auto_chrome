@@ -1,82 +1,8 @@
 /**
- * 基于文件标记的暂停机制。用于登录流程中遇到需要人工介入的场景
- * （CAPTCHA、Confirm you're not a robot 等）。
- *
- * 原理：在 logs/paused/ 下创建一个 flag 文件；程序每 2s 轮询一次；
- * flag 消失 → 恢复执行；出现 .abort 同名文件 → 放弃。
- *
- * 好处：适合 forked child process 场景（stdin 不可用）。用户用任意方式
- * 删 flag 都能解锁（终端、文件管理器、UI 将来的按钮）。
+ * 登录流程中遇到 CAPTCHA / "Confirm you're not a robot" 等无法自动解的人类验证时，
+ * 暂停程序并**持续轮询页面**，等用户在浏览器窗口自己解完。
+ * 拦截一消失（URL 变了 / DOM 变了）就自动继续，不需要任何额外操作。
  */
-const fs = require('fs');
-const path = require('path');
-
-const PAUSE_DIR = path.resolve(__dirname, '..', '..', 'logs', 'paused');
-
-function ensureDir() {
-    try { fs.mkdirSync(PAUSE_DIR, { recursive: true }); } catch (_) { }
-}
-
-/**
- * 等待人工介入。
- *
- * @param {string} label      简短标签，用在 flag 文件名里（如 `captcha_foo@x.com`）
- * @param {object} wlog       worker logger
- * @param {object} opts
- * @param {number} opts.timeoutMs  默认 30 分钟
- * @returns {{ resumed: boolean, aborted?: boolean, timeout?: boolean }}
- */
-async function waitForHumanIntervention(label, wlog, opts = {}) {
-    ensureDir();
-    const safeLabel = String(label).replace(/[^a-zA-Z0-9_.@-]/g, '_').substring(0, 80);
-    const flagPath = path.join(PAUSE_DIR, `${safeLabel}_${Date.now()}.flag`);
-    const abortPath = flagPath + '.abort';
-    fs.writeFileSync(flagPath, `${new Date().toISOString()}\nlabel=${label}\npid=${process.pid}\n`, 'utf-8');
-
-    const banner = [
-        '',
-        '═══════════════════════════════════════════════════════════════════',
-        `  🛑 需要人工介入：${label}`,
-        '',
-        '  请在浏览器窗口完成对应操作（验证码、"I\'m not a robot" 等）。',
-        '  完成后删除此 flag 文件以继续：',
-        '',
-        `    rm "${flagPath}"`,
-        '',
-        '  如需放弃：',
-        `    touch "${abortPath}"`,
-        '',
-        `  超时：${Math.round((opts.timeoutMs || 30 * 60 * 1000) / 60000)} 分钟后自动继续（视为超时放弃）`,
-        '═══════════════════════════════════════════════════════════════════',
-        ''
-    ].join('\n');
-
-    // 同时写 logger（含 pino 结构化）+ stderr（人眼直读）
-    if (wlog && wlog.warn) wlog.warn(banner);
-    process.stderr.write(banner);
-
-    const timeoutMs = opts.timeoutMs || 30 * 60 * 1000;
-    const pollInterval = 2000;
-    const deadline = Date.now() + timeoutMs;
-
-    while (Date.now() < deadline) {
-        await new Promise(r => setTimeout(r, pollInterval));
-        if (!fs.existsSync(flagPath)) {
-            if (wlog && wlog.info) wlog.info(`[pause:${label}] flag removed, resuming`);
-            return { resumed: true };
-        }
-        if (fs.existsSync(abortPath)) {
-            try { fs.unlinkSync(flagPath); } catch (_) { }
-            try { fs.unlinkSync(abortPath); } catch (_) { }
-            if (wlog && wlog.warn) wlog.warn(`[pause:${label}] abort flag detected`);
-            return { resumed: false, aborted: true };
-        }
-    }
-
-    try { fs.unlinkSync(flagPath); } catch (_) { }
-    if (wlog && wlog.warn) wlog.warn(`[pause:${label}] timed out after ${timeoutMs}ms`);
-    return { resumed: false, timeout: true };
-}
 
 /**
  * 检测当前页是否有「Confirm you're not a robot」/ reCAPTCHA 等人类验证拦截。
@@ -105,4 +31,76 @@ async function detectCaptchaChallenge(page) {
     }
 }
 
-module.exports = { waitForHumanIntervention, detectCaptchaChallenge, PAUSE_DIR };
+/**
+ * 检测到 CAPTCHA 后，持续轮询页面，等用户手动解完（页面离开 challenge 状态）。
+ *
+ * @param {Page}   page         puppeteer Page
+ * @param {string} label        日志用的短标签（例如 email）
+ * @param {object} wlog         worker logger
+ * @param {object} opts
+ * @param {number} opts.timeoutMs            默认 30 分钟
+ * @param {number} opts.clearConfirmMs       连续 N ms 都没检测到拦截才算真的解完（避免
+ *                                           过渡态抖动），默认 3000ms
+ * @returns {{ resumed: boolean, timeout?: boolean, elapsedMs: number }}
+ */
+async function waitForCaptchaResolved(page, label, wlog, opts = {}) {
+    const timeoutMs = opts.timeoutMs || 30 * 60 * 1000;
+    const pollInterval = opts.pollMs || 2000;
+    const clearConfirmMs = opts.clearConfirmMs || 3000;
+    const start = Date.now();
+    const deadline = start + timeoutMs;
+
+    const banner = [
+        '',
+        '═══════════════════════════════════════════════════════════════════',
+        `  🛑 检测到人类验证拦截：${label}`,
+        '',
+        '  请在 Chrome 窗口完成验证（勾选 "I\'m not a robot" / 图片验证码等）。',
+        '  程序会自动检测拦截消失后继续，不用手动干预。',
+        '',
+        `  每 ${pollInterval / 1000}s 轮询一次；${Math.round(timeoutMs / 60000)} 分钟超时`,
+        '═══════════════════════════════════════════════════════════════════',
+        ''
+    ].join('\n');
+    if (wlog && wlog.warn) wlog.warn(banner);
+    process.stderr.write(banner);
+
+    let clearStart = null;  // 连续 N ms "没拦截" 才算真的解完
+    let lastState = true;   // 默认认为还在拦截
+
+    while (Date.now() < deadline) {
+        await new Promise(r => setTimeout(r, pollInterval));
+        let stillBlocked;
+        try {
+            stillBlocked = await detectCaptchaChallenge(page);
+        } catch (_) {
+            stillBlocked = true;  // 页面异常算仍在
+        }
+
+        if (stillBlocked) {
+            clearStart = null;
+            if (lastState === false && wlog && wlog.info) {
+                wlog.info(`[captcha:${label}] still present`);
+            }
+            lastState = true;
+            continue;
+        }
+
+        // 没检测到拦截 —— 需连续 clearConfirmMs 都清白才放行
+        if (clearStart === null) {
+            clearStart = Date.now();
+            if (wlog && wlog.info) wlog.info(`[captcha:${label}] seems cleared, confirming for ${clearConfirmMs}ms...`);
+        } else if (Date.now() - clearStart >= clearConfirmMs) {
+            const elapsedMs = Date.now() - start;
+            if (wlog && wlog.info) wlog.info(`[captcha:${label}] resolved; elapsed ${(elapsedMs / 1000).toFixed(1)}s`);
+            return { resumed: true, elapsedMs };
+        }
+        lastState = false;
+    }
+
+    const elapsedMs = Date.now() - start;
+    if (wlog && wlog.warn) wlog.warn(`[captcha:${label}] timed out after ${(elapsedMs / 1000).toFixed(1)}s`);
+    return { resumed: false, timeout: true, elapsedMs };
+}
+
+module.exports = { detectCaptchaChallenge, waitForCaptchaResolved };

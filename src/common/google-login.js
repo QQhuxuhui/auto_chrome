@@ -11,7 +11,7 @@ const {
     takeScreenshot, listVisibleElements, fastClick, forceEnglishUI,
 } = require('./chrome');
 const { generateTOTP, getTOTPWithTTL } = require('./totp');
-const { detectCaptchaChallenge, waitForHumanIntervention } = require('./pause');
+const { detectCaptchaChallenge, waitForCaptchaResolved } = require('./pause');
 
 const MAX_LOGIN_STEPS = 25;
 
@@ -45,15 +45,14 @@ async function googleLogin(page, account, wlog, opts = {}) {
         // 每轮先尝试切成英文，已是英文或找不到切换器时 no-op。
         await forceEnglishUI(page, wlog);
 
-        // CAPTCHA / "Confirm you're not a robot" 拦截 —— 无法自动解，等人工介入
+        // CAPTCHA / "Confirm you're not a robot" 拦截 —— 不能自动解，持续轮询等人工解完
         if (await detectCaptchaChallenge(page)) {
             await takeScreenshot(page, `captcha_${account.email}`, wlog);
-            const result = await waitForHumanIntervention(`captcha_${account.email}`, wlog);
+            const result = await waitForCaptchaResolved(page, account.email, wlog);
             if (!result.resumed) {
-                throw new Error(`CAPTCHA unresolved: ${result.aborted ? 'aborted' : 'timeout'}`);
+                throw new Error(`CAPTCHA unresolved: ${result.timeout ? 'timeout' : 'unknown'}`);
             }
-            // 人已解完，下一轮重新 detectPageState 继续
-            continue;
+            continue;  // 人已解完，下一轮 detectPageState 继续
         }
 
         const stateInfo = await detectPageState(page, wlog);
