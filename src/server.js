@@ -49,6 +49,22 @@ async function start() {
     const app = await build();
     try {
         await app.listen({ port: PORT, host: HOST });
+
+        // Antigravity 定时 sync (set SYNC_INTERVAL_MS=0 to disable)
+        const SYNC_MS = parseInt(process.env.SYNC_INTERVAL_MS, 10);
+        if (SYNC_MS === 0) {
+            app.log.info('Antigravity scheduled sync disabled (SYNC_INTERVAL_MS=0)');
+        } else {
+            const ms = Number.isFinite(SYNC_MS) && SYNC_MS > 0 ? SYNC_MS : 5 * 60 * 1000;
+            const sync = require('./sync/antigravity-sync');
+            setInterval(() => {
+                sync.syncFromRemote()
+                    .then(r => app.log.info({ event: 'antigravity-sync', ...r }, `antigravity sync: matched=${r.matched} orphans=${r.orphans.length}`))
+                    .catch(e => app.log.warn({ err: e.message }, 'antigravity scheduled sync failed'));
+            }, ms).unref();
+            app.log.info(`Antigravity scheduled sync every ${ms}ms`);
+        }
+
         app.log.info(`HTTP ready on http://${HOST}:${PORT}`);
     } catch (e) {
         app.log.error(e);
