@@ -84,7 +84,10 @@ function buildChromeArgs({ workerId = 0, dataDir, debugPort, extraArgs = [], lan
         '--no-first-run',
         '--no-default-browser-check',
         '--disable-sync',
-        '--disable-features=InProductHelp',
+        // 关闭 Chrome 的 "Sign in to Chrome in a new profile?" (dice 拦截)
+        // 弹窗 —— 它会挡住 uplevelingstep / consent 页的后续导航，让 stage 3
+        // validation 卡在点账号后无响应。另外保留 InProductHelp 的禁用。
+        '--disable-features=InProductHelp,DiceWebSigninInterception,SigninInterceptBubble',
         // 强制 UI 语言为英文，避免不同国家账号返回不同语言的 Google 页面
         // （Google 服务器根据 Accept-Language 决定 UI 语言）
         `--lang=${lang}`,
