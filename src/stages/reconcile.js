@@ -225,8 +225,14 @@ async function clickRemoveAndConfirm(page, tag, wlog, hostAccount) {
     const warn = (m) => wlog && wlog.warn && wlog.warn(`${tag} ${m}`);
     const log = (m) => wlog && wlog.info && wlog.info(`${tag} ${m}`);
 
-    // 点「Remove member」/「Cancel invitation」/ 中文等价按钮
-    const step2 = await page.evaluate(() => {
+    const beforeUrl = page.url();
+
+    // ========== Step 2: 找并标记「Remove member」/「Cancel invitation」按钮，用 CDP 真实点击 ==========
+    // Material Design 按钮靠 pointerdown/pointerup，DOM 的 .click() 触发不了。
+    // 必须用 ElementHandle.click() 走 CDP 发真实鼠标事件。
+    const REMOVE_BTN_MARK = 'data-auto-remove-btn';
+    const step2mark = await page.evaluate((attr) => {
+        document.querySelectorAll(`[${attr}]`).forEach(el => el.removeAttribute(attr));
         const STRONG = [
             /remove.*member/i, /remove.*from.*family/i, /remove.*family.*group/i,
             /cancel.*invit/i, /revoke.*invit/i, /withdraw.*invit/i,
@@ -243,8 +249,8 @@ async function clickRemoveAndConfirm(page, tag, wlog, hostAccount) {
             return r.width > 20 && r.height > 10 &&
                    s.display !== 'none' && s.visibility !== 'hidden' && s.opacity !== '0';
         };
-        const clickables = document.querySelectorAll('button, a, [role="button"], [role="menuitem"]');
         const matchAny = (s, patterns) => patterns.some(p => p.test(s));
+        const clickables = document.querySelectorAll('button, a, [role="button"], [role="menuitem"]');
 
         for (const el of clickables) {
             if (!visible(el)) continue;
@@ -252,9 +258,9 @@ async function clickRemoveAndConfirm(page, tag, wlog, hostAccount) {
             const t = (el.textContent || '').trim();
             const aria = el.getAttribute('aria-label') || '';
             if (matchAny(t, STRONG) || matchAny(aria, STRONG)) {
+                el.setAttribute(attr, '1');
                 el.scrollIntoView({ block: 'center' });
-                el.click();
-                return { ok: true, via: 'strong', text: t.substring(0, 80) };
+                return { ok: true, via: 'strong', text: t.substring(0, 80), aria: aria.substring(0, 80) };
             }
         }
         for (const el of clickables) {
@@ -263,32 +269,73 @@ async function clickRemoveAndConfirm(page, tag, wlog, hostAccount) {
             const t = (el.textContent || '').trim();
             const aria = el.getAttribute('aria-label') || '';
             if (matchAny(t, WEAK) || matchAny(aria, WEAK)) {
+                el.setAttribute(attr, '1');
                 el.scrollIntoView({ block: 'center' });
-                el.click();
-                return { ok: true, via: 'weak', text: t.substring(0, 80) };
+                return { ok: true, via: 'weak', text: t.substring(0, 80), aria: aria.substring(0, 80) };
             }
         }
         return { ok: false };
-    }).catch(e => ({ ok: false, error: e.message }));
+    }, REMOVE_BTN_MARK).catch(e => ({ ok: false, error: e.message }));
 
-    if (!step2.ok) {
-        warn(`clickRemove failed: ${JSON.stringify(step2)}`);
+    if (!step2mark.ok) {
+        warn(`clickRemove no matching button: ${JSON.stringify(step2mark)}`);
         await takeScreenshot(page, `remove_noremovebtn`, wlog);
         return false;
     }
-    log(`clicked remove button (${step2.via}): "${step2.text}"`);
+
+    // CDP 真实点击
+    const rmHandle = await page.$(`[${REMOVE_BTN_MARK}]`).catch(() => null);
+    if (!rmHandle) {
+        warn('clickRemove handle lost');
+        await takeScreenshot(page, `remove_handlemiss`, wlog);
+        return false;
+    }
+    try {
+        await rmHandle.click({ delay: 50 });
+    } catch (e) {
+        warn(`clickRemove CDP click failed: ${e.message}; falling back to DOM click`);
+        await page.evaluate((attr) => {
+            const el = document.querySelector(`[${attr}]`);
+            if (el) el.click();
+        }, REMOVE_BTN_MARK).catch(() => { });
+    } finally {
+        await rmHandle.dispose().catch(() => { });
+    }
+    log(`clicked remove button (${step2mark.via}): "${step2mark.text || step2mark.aria}"`);
     await sleep(2500);
 
-    // 确认对话框
+    // ========== Step 2.5: 点 Remove 后，检测是否直接跳到了 challenge / /family/remove ==========
+    // Google 很多情况下「Remove member」点击不弹 dialog，而是**直接**走 POST → 跳 challenge 页。
+    // 这时候跳过 step 3（没 dialog 可找），直接去 solveMidflowChallenge。
+    const urlAfterRemove = page.url();
+    const urlChanged = urlAfterRemove !== beforeUrl;
+    const navigatedAway = /\/challenge\/|\/family\/remove\/|verifyit|verify-account|\/2sv/i.test(urlAfterRemove);
+
+    log(`post-remove url=${urlAfterRemove.substring(0, 120)} changed=${urlChanged} navigatedAway=${navigatedAway}`);
+
+    if (navigatedAway) {
+        log(`skipping step 3 (no dialog expected) — going straight to challenge solver`);
+        await takeScreenshot(page, `remove_after_remove_click`, wlog);
+        const solved = await solveMidflowChallenge(page, hostAccount, tag, wlog);
+        if (!solved) {
+            await takeScreenshot(page, `remove_challenge_unsolved`, wlog);
+            return false;
+        }
+        await sleep(2000);
+        return true;
+    }
+
+    // ========== Step 3: 确认对话框（仅当 step 2.5 未导航离开时） ==========
+    // 关键：只在 role=dialog 作用域内搜，避免在 document 上误点回"Remove member"自身。
     const step3 = await page.evaluate(() => {
         const dialog = document.querySelector('[role="dialog"], [role="alertdialog"]');
-        const scope = dialog || document;
-        const buttons = scope.querySelectorAll('button, [role="button"]');
+        if (!dialog) return { ok: false, reason: 'no_dialog' };
+        const buttons = dialog.querySelectorAll('button, [role="button"]');
         const CONFIRM = [
             /^\s*remove\s*$/i, /^\s*delete\s*$/i, /^\s*confirm\s*$/i, /^\s*ok\s*$/i, /^\s*yes\s*$/i,
             /^\s*cancel.*invit/i,
             /^移除$/, /^删除$/, /^确认$/, /^确定$/, /^是$/, /^取消邀请$/,
-            /remove from family/i, /^remove member$/i,
+            /remove from family/i,
         ];
         const visible = (el) => {
             const r = el.getBoundingClientRect();
@@ -303,18 +350,21 @@ async function clickRemoveAndConfirm(page, tag, wlog, hostAccount) {
             if (CONFIRM.some(p => p.test(t))) {
                 btn.scrollIntoView({ block: 'center' });
                 btn.click();
-                return { ok: true, text: t.substring(0, 80), inDialog: !!dialog };
+                return { ok: true, text: t.substring(0, 80) };
             }
         }
-        return { ok: false };
+        return { ok: false, reason: 'no_confirm_btn_in_dialog' };
     }).catch(e => ({ ok: false, error: e.message }));
 
     if (!step3.ok) {
-        warn(`confirm failed: ${JSON.stringify(step3)}`);
+        // step 2.5 没导航 + 没 dialog = 点击没触发任何反应，或者页面结构变了
+        warn(`step 3 no confirm dialog: ${JSON.stringify(step3)} (url=${page.url().substring(0, 100)})`);
         await takeScreenshot(page, `remove_noconfirm`, wlog);
-        return false;
+        // 即使这里找不到 dialog，也尝试继续 solve challenge —— 万一导航延迟了
+        const solved = await solveMidflowChallenge(page, hostAccount, tag, wlog);
+        return solved;
     }
-    log(`confirmed: "${step3.text}" (in dialog: ${step3.inDialog})`);
+    log(`confirmed in dialog: "${step3.text}"`);
 
     // 点完确认等页面稳定 1.5s，然后打一张截图看 Google 跳到哪（debug 用）
     await sleep(1500);
