@@ -6,7 +6,7 @@
  *   reconcileAgainstDB(hostRecord, googleEmails, runId) -> { changes: [] }
  *   reconcileHost(hostRecord, browser, runId, wlog) -> { changes }  (full flow)
  */
-const { sleep, newPage, clearBrowserSession } = require('../common/chrome');
+const { sleep, newPage, clearBrowserSession, takeScreenshot } = require('../common/chrome');
 const { googleLogin } = require('../common/google-login');
 const membersDb = require('../db/members');
 const eventsDb = require('../db/events');
@@ -80,60 +80,166 @@ async function reconcileAgainstDB(hostRecord, googleEmails, runId) {
 
 /**
  * 在 Google Family 页面上移除一个成员。
- * 定位策略：找到 email 文本所在行，点行尾的更多按钮 / 移除按钮，确认。
- * 返回 true 表示成功或该成员已不在；false 表示 UI 路径找不到。
+ *
+ * Google Family 是 SPA，移除流程分 3 步：
+ *   1. 点击成员行/链接 → 打开该成员的详情视图
+ *   2. 在详情视图里点「从家庭组中移除」按钮
+ *   3. 在确认对话框里点「移除」
+ *
+ * 每步失败都截图到 logs/screenshots/ 方便人工排查。
  */
 async function removeFamilyMember(page, memberEmail, wlog) {
-    const result = await page.evaluate((targetEmail) => {
-        const lowerTarget = targetEmail.toLowerCase();
-        const candidates = document.querySelectorAll('li, div[role="listitem"], div[role="row"], tr');
-        for (const row of candidates) {
-            const text = (row.textContent || '').toLowerCase();
-            if (!text.includes(lowerTarget)) continue;
-            const r = row.getBoundingClientRect();
-            if (r.width < 100 || r.height < 20) continue;
-            const buttons = row.querySelectorAll('button, [role="button"]');
-            for (const btn of buttons) {
-                const aria = (btn.getAttribute('aria-label') || '').toLowerCase();
-                const btnText = (btn.textContent || '').toLowerCase();
-                if (aria.includes('remove') || aria.includes('移除') || aria.includes('删除') ||
-                    btnText.includes('remove') || btnText.includes('移除') || btnText.includes('删除')) {
-                    btn.click();
-                    return 'clicked_row_button';
-                }
-            }
-            const moreBtn = row.querySelector('button[aria-label*="more" i], button[aria-label*="更多"]');
-            if (moreBtn) {
-                moreBtn.click();
-                return 'clicked_more';
+    const tag = `[removeFamilyMember ${memberEmail}]`;
+    const log = (m) => wlog && wlog.info && wlog.info(`${tag} ${m}`);
+    const warn = (m) => wlog && wlog.warn && wlog.warn(`${tag} ${m}`);
+
+    // ========== Step 1: 打开该成员的详情视图 ==========
+    // 优先找 <a href="/family/..."> 链接（Google SPA 通常这样），否则回退到点行/可点区域
+    const step1 = await page.evaluate((targetEmail) => {
+        const lower = targetEmail.toLowerCase();
+
+        // 策略 A: 明确是指向 family 子页面的链接
+        for (const a of document.querySelectorAll('a[href*="/family/"]')) {
+            const t = (a.textContent || '').toLowerCase();
+            if (t.includes(lower)) {
+                a.scrollIntoView({ block: 'center' });
+                a.click();
+                return { ok: true, strategy: 'anchor', href: a.getAttribute('href') };
             }
         }
-        return null;
-    }, memberEmail).catch(() => null);
 
-    if (!result) {
-        wlog && wlog.warn && wlog.warn(`removeFamilyMember: could not locate row for ${memberEmail}`);
-        return false;
-    }
-    await sleep(1500);
-    const confirmed = await page.evaluate(() => {
-        const buttons = document.querySelectorAll('button, [role="button"]');
-        for (const btn of buttons) {
-            const text = (btn.textContent || '').trim().toLowerCase();
-            if (text === 'remove' || text === 'confirm' || text === '移除' ||
-                text === '删除' || text === '确认' || text === '确定') {
-                btn.click();
-                return true;
+        // 策略 B: 任意可点元素文本包含该 email
+        const selectors = [
+            '[role="link"]', '[role="button"]',
+            'li', 'tr', 'div[role="listitem"]', 'div[role="row"]',
+        ];
+        for (const sel of selectors) {
+            for (const el of document.querySelectorAll(sel)) {
+                const t = (el.textContent || '').toLowerCase();
+                if (!t.includes(lower)) continue;
+                const r = el.getBoundingClientRect();
+                if (r.width < 80 || r.height < 30 || r.height > 300) continue;
+                el.scrollIntoView({ block: 'center' });
+                el.click();
+                return { ok: true, strategy: `clickable-${sel}`, w: r.width, h: r.height };
             }
         }
-        return false;
-    }).catch(() => false);
+        return { ok: false };
+    }, memberEmail).catch(e => ({ ok: false, error: e.message }));
 
-    if (!confirmed) {
-        wlog && wlog.warn && wlog.warn(`removeFamilyMember: no confirm dialog for ${memberEmail}`);
+    if (!step1.ok) {
+        warn(`step 1 failed (open detail): ${JSON.stringify(step1)}`);
+        await takeScreenshot(page, `remove_step1_notfound_${memberEmail}`, wlog);
         return false;
     }
+    log(`step 1 opened detail via ${step1.strategy}`);
+    await sleep(3000);
+
+    // ========== Step 2: 点「从家庭组中移除」按钮 ==========
+    const step2 = await page.evaluate(() => {
+        // 强匹配优先：含"remove...family"/"移除...家庭"等短语
+        const STRONG = [
+            /remove.*from.*family/i,
+            /remove.*family.*group/i,
+            /remove.*member/i,
+            /从家庭.*(移除|移出|删除)/,
+            /(移除|移出|删除).*家庭.*成员/,
+            /将.*(移除|移出)/,
+        ];
+        // 弱匹配：单独的 "Remove" / "移除成员" 等
+        const WEAK = [
+            /^\s*remove\s*$/i,
+            /^移除$/,
+            /^移除成员$/,
+            /^删除成员$/,
+        ];
+
+        const clickables = document.querySelectorAll('button, a, [role="button"], [role="menuitem"]');
+        const visible = (el) => {
+            const r = el.getBoundingClientRect();
+            const s = window.getComputedStyle(el);
+            return r.width > 20 && r.height > 10 &&
+                   s.display !== 'none' && s.visibility !== 'hidden' && s.opacity !== '0';
+        };
+        const matchAny = (s, patterns) => patterns.some(p => p.test(s));
+
+        // 先强匹配
+        for (const el of clickables) {
+            if (!visible(el)) continue;
+            const t = (el.textContent || '').trim();
+            const aria = el.getAttribute('aria-label') || '';
+            if (matchAny(t, STRONG) || matchAny(aria, STRONG)) {
+                el.scrollIntoView({ block: 'center' });
+                el.click();
+                return { ok: true, via: 'strong', text: t.substring(0, 80), aria: aria.substring(0, 80) };
+            }
+        }
+        // 再弱匹配（避免误点 cancel 等）
+        for (const el of clickables) {
+            if (!visible(el)) continue;
+            const t = (el.textContent || '').trim();
+            const aria = el.getAttribute('aria-label') || '';
+            if (matchAny(t, WEAK) || matchAny(aria, WEAK)) {
+                // 排除 dialog 内的弱匹配（那是确认按钮，要 step 3 处理）
+                if (el.closest('[role="dialog"], [role="alertdialog"]')) continue;
+                el.scrollIntoView({ block: 'center' });
+                el.click();
+                return { ok: true, via: 'weak', text: t.substring(0, 80), aria: aria.substring(0, 80) };
+            }
+        }
+        return { ok: false };
+    }).catch(e => ({ ok: false, error: e.message }));
+
+    if (!step2.ok) {
+        warn(`step 2 failed (click remove): ${JSON.stringify(step2)}`);
+        await takeScreenshot(page, `remove_step2_noremovebtn_${memberEmail}`, wlog);
+        return false;
+    }
+    log(`step 2 clicked remove button (${step2.via}): "${step2.text || step2.aria}"`);
     await sleep(2500);
+
+    // ========== Step 3: 确认对话框 ==========
+    const step3 = await page.evaluate(() => {
+        const dialog = document.querySelector('[role="dialog"], [role="alertdialog"]');
+        const scope = dialog || document;
+        const buttons = scope.querySelectorAll('button, [role="button"]');
+        const CONFIRM = [
+            /^\s*remove\s*$/i, /^\s*delete\s*$/i, /^\s*confirm\s*$/i, /^\s*ok\s*$/i, /^\s*yes\s*$/i,
+            /^移除$/, /^删除$/, /^确认$/, /^确定$/, /^是$/,
+            /remove from family/i,
+        ];
+        const visible = (el) => {
+            const r = el.getBoundingClientRect();
+            const s = window.getComputedStyle(el);
+            return r.width > 20 && r.height > 10 &&
+                   s.display !== 'none' && s.visibility !== 'hidden' && s.opacity !== '0';
+        };
+        for (const btn of buttons) {
+            if (!visible(btn)) continue;
+            const t = (btn.textContent || '').trim();
+            if (!t) continue;
+            if (CONFIRM.some(p => p.test(t))) {
+                btn.scrollIntoView({ block: 'center' });
+                btn.click();
+                return { ok: true, text: t.substring(0, 80), inDialog: !!dialog };
+            }
+        }
+        return { ok: false, hasDialog: !!dialog };
+    }).catch(e => ({ ok: false, error: e.message }));
+
+    if (!step3.ok) {
+        warn(`step 3 failed (confirm): ${JSON.stringify(step3)}`);
+        await takeScreenshot(page, `remove_step3_noconfirm_${memberEmail}`, wlog);
+        return false;
+    }
+    log(`step 3 confirmed: "${step3.text}" (in dialog: ${step3.inDialog})`);
+    await sleep(3500);
+
+    // 回到 family 列表，保证下一次循环看到更新后的 DOM
+    await page.goto(FAMILY_URL, { waitUntil: 'networkidle2', timeout: 20000 }).catch(() => { });
+    await sleep(2500);
+
+    log('flow complete');
     return true;
 }
 
