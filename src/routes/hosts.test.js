@@ -35,6 +35,17 @@ test('POST /api/hosts/bulk skips duplicates', async () => {
     assert.equal(body.skipped, 1);
 });
 
+test('POST /api/hosts/bulk parses TAB-separated lines', async () => {
+    await db.query("DELETE FROM hosts WHERE email LIKE 'api-host-tab%@example.com'");
+    const r = await app.inject({
+        method: 'POST', url: '/api/hosts/bulk',
+        payload: { lines: 'api-host-tab1@example.com\tpw1\tr@x.com\napi-host-tab2@example.com\tpw2' },
+    });
+    const body = JSON.parse(r.body);
+    assert.equal(body.inserted, 2, `expected 2 inserted, got ${JSON.stringify(body)}`);
+    await db.query("DELETE FROM hosts WHERE email LIKE 'api-host-tab%@example.com'");
+});
+
 test('GET /api/hosts returns list with slot fields', async () => {
     const r = await app.inject({ method: 'GET', url: '/api/hosts?search=api-host' });
     assert.equal(r.statusCode, 200);

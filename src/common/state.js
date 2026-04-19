@@ -66,9 +66,17 @@ async function addFailedRecord(record) {
 }
 
 // ============ 账号解析 ============
-function parseAccounts(f) {
-    if (!fs.existsSync(f)) throw new Error(`Account file not found: ${f}`);
-    let raw = fs.readFileSync(f, 'utf-8');
+function parseAccounts(input) {
+    let raw;
+    if (typeof input === 'string' && input.includes('\n') === false && input.length < 500 && fs.existsSync(input)) {
+        // Treat as a file path
+        raw = fs.readFileSync(input, 'utf-8');
+    } else if (typeof input === 'string') {
+        // Treat as raw content
+        raw = input;
+    } else {
+        throw new Error('parseAccounts: input must be a file path or raw string');
+    }
     if (raw.charCodeAt(0) === 0xFEFF) raw = raw.slice(1);
 
     const lines = raw.split(/\r?\n/).filter(l => {

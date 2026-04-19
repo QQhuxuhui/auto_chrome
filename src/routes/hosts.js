@@ -1,61 +1,41 @@
 const hosts = require('../db/hosts');
+const { parseAccounts } = require('../common/state');
 
-function parseLinesToAccounts(text) {
-    // Minimal inline parser for bulk upload. Supports `email:pass[:recovery[:totp]]`.
-    // common/state.js#parseAccounts reads from a file path; we duplicate the minimal
-    // logic here rather than refactor that function to accept strings.
-    const lines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l && !l.startsWith('#'));
-    const out = [];
-    for (const line of lines) {
-        const normalized = line.replace(/\uff1a/g, ':');
-        const parts = normalized.split(':').map(s => s.trim());
-        if (parts.length < 2) continue;
-        const email = parts[0];
-        const password = parts[1];
-        if (!email.includes('@')) continue;
-        const recovery = parts[2] || '';
-        const totpRaw = parts.slice(3).join(':');
-        let totp_secret = '';
-        const m = (totpRaw || '').match(/^[A-Za-z2-7]+/);
-        if (m && m[0].length >= 16) totp_secret = m[0];
-        out.push({ email, password, recovery_email: recovery || null, totp_secret: totp_secret || null });
-    }
-    return out;
+function adaptAccount(a) {
+    return {
+        email: a.email,
+        password: a.password || a.pass,
+        recovery_email: a.recovery_email || a.recovery,
+        totp_secret: a.totp_secret,
+        notes: a.notes,
+    };
 }
 
 module.exports = async function routes(app) {
-    app.get('/api/hosts', async (req) => {
-        const { disabled, search, page, pageSize } = req.query;
-        return hosts.listHosts({
-            disabled,
-            search,
-            page: page ? parseInt(page, 10) : undefined,
-            pageSize: pageSize ? parseInt(pageSize, 10) : undefined,
-        });
-    });
-
     app.post('/api/hosts/bulk', async (req, reply) => {
         const { lines, accounts } = req.body || {};
         let items = [];
         if (typeof lines === 'string' && lines.trim()) {
-            items = parseLinesToAccounts(lines);
+            items = parseAccounts(lines).map(adaptAccount);
         } else if (Array.isArray(accounts)) {
-            items = accounts;
+            items = accounts.map(adaptAccount);
         } else {
             return reply.code(400).send({ error: 'either `lines` or `accounts` is required' });
+        }
+        if (items.length === 0) {
+            return { inserted: 0, skipped: 0, errors: [], parsedZero: true };
         }
         const out = { inserted: 0, skipped: 0, errors: [] };
         for (const it of items) {
             try {
                 const r = await hosts.upsertHost({
                     email: it.email,
-                    password: it.password || it.pass,
-                    recovery_email: it.recovery_email || it.recovery,
+                    password: it.password,
+                    recovery_email: it.recovery_email,
                     totp_secret: it.totp_secret,
                     notes: it.notes,
                 });
-                if (r.inserted) out.inserted++;
-                else out.skipped++;
+                if (r.inserted) out.inserted++; else out.skipped++;
             } catch (e) {
                 out.errors.push({ email: it.email, error: e.message });
             }
@@ -75,6 +55,20 @@ module.exports = async function routes(app) {
         await hosts.deleteHost(id);
         reply.code(204).send();
     });
+
+    app.get('/api/hosts', async (req) => {
+        const { disabled, search, page, pageSize } = req.query;
+        return hosts.listHosts({
+            disabled,
+            search,
+            page: page ? parseInt(page, 10) : undefined,
+            pageSize: pageSize ? parseInt(pageSize, 10) : undefined,
+        });
+    });
 };
 
-module.exports.parseLinesToAccounts = parseLinesToAccounts;
+// Backward-compat export (members route imports parseLinesToAccounts from here;
+// it's now a thin wrapper over parseAccounts)
+module.exports.parseLinesToAccounts = function(text) {
+    return parseAccounts(text).map(adaptAccount);
+};

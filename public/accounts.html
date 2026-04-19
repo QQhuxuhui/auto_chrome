@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <title>Accounts — Gemini Family Pipeline</title>
+    <title>账号管理 — Gemini Family Pipeline</title>
     <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
     <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
     <link rel="stylesheet" href="/public/css/app.css">
@@ -11,9 +11,9 @@
 <nav class="mb-6 flex gap-3 items-center">
     <span class="text-lg font-semibold">Gemini Family Pipeline</span>
     <div class="flex-1"></div>
-    <a href="/" class="px-3 py-1 rounded hover:bg-slate-800">Dashboard</a>
-    <a href="/accounts" class="px-3 py-1 rounded hover:bg-slate-800 font-medium">Accounts</a>
-    <a href="/runs" class="px-3 py-1 rounded hover:bg-slate-800">Runs</a>
+    <a href="/" class="px-3 py-1 rounded hover:bg-slate-800">仪表盘</a>
+    <a href="/accounts" class="px-3 py-1 rounded hover:bg-slate-800 font-medium">账号管理</a>
+    <a href="/runs" class="px-3 py-1 rounded hover:bg-slate-800">运行历史</a>
 </nav>
 
 <main x-data="accounts()" x-init="load()" class="space-y-4">
@@ -26,8 +26,8 @@
     </div>
 
     <div class="flex gap-2 border-b border-slate-700">
-        <button @click="tab='hosts'" :class="tab==='hosts' ? 'text-white font-semibold border-b-2 border-emerald-500' : 'text-slate-400'" class="px-4 py-2">Hosts</button>
-        <button @click="tab='members'" :class="tab==='members' ? 'text-white font-semibold border-b-2 border-emerald-500' : 'text-slate-400'" class="px-4 py-2">Members</button>
+        <button @click="tab='hosts'" :class="tab==='hosts' ? 'text-white font-semibold border-b-2 border-emerald-500' : 'text-slate-400'" class="px-4 py-2">母号</button>
+        <button @click="tab='members'" :class="tab==='members' ? 'text-white font-semibold border-b-2 border-emerald-500' : 'text-slate-400'" class="px-4 py-2">子号</button>
     </div>
 
     <!-- Hosts tab -->
@@ -38,7 +38,7 @@
                    class="px-3 py-1 bg-slate-800 rounded flex-1">
         </div>
         <table class="data card">
-            <thead><tr><th>email</th><th>slot</th><th>disabled</th><th>actions</th></tr></thead>
+            <thead><tr><th>邮箱</th><th>占用</th><th>已停用</th><th>操作</th></tr></thead>
             <tbody>
                 <template x-for="h in hosts" :key="h.id">
                     <tr>
@@ -48,11 +48,11 @@
                             <input type="checkbox" :checked="h.disabled" @change="toggleDisabled(h)">
                         </td>
                         <td>
-                            <button @click="deleteHost(h)" class="text-red-400 text-sm">Delete</button>
+                            <button @click="deleteHost(h)" class="text-red-400 text-sm">删除</button>
                         </td>
                     </tr>
                 </template>
-                <tr x-show="!hosts.length"><td colspan="4" class="text-center text-slate-500 py-4">no hosts</td></tr>
+                <tr x-show="!hosts.length"><td colspan="4" class="text-center text-slate-500 py-4">暂无母号</td></tr>
             </tbody>
         </table>
     </section>
@@ -64,19 +64,19 @@
             <select x-model="memberStatusFilter" @change="loadMembers()" class="px-2 py-1 bg-slate-800 rounded">
                 <option value="">全部状态</option>
                 <template x-for="s in ['new','invite_pending','invite_failed','joined','accept_failed','oauth_failed','done','abandoned','removed_from_family']" :key="s">
-                    <option :value="s" x-text="s"></option>
+                    <option :value="s" x-text="statusLabel(s)"></option>
                 </template>
             </select>
             <input x-model="memberSearch" @input.debounce.300ms="loadMembers()" placeholder="搜索 email"
                    class="px-3 py-1 bg-slate-800 rounded flex-1">
         </div>
         <table class="data card">
-            <thead><tr><th>email</th><th>status</th><th>host</th><th>fail</th><th>token</th><th>actions</th></tr></thead>
+            <thead><tr><th>邮箱</th><th>状态</th><th>母号</th><th>失败次数</th><th>凭证</th><th>操作</th></tr></thead>
             <tbody>
                 <template x-for="m in members" :key="m.id">
                     <tr>
                         <td class="mono" x-text="m.email"></td>
-                        <td><span class="pill" :class="m.status" x-text="m.status"></span></td>
+                        <td><span class="pill" :class="m.status" x-text="statusLabel(m.status)"></span></td>
                         <td class="mono text-xs">
                             <span x-text="m.status === 'done' ? hostEmailById(m.host_id) : '—'"></span>
                         </td>
@@ -85,20 +85,20 @@
                             <template x-if="m.token">
                                 <span>
                                     <span class="mono text-xs" x-text="App.shortToken(m.token)"></span>
-                                    <button @click="copyToken(m)" class="ml-1 text-xs text-blue-400">Copy</button>
+                                    <button @click="copyToken(m)" class="ml-1 text-xs text-blue-400">复制</button>
                                 </span>
                             </template>
                             <template x-if="!m.token"><span>—</span></template>
                         </td>
                         <td class="space-x-2 text-sm">
-                            <button @click="openDetail(m)" class="text-blue-400">Detail</button>
-                            <button @click="resetMember(m)" class="text-yellow-400">Reset</button>
-                            <button @click="abandonMember(m)" class="text-orange-400">Abandon</button>
-                            <button @click="deleteMember(m)" class="text-red-400">Delete</button>
+                            <button @click="openDetail(m)" class="text-blue-400">详情</button>
+                            <button @click="resetMember(m)" class="text-yellow-400">重置</button>
+                            <button @click="abandonMember(m)" class="text-orange-400">放弃</button>
+                            <button @click="deleteMember(m)" class="text-red-400">删除</button>
                         </td>
                     </tr>
                 </template>
-                <tr x-show="!members.length"><td colspan="6" class="text-center text-slate-500 py-4">no members</td></tr>
+                <tr x-show="!members.length"><td colspan="6" class="text-center text-slate-500 py-4">暂无子号</td></tr>
             </tbody>
         </table>
     </section>
@@ -111,7 +111,7 @@
         <textarea x-model="bulkText" rows="12" class="w-full bg-slate-900 p-2 mono text-sm rounded"
                   placeholder="abc@gmail.com:pw1:rec@example.com:TOTP123..."></textarea>
         <div class="mt-3 flex gap-2">
-            <button @click="openBulk=''" class="px-3 py-1 bg-slate-700 rounded">Cancel</button>
+            <button @click="openBulk=''" class="px-3 py-1 bg-slate-700 rounded">取消</button>
             <button @click="submitBulk()" class="px-3 py-1 bg-emerald-700 rounded">上传</button>
         </div>
         <div x-show="bulkResult" class="mt-3 text-sm">
@@ -126,20 +126,20 @@
             <div class="space-y-3">
                 <h2 class="text-lg font-semibold mono" x-text="detail.email"></h2>
                 <div class="text-sm space-y-1">
-                    <div>status: <span class="pill" :class="detail.status" x-text="detail.status"></span></div>
-                    <div>fail_count: <span x-text="detail.fail_count"></span></div>
-                    <div>invited_at: <span class="mono" x-text="detail.invited_at || '—'"></span></div>
-                    <div>joined_at: <span class="mono" x-text="detail.joined_at || '—'"></span></div>
-                    <div>done_at: <span class="mono" x-text="detail.done_at || '—'"></span></div>
-                    <div>last_error: <span class="mono text-red-400" x-text="detail.last_error || '—'"></span></div>
-                    <div class="text-xs text-slate-500">Current host (internal): <span class="mono" x-text="hostEmailById(detail.host_id)"></span></div>
+                    <div>状态: <span class="pill" :class="detail.status" x-text="statusLabel(detail.status)"></span></div>
+                    <div>失败次数：<span x-text="detail.fail_count"></span></div>
+                    <div>邀请时间：<span class="mono" x-text="detail.invited_at || '—'"></span></div>
+                    <div>加入时间：<span class="mono" x-text="detail.joined_at || '—'"></span></div>
+                    <div>完成时间：<span class="mono" x-text="detail.done_at || '—'"></span></div>
+                    <div>最后错误：<span class="mono text-red-400" x-text="detail.last_error || '—'"></span></div>
+                    <div class="text-xs text-slate-500">当前绑定母号（内部字段）：<span class="mono" x-text="hostEmailById(detail.host_id)"></span></div>
                 </div>
                 <div>
-                    <div class="text-sm font-semibold mb-1">Token</div>
+                    <div class="text-sm font-semibold mb-1">凭证</div>
                     <textarea readonly class="w-full bg-slate-900 p-2 mono text-xs rounded" rows="3" x-text="detail.token || ''"></textarea>
                 </div>
                 <div>
-                    <div class="text-sm font-semibold mb-1">Events</div>
+                    <div class="text-sm font-semibold mb-1">事件时间线</div>
                     <ul class="text-xs space-y-1 max-h-80 overflow-y-auto">
                         <template x-for="e in detail.events" :key="e.id">
                             <li class="mono">
@@ -152,7 +152,7 @@
                     </ul>
                 </div>
                 <div class="flex gap-2 pt-2">
-                    <button @click="detailOpen=false" class="px-3 py-1 bg-slate-700 rounded">Close</button>
+                    <button @click="detailOpen=false" class="px-3 py-1 bg-slate-700 rounded">关闭</button>
                 </div>
             </div>
         </template>
@@ -175,6 +175,19 @@ function accounts() {
         bulkResult: null,
         detailOpen: false,
         detail: null,
+        statusLabel(s) {
+            return {
+                'new': '待处理',
+                'invite_pending': '邀请中',
+                'invite_failed': '邀请失败',
+                'joined': '已加入',
+                'accept_failed': '接受失败',
+                'oauth_failed': '授权失败',
+                'done': '已完成',
+                'abandoned': '已放弃',
+                'removed_from_family': '已移除',
+            }[s] || s;
+        },
         async load() {
             await Promise.all([this.loadHosts(), this.loadMembers(), this.loadMigrate()]);
         },
@@ -201,11 +214,20 @@ function accounts() {
         },
         async submitBulk() {
             const url = this.openBulk === 'hosts' ? '/api/hosts/bulk' : '/api/members/bulk';
+            const targetTab = this.openBulk;
             try {
-                this.bulkResult = await App.api('POST', url, { lines: this.bulkText });
-                await (this.openBulk === 'hosts' ? this.loadHosts() : this.loadMembers());
-                this.bulkText = '';
-            } catch (e) { alert(e.message); }
+                const result = await App.api('POST', url, { lines: this.bulkText });
+                this.bulkResult = result;
+                await (targetTab === 'hosts' ? this.loadHosts() : this.loadMembers());
+                const total = (result.inserted || 0) + (result.skipped || 0);
+                if (result.parsedZero || total === 0) {
+                    alert('没有解析到有效账号，请检查格式（支持：冒号/TAB/---- 分隔，email:密码:找回邮箱:TOTP）');
+                } else {
+                    alert(`导入成功：新增 ${result.inserted}，跳过重复 ${result.skipped}${(result.errors && result.errors.length) ? `，失败 ${result.errors.length}` : ''}`);
+                    this.bulkText = '';
+                    this.openBulk = '';   // close drawer on success
+                }
+            } catch (e) { alert('上传失败：' + e.message); }
         },
         async doImport() {
             try {
@@ -219,7 +241,7 @@ function accounts() {
             catch (e) { alert(e.message); }
         },
         async deleteHost(h) {
-            if (!confirm(`Delete host ${h.email}?`)) return;
+            if (!confirm(`确定删除母号 ${h.email}？`)) return;
             try { await App.api('DELETE', `/api/hosts/${h.id}`); await this.loadHosts(); }
             catch (e) { alert(e.message); }
         },
@@ -231,20 +253,20 @@ function accounts() {
         },
         async copyToken(m) {
             const ok = await App.copyText(m.token);
-            alert(ok ? 'copied' : 'copy failed');
+            alert(ok ? '已复制' : '复制失败');
         },
         async resetMember(m) {
-            if (!confirm(`Reset ${m.email}?`)) return;
+            if (!confirm(`确定重置 ${m.email}？`)) return;
             try { await App.api('PATCH', `/api/members/${m.id}?action=reset`, {}); await this.loadMembers(); }
             catch (e) { alert(e.message); }
         },
         async abandonMember(m) {
-            if (!confirm(`Abandon ${m.email}?`)) return;
+            if (!confirm(`确定放弃 ${m.email}？`)) return;
             try { await App.api('PATCH', `/api/members/${m.id}?action=abandon`, {}); await this.loadMembers(); }
             catch (e) { alert(e.message); }
         },
         async deleteMember(m) {
-            if (!confirm(`Delete ${m.email}?`)) return;
+            if (!confirm(`确定删除 ${m.email}？`)) return;
             try { await App.api('DELETE', `/api/members/${m.id}`); await this.loadMembers(); }
             catch (e) { alert(e.message); }
         },

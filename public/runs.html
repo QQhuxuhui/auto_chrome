@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <title>Runs — Gemini Family Pipeline</title>
+    <title>运行历史 — Gemini Family Pipeline</title>
     <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
     <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
     <link rel="stylesheet" href="/public/css/app.css">
@@ -11,27 +11,27 @@
 <nav class="mb-6 flex gap-3 items-center">
     <span class="text-lg font-semibold">Gemini Family Pipeline</span>
     <div class="flex-1"></div>
-    <a href="/" class="px-3 py-1 rounded hover:bg-slate-800">Dashboard</a>
-    <a href="/accounts" class="px-3 py-1 rounded hover:bg-slate-800">Accounts</a>
-    <a href="/runs" class="px-3 py-1 rounded hover:bg-slate-800 font-medium">Runs</a>
+    <a href="/" class="px-3 py-1 rounded hover:bg-slate-800">仪表盘</a>
+    <a href="/accounts" class="px-3 py-1 rounded hover:bg-slate-800">账号管理</a>
+    <a href="/runs" class="px-3 py-1 rounded hover:bg-slate-800 font-medium">运行历史</a>
 </nav>
 
 <main x-data="runsPage()" x-init="load(); interval = setInterval(load, 3000)"
       @beforeunload.window="clearInterval(interval)" class="space-y-4">
 
     <table class="data card">
-        <thead><tr><th>#</th><th>status</th><th>stages</th><th>launched_by</th><th>started</th><th>duration</th><th>stats</th><th></th></tr></thead>
+        <thead><tr><th>#</th><th>状态</th><th>阶段</th><th>启动方式</th><th>开始时间</th><th>耗时</th><th>统计</th><th></th></tr></thead>
         <tbody>
             <template x-for="r in runs" :key="r.id">
                 <tr :class="r.status === 'running' ? 'bg-blue-950/30' : ''">
                     <td x-text="r.id"></td>
-                    <td><span class="pill" x-text="r.status"></span></td>
+                    <td><span class="pill" x-text="statusLabel(r.status)"></span></td>
                     <td class="mono" x-text="r.stages"></td>
                     <td class="text-xs" x-text="r.launched_by"></td>
                     <td class="text-xs" x-text="App.timeago(r.started_at)"></td>
                     <td class="text-xs" x-text="duration(r)"></td>
                     <td class="mono text-xs truncate max-w-xs" x-text="r.stats ? JSON.stringify(r.stats) : '—'"></td>
-                    <td><button @click="openRun(r)" class="text-blue-400 text-sm">events</button></td>
+                    <td><button @click="openRun(r)" class="text-blue-400 text-sm">事件</button></td>
                 </tr>
             </template>
         </tbody>
@@ -41,7 +41,7 @@
     <div x-show="drawerOpen" class="drawer open" @click.stop>
         <template x-if="current">
             <div>
-                <h2 class="text-lg font-semibold">Run #<span x-text="current.id"></span></h2>
+                <h2 class="text-lg font-semibold">运行 #<span x-text="current.id"></span></h2>
                 <div class="text-sm text-slate-400 mb-2" x-text="current.status + ' · ' + (current.stages || '')"></div>
                 <ul class="text-xs space-y-1 max-h-[70vh] overflow-y-auto">
                     <template x-for="e in current.events" :key="e.id">
@@ -53,7 +53,7 @@
                         </li>
                     </template>
                 </ul>
-                <button @click="drawerOpen=false" class="mt-3 px-3 py-1 bg-slate-700 rounded">Close</button>
+                <button @click="drawerOpen=false" class="mt-3 px-3 py-1 bg-slate-700 rounded">关闭</button>
             </div>
         </template>
     </div>
@@ -63,6 +63,22 @@
 function runsPage() {
     return {
         runs: [], drawerOpen: false, current: null, interval: null,
+        statusLabel(s) {
+            return {
+                'new': '待处理',
+                'running': '运行中',
+                'done': '已完成',
+                'failed': '已失败',
+                'cancelled': '已取消',
+                'invite_pending': '邀请中',
+                'invite_failed': '邀请失败',
+                'joined': '已加入',
+                'accept_failed': '接受失败',
+                'oauth_failed': '授权失败',
+                'abandoned': '已放弃',
+                'removed_from_family': '已移除',
+            }[s] || s;
+        },
         async load() {
             try { this.runs = await App.api('GET', '/api/pipeline/runs'); } catch (_) { }
         },
