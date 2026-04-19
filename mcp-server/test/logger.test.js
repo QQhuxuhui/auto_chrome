@@ -24,3 +24,18 @@ test('logger writes to stderr, never stdout', (t) => {
     assert.ok(joined.includes('boom'));
     assert.ok(!joined.includes('should-not-appear'));
 });
+
+test('logger exposes success method matching common/logger interface', (t) => {
+    const chunks = [];
+    const orig = process.stderr.write;
+    process.stderr.write = (s) => { chunks.push(String(s)); return true; };
+    try {
+        const log = createLogger('info');
+        log.success('finished ok');
+    } finally {
+        process.stderr.write = orig;
+    }
+    const joined = chunks.join('');
+    assert.ok(joined.includes('finished ok'), 'success message should appear');
+    assert.ok(joined.includes('[SUCCESS]'), 'tag should be SUCCESS');
+});
