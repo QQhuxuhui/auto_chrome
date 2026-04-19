@@ -40,9 +40,13 @@ function registerGoogleTools({ registry, logger, config }) {
                 const s = registry.get(sessionId);
                 const wlog = logger.child(`[${sessionId}]`);
 
-                // Normalize: fa_secret is alias for totp_secret
+                // Normalize field names. common/google-login.js uses:
+                //   account.pass         — password (NOT `password`)
+                //   account.totp_secret  — base32 secret (also accepts fa_secret alias)
+                // MCP schema exposes `password` for caller ergonomics; map it here.
                 const effectiveAccount = {
                     ...account,
+                    pass: account.pass || account.password,
                     totp_secret: account.totp_secret || account.fa_secret,
                 };
 
@@ -88,6 +92,9 @@ function registerGoogleTools({ registry, logger, config }) {
                 try {
                     await page.goto(startUrl, { waitUntil: 'domcontentloaded', timeout: 30000 })
                         .catch(e => wlog.warn(`signin nav: ${e.message}`));
+                    // Let the signin page settle before googleLogin's state machine starts
+                    // probing. Matches auto_chrome/src/3_local_oauth.js processMember timing.
+                    await new Promise(res => setTimeout(res, 1000));
 
                     // Fix 3: clearTimeout + swallow losing promise to avoid leaks
                     let timeoutId;
@@ -124,6 +131,17 @@ function registerGoogleTools({ registry, logger, config }) {
                         if (/deadloop|stuck/i.test(e.message || '')) {
                             const screenshot = await captureBase64Screenshot(page).catch(() => null);
                             return { status: 'stuck', finalUrl: page.url(), stateHistory: [], screenshot };
+                        }
+                        if (/wrong password|incorrect password|密码错误|无法让您登录/i.test(e.message || '')) {
+                            const screenshot = await captureBase64Screenshot(page).catch(() => null);
+                            return {
+                                status: 'rejected',
+                                reason: 'wrong_password',
+                                finalUrl: page.url(),
+                                stateHistory: [],
+                                screenshot,
+                                error: e.message,
+                            };
                         }
                         throw e;
                     } finally {

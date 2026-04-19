@@ -93,6 +93,21 @@ async function googleLogin(page, account, wlog, opts = {}) {
             }
 
             case 'password': {
+                // 等待 Google 密码页 hydrate 完成（组件有时会换型，密码输入框会被替换）
+                // 直接在首次进入态时 poll 到一个稳定的可见 password input，而不是盲 sleep。
+                await page.waitForFunction(() => {
+                    const all = Array.from(document.querySelectorAll('input[type="password"]'));
+                    const visible = all.filter(el => {
+                        const r = el.getBoundingClientRect();
+                        const s = window.getComputedStyle(el);
+                        return r.width > 0 && r.height > 0
+                            && s.display !== 'none' && s.visibility !== 'hidden' && s.opacity !== '0'
+                            && el.getAttribute('aria-hidden') !== 'true';
+                    });
+                    return visible.length >= 1;
+                }, { timeout: 5000 }).catch(() => { /* 超时也继续，让下面的诊断暴露 */ });
+                await sleep(500);
+
                 // 诊断日志：URL / 可见密码框数量 / 累计进入次数，定位"密码框反复刷新"
                 const pwDiag = await page.evaluate(() => {
                     const all = Array.from(document.querySelectorAll('input[type="password"]'));
@@ -114,19 +129,24 @@ async function googleLogin(page, account, wlog, opts = {}) {
                 const pwSeen = stateHistory.filter(s => s === 'password').length;
                 wlog.info(`  [pwd-diag] enter#${pwSeen} path=${pwDiag && pwDiag.path} pwInputs total=${pwDiag && pwDiag.total} visible=${pwDiag && pwDiag.visible} valueLen=${pwDiag && pwDiag.currentValueLen}`);
 
-                // 检查页面上是否已有密码错误提示
-                const hasError = await page.evaluate(() => {
-                    const text = (document.body ? document.body.innerText : '').toLowerCase();
-                    return text.includes('wrong password') ||
-                        text.includes('密码错误') ||
-                        text.includes('incorrect password') ||
-                        text.includes("couldn't sign you in") ||
-                        text.includes('无法让您登录');
-                }).catch(() => false);
+                // 只有"已经提交过一次密码又回到 password 页"才算错误 —— 首次进 password 态
+                // 绝不可能是 wrong password（还没提交过）。此前在首次进入就匹配
+                // "wrong password" / "couldn't sign you in" 文案会误报（hydrate 期 tooltip/aria-label
+                // 里就有这些词）。"couldn't sign you in" 本身也不是密码错误，是浏览器被拒，
+                // 应由外层 rejected 检测处理，不在这里抛。
+                if (pwSeen > 1) {
+                    const hasError = await page.evaluate(() => {
+                        const text = (document.body ? document.body.innerText : '').toLowerCase();
+                        return text.includes('wrong password') ||
+                            text.includes('密码错误') ||
+                            text.includes('incorrect password') ||
+                            text.includes('无法让您登录');
+                    }).catch(() => false);
 
-                if (hasError) {
-                    await takeScreenshot(page, `login_wrong_password_${account.email}`, wlog);
-                    throw new Error('Wrong password: error message detected on page');
+                    if (hasError) {
+                        await takeScreenshot(page, `login_wrong_password_${account.email}`, wlog);
+                        throw new Error('Wrong password: error message detected on page');
+                    }
                 }
 
                 // 如果已经输入过密码（上一个状态也是 password），说明密码可能错误
