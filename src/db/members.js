@@ -180,31 +180,53 @@ async function abandonMember(memberId) {
     return mapRow(rows[0]);
 }
 
-async function listMembersForStage(stage) {
+async function listMembersForStage(stage, { hostIds } = {}) {
     const s = String(stage);
-    let sql;
+    const useHostFilter = Array.isArray(hostIds) && hostIds.length > 0;
+    let sql, params;
     if (s === '1') {
+        // Stage 1: host assigned at runtime via pickHost; host filter not applicable here.
         sql = `
             SELECT * FROM members
             WHERE status IN ('new','invite_failed') AND fail_count < $1
             ORDER BY created_at ASC
         `;
+        params = [ABANDON_THRESHOLD];
     } else if (s === '2') {
-        sql = `
-            SELECT * FROM members
-            WHERE status = 'invite_pending' AND host_id IS NOT NULL
-            ORDER BY invited_at ASC NULLS FIRST
-        `;
+        if (useHostFilter) {
+            sql = `
+                SELECT * FROM members
+                WHERE status = 'invite_pending' AND host_id = ANY($1)
+                ORDER BY invited_at ASC NULLS FIRST
+            `;
+            params = [hostIds];
+        } else {
+            sql = `
+                SELECT * FROM members
+                WHERE status = 'invite_pending' AND host_id IS NOT NULL
+                ORDER BY invited_at ASC NULLS FIRST
+            `;
+            params = [];
+        }
     } else if (s === '3') {
-        sql = `
-            SELECT * FROM members
-            WHERE status IN ('joined','oauth_failed') AND fail_count < $1
-            ORDER BY joined_at ASC NULLS LAST, updated_at ASC
-        `;
+        if (useHostFilter) {
+            sql = `
+                SELECT * FROM members
+                WHERE status IN ('joined','oauth_failed') AND fail_count < $1 AND host_id = ANY($2)
+                ORDER BY joined_at ASC NULLS LAST, updated_at ASC
+            `;
+            params = [ABANDON_THRESHOLD, hostIds];
+        } else {
+            sql = `
+                SELECT * FROM members
+                WHERE status IN ('joined','oauth_failed') AND fail_count < $1
+                ORDER BY joined_at ASC NULLS LAST, updated_at ASC
+            `;
+            params = [ABANDON_THRESHOLD];
+        }
     } else {
         throw new Error(`listMembersForStage: invalid stage ${stage}`);
     }
-    const params = (s === '2') ? [] : [ABANDON_THRESHOLD];
     const { rows } = await db.query(sql, params);
     return rows.map(mapRow);
 }

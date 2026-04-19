@@ -88,6 +88,15 @@ async function main() {
     const reconcileOnly = !!flags['reconcile-only'];
     const hostIds = flags['host-ids'] ? flags['host-ids'].split(',').map(s => parseInt(s, 10)).filter(Boolean) : [];
 
+    // Resolve hostFilter (emails) → hostIds for stage 2/3 filtering.
+    // Stage 1 uses hostFilter (emails) directly via pickHost; no change there.
+    let resolvedHostIds = hostIds.slice(); // start with any explicit --host-ids
+    if (hostFilter.length && resolvedHostIds.length === 0) {
+        const all = await hostsDb.listHosts({ pageSize: 10000 });
+        const filterLower = hostFilter.map(s => s.toLowerCase());
+        resolvedHostIds = all.filter(h => filterLower.includes(h.email.toLowerCase())).map(h => h.id);
+    }
+
     const stats = { reconcile: null, stage1: null, stage2: null, stage3: null };
     let finalStatus = 'completed';
     let finalError = null;
@@ -106,8 +115,8 @@ async function main() {
         } else {
             stats.reconcile = await runReconcilePhase({ runId, hostFilter });
             if (stages.includes('1')) stats.stage1 = await runStage1({ runId, hostFilter, concurrency });
-            if (stages.includes('2')) stats.stage2 = await runStage2({ runId, concurrency });
-            if (stages.includes('3')) stats.stage3 = await runStage3({ runId, concurrency });
+            if (stages.includes('2')) stats.stage2 = await runStage2({ runId, concurrency, hostIds: resolvedHostIds });
+            if (stages.includes('3')) stats.stage3 = await runStage3({ runId, concurrency, hostIds: resolvedHostIds });
         }
     } catch (e) {
         finalStatus = 'failed';

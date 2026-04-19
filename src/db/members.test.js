@@ -98,3 +98,26 @@ test('listMembersForStage returns stage 1 work items', async () => {
     assert.ok(emails.includes('test-mem-8a@example.com'));
     assert.ok(emails.includes('test-mem-8b@example.com'));
 });
+
+test('listMembersForStage stage 2 respects hostIds filter', async () => {
+    const { host: h2 } = await hosts.upsertHost({ email: 'test-mem-host-2@example.com', password: 'hp' });
+    const { member: mA } = await members.upsertMember({ email: 'test-mem-9a@example.com', password: 'pw' });
+    const { member: mB } = await members.upsertMember({ email: 'test-mem-9b@example.com', password: 'pw' });
+    await members.transitionToInvitePending(mA.id, hostId);  // host 1
+    await members.transitionToInvitePending(mB.id, h2.id);   // host 2
+
+    const filtered = await members.listMembersForStage(2, { hostIds: [hostId] });
+    const emails = filtered.map(m => m.email);
+    assert.ok(emails.includes('test-mem-9a@example.com'), 'should include host 1 member');
+    assert.ok(!emails.includes('test-mem-9b@example.com'), 'should NOT include host 2 member');
+
+    // Without filter: both visible
+    const unfiltered = await members.listMembersForStage(2);
+    const unfilteredEmails = unfiltered.map(m => m.email);
+    assert.ok(unfilteredEmails.includes('test-mem-9a@example.com'));
+    assert.ok(unfilteredEmails.includes('test-mem-9b@example.com'));
+
+    // inline cleanup (also covered by test.after)
+    await db.query('DELETE FROM members WHERE id IN ($1, $2)', [mA.id, mB.id]);
+    await db.query('DELETE FROM hosts WHERE id = $1', [h2.id]);
+});

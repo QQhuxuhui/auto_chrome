@@ -800,11 +800,11 @@ function cleanupWorkers2(workers) {
     }
 }
 
-async function runStage2({ runId, concurrency = 1 } = {}) {
+async function runStage2({ runId, concurrency = 1, hostIds } = {}) {
     const chromePath = findChrome();
     if (!chromePath) throw new Error('Chrome not found');
 
-    const work = await membersDb.listMembersForStage(2);
+    const work = await membersDb.listMembersForStage(2, { hostIds });
     log(`Stage2: ${work.length} pending acceptances`);
     if (!work.length) return { ok: 0, ng: 0 };
 

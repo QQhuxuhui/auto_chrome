@@ -984,11 +984,8 @@ function cleanupWorkers(workers) {
     if (keepBrowserOpen && workers.length > 0) log('Browsers kept open (KEEP_BROWSER_OPEN=true)');
 }
 
-process.on('SIGINT', () => {
-    log('\nInterrupted (Ctrl+C). Cleaning up...', 'WARN');
-    cleanupWorkers(_workers);
-    process.exit();
-});
+// Signal handler and auto-main are gated so this file can be safely require()'d
+// by 3_local_oauth.js (and tests) without stealing SIGINT from the orchestrator.
 
 function pairMembersWithHosts(hosts, members) {
     // Same convention as stage1 buildGroups: 5 members per host, by index.
@@ -1117,8 +1114,13 @@ async function main() {
     log('');
 }
 
-// Invoke main when this file is run directly (not when imported by the test file).
+// Signal handler and auto-main gated so require()'ing this file won't steal signals.
 if (require.main === module) {
+    process.on('SIGINT', () => {
+        log('\nInterrupted (Ctrl+C). Cleaning up...', 'WARN');
+        cleanupWorkers(_workers);
+        process.exit();
+    });
     main().catch(e => {
         log(`Fatal: ${e.message}`, 'ERROR');
         if (e.stack) console.error(e.stack);

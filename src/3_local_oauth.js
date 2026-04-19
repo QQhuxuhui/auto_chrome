@@ -489,11 +489,11 @@ function cleanupWorkers3(workers) {
     }
 }
 
-async function runStage3({ runId, concurrency = 1 } = {}) {
+async function runStage3({ runId, concurrency = 1, hostIds } = {}) {
     const chromePath = findChrome();
     if (!chromePath) throw new Error('Chrome not found');
 
-    const work = await membersDb.listMembersForStage(3);
+    const work = await membersDb.listMembersForStage(3, { hostIds });
     log(`Stage3: ${work.length} pending oauth`);
     if (!work.length) return { ok: 0, ng: 0 };
 
