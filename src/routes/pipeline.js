@@ -7,7 +7,7 @@ const activeChildren = new Map();  // runId -> child_process
 
 module.exports = async function routes(app) {
     app.post('/api/pipeline/start', async (req, reply) => {
-        const { stages = '1,2,3', hostFilter = [], concurrency = 1, dryRun = false } = req.body || {};
+        const { stages = '1,2,3', hostFilter = [], concurrency = 1, dryRun = false, removeUnknownMembers = false } = req.body || {};
         const current = await runs.getCurrentRun();
         if (current) return reply.code(409).send({ error: `run #${current.id} already running`, runId: current.id });
 
@@ -30,6 +30,9 @@ module.exports = async function routes(app) {
         ];
         if (Array.isArray(hostFilter) && hostFilter.length) {
             args.push('--hosts', hostFilter.join(','));
+        }
+        if (removeUnknownMembers) {
+            args.push('--remove-unknown');
         }
         const child = fork(orchestratorPath, args, {
             stdio: ['ignore', 'inherit', 'inherit', 'ipc'],

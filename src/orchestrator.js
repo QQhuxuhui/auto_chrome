@@ -40,18 +40,42 @@ function parseFlags(argv) {
     return out;
 }
 
-async function runReconcilePhase({ runId, hostFilter, hostIds }) {
+function parseEmailFilter(value) {
+    if (value === undefined) return undefined;
+    const raw = value === true ? '' : String(value);
+    return raw.split(',').map(s => s.trim()).filter(Boolean);
+}
+
+function parseHostIdFilter(value) {
+    if (value === undefined) return undefined;
+    const raw = value === true ? '' : String(value);
+    return raw.split(',')
+        .map(s => parseInt(s.trim(), 10))
+        .filter(n => Number.isInteger(n) && n > 0);
+}
+
+function parseExplicitHostSelection(flags) {
+    const hostFilter = parseEmailFilter(flags.hosts);
+    const hostIds = parseHostIdFilter(flags['host-ids']);
+    return {
+        hostFilter,
+        hostIds,
+        explicitFilter: hostFilter !== undefined || hostIds !== undefined,
+    };
+}
+
+async function runReconcilePhase({ runId, hostFilter, hostIds, removeUnknown }) {
     const chromePath = findChrome();
     if (!chromePath) throw new Error('Chrome not found');
 
     let targetHosts;
-    if (hostIds && hostIds.length) {
+    if (Array.isArray(hostIds)) {
         targetHosts = [];
         for (const id of hostIds) {
             const h = await hostsDb.getHostById(id);
             if (h) targetHosts.push(h);
         }
-    } else if (hostFilter && hostFilter.length) {
+    } else if (Array.isArray(hostFilter)) {
         const all = await hostsDb.listHosts({ pageSize: 10000 });
         targetHosts = all.filter(h => hostFilter.map(s => s.toLowerCase()).includes(h.email.toLowerCase()));
     } else {
@@ -64,7 +88,7 @@ async function runReconcilePhase({ runId, hostFilter, hostIds }) {
         const chrome = await launchRealChrome(chromePath, 0);
         try {
             const wlog = createWorkerLogger(0);
-            const { changes } = await reconcileHost(host, chrome.browser, runId, wlog);
+            const { changes } = await reconcileHost(host, chrome.browser, runId, wlog, { removeUnknown });
             totalChanges.push(...changes);
         } catch (e) {
             log(`Reconcile host ${host.email} failed: ${e.message}`, 'WARN');
@@ -83,15 +107,15 @@ async function main() {
     if (!runId) { log('orchestrator: --run-id is required', 'ERROR'); process.exit(2); }
 
     const stages = (flags.stages || '1,2,3').split(',').map(s => s.trim()).filter(Boolean);
-    const hostFilter = flags.hosts ? flags.hosts.split(',').map(s => s.trim()).filter(Boolean) : [];
     const concurrency = flags.concurrency ? parseInt(flags.concurrency, 10) : 1;
     const reconcileOnly = !!flags['reconcile-only'];
-    const hostIds = flags['host-ids'] ? flags['host-ids'].split(',').map(s => parseInt(s, 10)).filter(Boolean) : [];
+    const removeUnknown = !!flags['remove-unknown'];
+    const { hostFilter, hostIds, explicitFilter } = parseExplicitHostSelection(flags);
 
     // Resolve hostFilter (emails) → hostIds for stage 2/3 filtering.
     // Stage 1 uses hostFilter (emails) directly via pickHost; no change there.
-    let resolvedHostIds = hostIds.slice(); // start with any explicit --host-ids
-    if (hostFilter.length && resolvedHostIds.length === 0) {
+    let resolvedHostIds = Array.isArray(hostIds) ? hostIds.slice() : [];
+    if (Array.isArray(hostFilter) && hostFilter.length && resolvedHostIds.length === 0) {
         const all = await hostsDb.listHosts({ pageSize: 10000 });
         const filterLower = hostFilter.map(s => s.toLowerCase());
         resolvedHostIds = all.filter(h => filterLower.includes(h.email.toLowerCase())).map(h => h.id);
@@ -111,13 +135,16 @@ async function main() {
 
     try {
         if (reconcileOnly) {
-            stats.reconcile = await runReconcilePhase({ runId, hostFilter, hostIds });
+            if (explicitFilter && resolvedHostIds.length === 0) {
+                log('orchestrator: --hosts/--host-ids filter resolved to zero hosts; reconcile will have zero work', 'WARN');
+            }
+            const reconcileOpts = explicitFilter
+                ? { runId, hostFilter, hostIds: resolvedHostIds, removeUnknown }
+                : { runId, removeUnknown };
+            stats.reconcile = await runReconcilePhase(reconcileOpts);
         } else {
-            stats.reconcile = await runReconcilePhase({ runId, hostFilter });
-            // A filter is "explicit" iff the user passed --hosts and/or --host-ids.
-            // If it resolved to zero IDs, pass empty array (stages treat as "no work").
-            // If user passed nothing, don't include hostIds key (stages process all).
-            const explicitFilter = hostFilter.length > 0 || hostIds.length > 0;
+            const reconcileOpts = explicitFilter ? { runId, hostFilter, hostIds: resolvedHostIds, removeUnknown } : { runId, removeUnknown };
+            stats.reconcile = await runReconcilePhase(reconcileOpts);
             if (explicitFilter && resolvedHostIds.length === 0) {
                 log(`orchestrator: --hosts/--host-ids filter resolved to zero hosts; stage 2/3 will have zero work`, 'WARN');
             }
@@ -154,4 +181,4 @@ if (require.main === module) {
     });
 }
 
-module.exports = { parseFlags, runReconcilePhase };
+module.exports = { parseFlags, parseExplicitHostSelection, runReconcilePhase };

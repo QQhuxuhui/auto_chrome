@@ -15,6 +15,21 @@ const antigravitySync = require('../sync/antigravity-sync');
 
 const FAMILY_URL = 'https://myaccount.google.com/family/details?utm_source=g1web&utm_medium=default';
 
+function computeUnknownEmails(familyEmails, localMembers, hostEmail) {
+    const knownSet = new Set();
+    knownSet.add(String(hostEmail || '').toLowerCase());
+    for (const m of localMembers || []) {
+        if (m && m.email) knownSet.add(String(m.email).toLowerCase());
+    }
+    const out = [];
+    for (const e of familyEmails || []) {
+        const lower = String(e || '').toLowerCase();
+        if (!lower) continue;
+        if (!knownSet.has(lower)) out.push(e);
+    }
+    return out;
+}
+
 async function scrapeFamilyMembers(page, wlog) {
     await page.goto(FAMILY_URL, { waitUntil: 'networkidle2', timeout: 30000 }).catch(e =>
         wlog && wlog.warn && wlog.warn(`family page load: ${e.message}`));
@@ -122,7 +137,7 @@ async function removeFamilyMember(page, memberEmail, wlog) {
     return true;
 }
 
-async function reconcileHost(hostRecord, browser, runId, wlog) {
+async function reconcileHost(hostRecord, browser, runId, wlog, options = {}) {
     if (hostRecord.disabled) {
         wlog && wlog.info && wlog.info(`reconcile: skip disabled host ${hostRecord.email}`);
         return { changes: [] };
@@ -182,6 +197,26 @@ async function reconcileHost(hostRecord, browser, runId, wlog) {
             });
         }
 
+        // 可选：删除「未知」家庭成员（不在本地 DB 的、也不是 host 自己的）
+        if (options.removeUnknown) {
+            const localMembers = await membersDb.listMembers({ hostId: hostRecord.id, pageSize: 10000 });
+            const unknown = computeUnknownEmails(emails, localMembers, hostRecord.email);
+            wlog && wlog.info && wlog.info(`removeUnknown: ${unknown.length} unknown email(s) on ${hostRecord.email}'s family`);
+            for (const email of unknown) {
+                wlog && wlog.info && wlog.info(`removing unknown member ${email} from ${hostRecord.email}'s family`);
+                const ok = await removeFamilyMember(page, email, wlog);
+                if (ok) {
+                    await eventsDb.logEvent({
+                        memberId: null, hostId: hostRecord.id, runId,
+                        stage: 'reconcile', eventType: 'note',
+                        message: `removed unknown family member: ${email}`,
+                    });
+                } else {
+                    wlog && wlog.warn && wlog.warn(`failed to remove unknown member ${email}`);
+                }
+            }
+        }
+
         return reconcileAgainstDB(hostRecord, emails, runId);
     } finally {
         await page.close().catch(() => { });
@@ -189,4 +224,4 @@ async function reconcileHost(hostRecord, browser, runId, wlog) {
     }
 }
 
-module.exports = { scrapeFamilyMembers, reconcileAgainstDB, reconcileHost, FAMILY_URL };
+module.exports = { scrapeFamilyMembers, reconcileAgainstDB, reconcileHost, computeUnknownEmails, FAMILY_URL };

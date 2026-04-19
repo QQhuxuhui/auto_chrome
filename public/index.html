@@ -129,6 +129,15 @@
                     </select>
                 </label>
             </div>
+            <div>
+                <label class="text-sm">
+                    <input type="checkbox" x-model="form.removeUnknown">
+                    删除未知家庭成员
+                </label>
+                <div class="text-xs text-slate-400 ml-5 mt-1">
+                    登录 host 后，凡是 Google 家庭里但不在本系统内的成员将被移除（host 自己不会被动）。默认关。
+                </div>
+            </div>
             <div class="flex gap-2 pt-2">
                 <button @click="openStart = false" class="px-3 py-1 bg-slate-700 rounded">取消</button>
                 <button @click="submitStart()" class="px-3 py-1 bg-emerald-700 rounded">开始</button>
@@ -145,7 +154,7 @@ function dashboard() {
         ag: { total: 0, disabled: 0, validation_blocked: 0, is_forbidden: 0, orphans: 0, last_sync: null },
         openStart: false,
         hostsList: [],
-        form: { stages1: true, stages2: true, stages3: true, hostMode: 'auto', selectedHosts: [], concurrency: 1 },
+        form: { stages1: true, stages2: true, stages3: true, hostMode: 'auto', selectedHosts: [], concurrency: 1, removeUnknown: false },
         error: '',
         interval: null,
         statusLabel(s) {
@@ -180,6 +189,7 @@ function dashboard() {
             this.error = '';
             this.form.selectedHosts = [];
             this.form.hostMode = 'auto';
+            this.form.removeUnknown = false;
             this.openStart = true;
             await this.reloadHosts();
         },
@@ -203,6 +213,7 @@ function dashboard() {
                     stages: stages.join(','),
                     hostFilter,
                     concurrency: this.form.concurrency,
+                    removeUnknownMembers: this.form.removeUnknown,
                 });
                 this.openStart = false;
                 this.load();
