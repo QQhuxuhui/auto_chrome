@@ -346,7 +346,12 @@ async function detectPageState(page, wlog) {
 
     let state = 'unknown';
     // URL-based detection takes priority for certain patterns
-    if (u.includes('challenge/pwd') && pageInfo.hasPasswordInput) {
+    if (u.includes('gds.google.com/web/')) {
+        // GDS (Google Data Services) 的"保证你能一直登录 / 设置家庭住址 / 资料照片" 等
+        // 是登录后 Google 插在中间的引导页。Cancel / Skip / Not now 永远退得掉，
+        // 对 stage 2 这种接受邀请 / gmail 自动登录场景都必须跳过。
+        state = 'skippable_prompt';
+    } else if (u.includes('challenge/pwd') && pageInfo.hasPasswordInput) {
         // 必须有可见密码框才判 password，避免在 SPA 过场期对隐藏框 fastType
         state = 'password';
     } else if ((u.includes('challenge/totp') || u.includes('challenge/ipp')) &&
@@ -515,12 +520,14 @@ async function clickButton(page, keywords) {
                     if (child.nodeType === Node.TEXT_NODE) directText += child.textContent;
                 }
                 directText = directText.trim().toLowerCase();
-                return { text, directText, visible, tag, area: r.width * r.height };
+                const aria = (node.getAttribute('aria-label') || '').trim().toLowerCase();
+                return { text, directText, aria, visible, tag, area: r.width * r.height };
             }, el);
             if (!info.visible) continue;
             const containerTags = ['form', 'section', 'main', 'body', 'html', 'article', 'nav', 'header', 'footer'];
             if (containerTags.includes(info.tag)) continue;
-            if (keywords.some(k => info.text.includes(k))) {
+            // 文本匹配 OR aria-label 匹配 —— Material Design 按钮文本有时只在 aria-label 里
+            if (keywords.some(k => info.text.includes(k) || info.aria.includes(k))) {
                 matches.push({ el, info });
             }
         } catch (_) { }
@@ -552,10 +559,13 @@ async function clickButtonByEval(page, keywords) {
         const matches = [];
         for (const el of all) {
             const txt = (el.textContent || '').trim().toLowerCase();
-            if (isVisible(el) && kws.some(k => txt.includes(k))) {
+            const aria = (el.getAttribute('aria-label') || '').trim().toLowerCase();
+            // 文本或 aria-label 命中即可 —— Material Design 按钮可能只提供 aria-label
+            if (isVisible(el) && kws.some(k => txt.includes(k) || aria.includes(k))) {
                 const tag = el.tagName.toLowerCase();
                 if (['form', 'section', 'main', 'body', 'html'].includes(tag)) continue;
-                matches.push({ el, txt, len: txt.length });
+                const hay = txt || aria;
+                matches.push({ el, txt: hay, len: hay.length });
             }
         }
         if (matches.length === 0) return null;
