@@ -157,6 +157,118 @@ function registerGoogleTools({ registry, logger, config }) {
         },
     };
 
+    tools['google.oauth_get_code'] = {
+        schema: {
+            type: 'object',
+            required: ['sessionId', 'scopes'],
+            properties: {
+                sessionId: { type: 'string' },
+                clientId: { type: 'string', description: 'Falls back to env CLIENT_ID' },
+                scopes: { type: 'array', items: { type: 'string' } },
+                callbackPortStart: { type: 'integer', default: 18900 },
+                handleConsent: { type: 'boolean', default: true, description: 'Auto-click consent + handle TOTP re-challenge' },
+                account: {
+                    type: 'object',
+                    description: 'handleConsent=true needs account for TOTP secret and email matching',
+                    properties: {
+                        email: { type: 'string' },
+                        totp_secret: { type: 'string' },
+                        fa_secret: { type: 'string' },
+                    },
+                },
+                timeoutMs: { type: 'integer', default: 120000 },
+            },
+        },
+        async handler({ sessionId, clientId, scopes, callbackPortStart = 18900, handleConsent = true, account, timeoutMs = 120000 }) {
+            const { buildAuthUrl, startCbServer } = require(path.join(COMMON_PATH, 'oauth'));
+            // Consent helpers live in 3_sub2api.js
+            const sub2apiPath = path.resolve(COMMON_PATH, '..', '3_sub2api');
+            const { clickOAuthConsentTarget, handleTotpChallenge } = require(sub2apiPath);
+
+            return registry.withLock(sessionId, async () => {
+                const s = registry.get(sessionId);
+                const wlog = logger.child(`[${sessionId}]`);
+                const effClientId = clientId || config.clientId;
+                if (!effClientId) {
+                    throw new McpError(CODES.PRECONDITION_FAILED, 'clientId missing (pass arg or set env CLIENT_ID)');
+                }
+                // Normalize account (fa_secret → totp_secret)
+                const effAccount = account
+                    ? { ...account, totp_secret: account.totp_secret || account.fa_secret }
+                    : null;
+
+                const cbServer = await startCbServer(callbackPortStart, wlog);
+                const redirectUri = `http://localhost:${cbServer.port}/callback`;
+
+                try {
+                    const authUrl = buildAuthUrl({ clientId: effClientId, scopes, port: cbServer.port });
+                    const page = await s.browser.newPage();
+                    try {
+                        // Fire navigation; don't await — consent driven from the poller below
+                        page.goto(authUrl, { waitUntil: 'domcontentloaded', timeout: 60000 })
+                            .catch(e => wlog.debug(`authUrl goto: ${e.message}`));
+
+                        // Consent poller
+                        let keepPolling = true;
+                        const poller = (async () => {
+                            // Initial delay so the page has time to render consent UI
+                            await new Promise(res => setTimeout(res, 2500));
+                            let ticks = 0;
+                            while (keepPolling && handleConsent) {
+                                ticks++;
+                                try {
+                                    if (effAccount) {
+                                        const totpHandled = await handleTotpChallenge(page, effAccount, wlog);
+                                        if (totpHandled) { await new Promise(res => setTimeout(res, 4000)); continue; }
+                                    }
+                                    const hit = effAccount
+                                        ? await clickOAuthConsentTarget(page, effAccount.email)
+                                        : null;
+                                    if (hit) {
+                                        wlog.debug(`[consent] click (#${ticks}): ${hit}`);
+                                        await new Promise(res => setTimeout(res, 2500));
+                                        continue;
+                                    }
+                                } catch (_) { /* keep polling */ }
+                                await new Promise(res => setTimeout(res, 1500));
+                            }
+                        })();
+                        poller.catch(() => {});
+
+                        // Race callback capture against timeout
+                        let timeoutId;
+                        const timeoutP = new Promise((_, rej) => {
+                            timeoutId = setTimeout(
+                                () => rej(new McpError(CODES.OAUTH_CODE_NOT_RECEIVED, `no callback within ${timeoutMs}ms`)),
+                                timeoutMs,
+                            );
+                        });
+
+                        let result;
+                        try {
+                            result = await Promise.race([cbServer.codePromise, timeoutP]);
+                        } finally {
+                            clearTimeout(timeoutId);
+                            keepPolling = false;
+                        }
+
+                        if (result.error) {
+                            throw new McpError(CODES.OAUTH_CODE_NOT_RECEIVED, `oauth denied: ${result.error}`);
+                        }
+                        if (!result.code) {
+                            throw new McpError(CODES.OAUTH_CODE_NOT_RECEIVED, 'callback received but no code field');
+                        }
+                        return { code: result.code, redirectUri };
+                    } finally {
+                        await page.close().catch(() => {});
+                    }
+                } finally {
+                    try { cbServer.server.close(); } catch (_) {}
+                }
+            });
+        },
+    };
+
     return tools;
 }
 
