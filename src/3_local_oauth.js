@@ -577,9 +577,6 @@ async function runStage3({ runId, concurrency = 1 } = {}) {
     return stats;
 }
 
-process.on('SIGINT',  () => { cleanupWorkers3(_workers3); process.exit(130); });
-process.on('SIGTERM', () => { cleanupWorkers3(_workers3); process.exit(143); });
-
 module.exports = {
     runStage3,
     buildAuthUrl,
@@ -599,7 +596,10 @@ module.exports = {
 };
 
 if (require.main === module) {
-    runStage3({ runId: null, concurrency: 1 })
+    process.on('SIGINT',  () => { cleanupWorkers3(_workers3); process.exit(130); });
+    process.on('SIGTERM', () => { cleanupWorkers3(_workers3); process.exit(143); });
+
+    runStage3({ runId: null, concurrency: CLI_OPTS.concurrency })
         .then(() => process.exit(0))
         .catch(e => { log(`Fatal: ${e.message}`, 'ERROR'); process.exit(1); });
 }

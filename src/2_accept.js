@@ -868,13 +868,22 @@ async function runStage2({ runId, concurrency = 1 } = {}) {
     return stats;
 }
 
-process.on('SIGINT',  () => { cleanupWorkers2(_workers2); process.exit(130); });
-process.on('SIGTERM', () => { cleanupWorkers2(_workers2); process.exit(143); });
-
 module.exports = { runStage2, acceptInvite };
 
 if (require.main === module) {
-    runStage2({ runId: null, concurrency: 1 })
+    process.on('SIGINT',  () => { cleanupWorkers2(_workers2); process.exit(130); });
+    process.on('SIGTERM', () => { cleanupWorkers2(_workers2); process.exit(143); });
+
+    // Parse --concurrency / -c from argv (Bug 4 fix)
+    let cli_concurrency = parseInt(process.env.CONCURRENCY, 10) || 1;
+    const argv_ = process.argv.slice(2);
+    for (let i = 0; i < argv_.length; i++) {
+        if ((argv_[i] === '--concurrency' || argv_[i] === '-c') && argv_[i + 1]) {
+            cli_concurrency = parseInt(argv_[i + 1], 10) || cli_concurrency;
+        }
+    }
+
+    runStage2({ runId: null, concurrency: cli_concurrency })
         .then(() => process.exit(0))
         .catch(e => { log(`Fatal: ${e.message}`, 'ERROR'); process.exit(1); });
 }
