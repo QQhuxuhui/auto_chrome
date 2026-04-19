@@ -297,7 +297,7 @@ async function acceptInvite(memberAccount, browser, workerId) {
 
             // Scan inbox rows, extract { text, hrefs }, delegate to pure matcher (see stage2-matcher.js).
             const rowData = await page.evaluate(() => {
-                const rows = document.querySelectorAll('tr.zA, tr.zE, div[role="row"], tr[draggable="true"]');
+                const rows = document.querySelectorAll('tr.zA, tr.zE, tr[role="row"], div[role="row"], tr[draggable="true"]');
                 const out = [];
                 for (const row of rows) {
                     const r = row.getBoundingClientRect();
@@ -324,7 +324,7 @@ async function acceptInvite(memberAccount, browser, workerId) {
                 // 点击邮件行打开邮件 — 使用 gjy 的精确选择器过滤 + dev 的多层 fallback
                 // 策略 1: evaluate 点击邮件行（带尺寸和标签栏过滤）
                 const openedByEval = await page.evaluate((keywords) => {
-                    const rows = document.querySelectorAll('tr.zA, tr.zE, div[role="row"], tr[draggable="true"]');
+                    const rows = document.querySelectorAll('tr.zA, tr.zE, tr[role="row"], div[role="row"], tr[draggable="true"]');
                     for (const row of rows) {
                         const r = row.getBoundingClientRect();
                         if (r.width < 200 || r.height < 20) continue;
@@ -558,21 +558,57 @@ async function acceptInvite(memberAccount, browser, workerId) {
                 }, 10000);
             });
 
-            // 点击匹配到的 <a> 元素（按 href 或 data-saferedirecturl 定位）
-            const clickOk = await page.evaluate((url) => {
+            // 点击匹配到的 <a> 元素。
+            // 关键：不能用 `a.click()` —— Gmail 的邮件链接是 target="_blank"，
+            // 打开新 tab 依赖 window.open 被 user-gesture 允许。合成 JS click
+            // 不算 user gesture，弹窗会被浏览器拦截，结果就是 href 匹配成功
+            // 但 tab 没开、也没 navigation。必须走 CDP 真实鼠标事件（ElementHandle.click）。
+            const MARK_ATTR = 'data-accept-link-target';
+            const marked = await page.evaluate((url, attr) => {
+                document.querySelectorAll(`[${attr}]`).forEach(el => el.removeAttribute(attr));
                 const links = document.querySelectorAll('a[href]');
                 for (const a of links) {
                     const h = a.getAttribute('data-saferedirecturl') || a.href || '';
                     if (h === url || h.includes(url.substring(0, 60))) {
                         const r = a.getBoundingClientRect();
                         if (r.width > 0 && r.height > 0) {
-                            a.click();
+                            a.setAttribute(attr, '1');
                             return true;
                         }
                     }
                 }
                 return false;
-            }, acceptLink).catch(() => false);
+            }, acceptLink, MARK_ATTR).catch(() => false);
+
+            let clickOk = false;
+            if (marked) {
+                const linkHandle = await page.$(`[${MARK_ATTR}]`).catch(() => null);
+                if (linkHandle) {
+                    try {
+                        // ElementHandle.click 通过 CDP 发真实 pointerdown/pointerup，
+                        // 才能让 Gmail 的 jsaction + window.open(target=_blank) 正常触发。
+                        await linkHandle.click({ delay: 30 });
+                        clickOk = true;
+                    } catch (e) {
+                        wlog.debug(`  ElementHandle click failed: ${e.message}, falling back to JS click`);
+                    } finally {
+                        await linkHandle.dispose().catch(() => { });
+                    }
+                }
+
+                // CDP 点击失败时退回 JS click（至少让链接 onClick handler 跑，有时还能同 tab 跳走）
+                if (!clickOk) {
+                    clickOk = await page.evaluate((attr) => {
+                        const el = document.querySelector(`[${attr}]`);
+                        if (el) { el.click(); return true; }
+                        return false;
+                    }, MARK_ATTR).catch(() => false);
+                }
+
+                await page.evaluate((attr) => {
+                    document.querySelectorAll(`[${attr}]`).forEach(el => el.removeAttribute(attr));
+                }, MARK_ATTR).catch(() => { });
+            }
 
             if (clickOk) {
                 wlog.info('  Clicked accept link inside Gmail');
@@ -686,19 +722,73 @@ async function acceptInvite(memberAccount, browser, workerId) {
         await sleep(3000);
         await takeScreenshot(page, `accept_page_${memberAccount.email}`, wlog);
 
-        // 成功状态判定：文本包含以下任一短语
+        // 成功状态判定：URL 命中 /family/join/success（跨语言最稳），或文本命中以下短语
+        // Google 本地化成员账号页面时，成功 URL 路径保持不变，文本则会变。
+        const SUCCESS_URL_RE = /\/family\/(join\/success|members|details)/i;
         const successTexts = [
+            // English
             "you're now part of", "you've joined", "you are now a member",
             "you're in the family", "welcome to your family",
-            "你已加入", "已成为", "成功加入",
+            // Chinese
+            "你已加入", "已成为", "成功加入", "欢迎加入",
+            // Vietnamese
+            "chào mừng bạn tham gia", "bạn đã tham gia",
+            // Spanish / Portuguese
+            "te has unido", "ahora formas parte", "bem-vindo", "agora faz parte",
+            // French
+            "vous avez rejoint", "bienvenue dans",
+            // German
+            "willkommen in deiner familie", "du bist jetzt",
+            // Japanese / Korean
+            "ファミリーに参加しました", "ファミリーグループに参加", "가족에 참여했습니다", "가족 그룹에 참여",
+            // Russian / Indonesian / Italian / Arabic
+            "вы присоединились", "selamat datang", "benvenuto nella tua famiglia", "لقد انضممت",
         ];
-        // 确认按钮关键词（按具体度排序，具体的优先）
+        // 确认按钮关键词：对齐 acceptKws 的多语言覆盖面 —— 会员账号的 UI 按 Google
+        // 本地化决定，要能匹配到各种语言的 Join / Accept / Continue / Confirm。
+        // 按具体度排序（更具体的在前）避免误点旁边的"继续学习"等无关按钮。
         const confirmKws = [
+            // 最具体："Join family group" 的各语言变体
             'join family group', 'join family', 'join group',
-            '加入家庭组', '加入家庭群组',
-            'accept invitation', 'accept',
-            'continue', 'confirm', 'get started', 'agree',
-            '接受', '加入', '确认', '继续', '同意', '完成', '开始',
+            '加入家庭组', '加入家庭群组', '加入家庭群',
+            'tham gia nhóm gia đình', 'tham gia nhóm',
+            'unirme al grupo familiar', 'unirse al grupo familiar', 'unirme a la familia',
+            'juntar-se ao grupo familiar', 'aderir ao grupo',
+            'rejoindre le groupe familial', 'rejoindre la famille',
+            'familiengruppe beitreten', 'der familie beitreten',
+            'bergabung dengan grup keluarga', 'bergabung keluarga',
+            'unisciti al gruppo famiglia', 'unisciti alla famiglia',
+            'ファミリーグループに参加', '家族グループに参加',
+            '가족 그룹에 가입', '가족 그룹에 참여',
+            'присоединиться к семейной группе', 'присоединиться к семье',
+            'الانضمام إلى مجموعة العائلة',
+            // 二级：通用 accept/join + 多语言
+            'accept invitation', 'accept', 'join',
+            '接受邀请', '接受', '加入',
+            'chấp nhận lời mời', 'chấp nhận', 'tham gia',
+            'aceptar invitación', 'aceptar', 'unirme', 'unirse',
+            'aceitar convite', 'aceitar', 'juntar', 'entrar',
+            'accepter l\'invitation', 'accepter', 'rejoindre',
+            'einladung annehmen', 'annehmen', 'beitreten',
+            'terima undangan', 'terima', 'bergabung', 'gabung',
+            'accetta invito', 'accetta', 'unisciti', 'partecipa',
+            '招待を承諾', '承諾', '参加する', '参加',
+            '초대 수락', '수락', '가입', '참여',
+            'принять приглашение', 'принять', 'присоединиться',
+            'قبول الدعوة', 'قبول', 'انضمام', 'انضم',
+            // 三级：流程推进按钮（continue/confirm/agree/get started）多语言
+            'continue', 'confirm', 'get started', 'agree', 'next', 'done',
+            '确认', '继续', '同意', '完成', '开始', '下一步',
+            'tiếp tục', 'xác nhận', 'đồng ý', 'bắt đầu',
+            'continuar', 'confirmar', 'estoy de acuerdo', 'siguiente', 'listo',
+            'continuer', 'confirmer', 'je suis d\'accord', 'suivant',
+            'weiter', 'bestätigen', 'zustimmen', 'fertig',
+            'lanjutkan', 'konfirmasi', 'setuju', 'selesai',
+            'continua', 'conferma', 'accetto', 'fine',
+            '続行', '確認', '同意する', '次へ', '完了',
+            '계속', '확인', '동의', '다음', '완료',
+            'продолжить', 'подтвердить', 'согласен', 'далее', 'готово',
+            'متابعة', 'تأكيد', 'أوافق', 'التالي', 'تم',
         ];
 
         let joined = false;
@@ -710,8 +800,9 @@ async function acceptInvite(memberAccount, browser, workerId) {
 
             wlog.debug(`  Confirm step ${confirmStep + 1}: url=${urlBefore} text="${pageText.substring(0, 80)}..."`);
 
-            // 是否已经加入
-            if (successTexts.some(t => pageText.includes(t))) {
+            // 是否已经加入 —— URL 命中成功路径优先（跨语言最稳），文本兜底
+            if (SUCCESS_URL_RE.test(urlBefore) ||
+                successTexts.some(t => pageText.includes(t))) {
                 wlog.success('  Successfully joined family group!');
                 joined = true;
                 break;
@@ -739,7 +830,8 @@ async function acceptInvite(memberAccount, browser, workerId) {
                 const curText = await page.evaluate(() =>
                     document.body ? document.body.innerText.substring(0, 2000).toLowerCase() : ''
                 ).catch(() => '');
-                if (successTexts.some(t => curText.includes(t))) {
+                if (SUCCESS_URL_RE.test(curUrl) ||
+                    successTexts.some(t => curText.includes(t))) {
                     wlog.success('  Successfully joined family group!');
                     joined = true;
                     changed = true;
@@ -768,7 +860,7 @@ async function acceptInvite(memberAccount, browser, workerId) {
                 await takeScreenshot(page, `accept_chrome_error_${memberAccount.email}`, wlog);
                 throw new Error(`accept_navigation_failed: ${finalUrl}`);
             }
-            if (finalUrl.includes('family/details') || finalUrl.includes('family/members') ||
+            if (SUCCESS_URL_RE.test(finalUrl) ||
                 successTexts.some(t => finalText.includes(t))) {
                 wlog.success('  Joined (detected via final state)');
             } else {
