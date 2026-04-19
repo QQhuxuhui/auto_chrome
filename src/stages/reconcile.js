@@ -144,19 +144,61 @@ async function reconcileAgainstDB(hostRecord, googleEmails, runId) {
 /**
  * 检测当前页是否跳到了 "verify it's you" / 2FA 挑战页，若是则
  * 调用 googleLogin 走一遍状态机（它能读 hostAccount.totp_secret 自动
- * 填 TOTP 验证码）。失败返回 false。
+ * 填 TOTP 验证码）。
+ *
+ * Google 的敏感操作二次验证可能：
+ *   - URL: /signin/challenge/... 或 /v3/signin/challenge/... 或 /signin/v2/challenge/...
+ *   - URL: /verifyit / /verify / /gaia/s/challenge 等
+ *   - 有时是同域 overlay，URL 不变但页面内容含 "Verify it's you"
+ *
+ * 所以双重检测 + 长轮询（最多 10 秒）。
  */
 async function solveMidflowChallenge(page, hostAccount, tag, wlog) {
-    const url = page.url();
-    const isChallenge = /\/signin\/challenge\//i.test(url)
-        || /\/v3\/signin\/challenge\//i.test(url)
-        || /\/signin\/v2\/challenge\//i.test(url);
-    if (!isChallenge) return true;
-    wlog && wlog.info && wlog.info(`${tag} mid-flow challenge detected at ${url}; invoking googleLogin`);
+    const CHALLENGE_URL_RE = /\/(?:signin|sign_in|v3|v2|webauthn)\/.*challenge|verifyit|verify-account|accountrecovery|\/2sv|\/challenge\//i;
+    const CHALLENGE_TEXT_RE = /verify it'?s you|verify your identity|for your security|confirm your identity|protect your account|验证您的身份|确认是您本人|为了保护您|安全验证|请验证/i;
+
+    // 长轮询等挑战出现（Google 有时要等 2-5 秒才跳到挑战页）
+    let detected = null;
+    for (let i = 0; i < 20; i++) {
+        const url = page.url();
+        if (CHALLENGE_URL_RE.test(url)) {
+            detected = { by: 'url', url };
+            break;
+        }
+        const hasVerifyText = await page.evaluate((pattern) => {
+            const re = new RegExp(pattern, 'i');
+            const text = document.body ? document.body.innerText : '';
+            return re.test(text);
+        }, CHALLENGE_TEXT_RE.source).catch(() => false);
+        if (hasVerifyText) {
+            detected = { by: 'content', url };
+            break;
+        }
+        // 也可能已经成功跳回 family 列表/详情页（表示 remove 完成无需验证）
+        if (/\/family\/details/.test(url) || /\/family\/member/.test(url)) {
+            if (i >= 3) {
+                // 多次都在 family 页，没挑战
+                wlog && wlog.info && wlog.info(`${tag} settled back to family page, no challenge needed`);
+                return true;
+            }
+        }
+        await sleep(500);
+    }
+
+    if (!detected) {
+        const url = page.url();
+        wlog && wlog.info && wlog.info(`${tag} no challenge detected after 10s, continuing (url=${url.substring(0, 120)})`);
+        return true;
+    }
+
+    wlog && wlog.info && wlog.info(`${tag} challenge detected via ${detected.by}: ${detected.url}`);
+    await takeScreenshot(page, `remove_challenge_before_solve`, wlog);
+
     if (!hostAccount) {
         wlog && wlog.warn && wlog.warn(`${tag} challenge detected but no hostAccount passed — cannot auto-solve`);
         return false;
     }
+
     try {
         await googleLogin(page, {
             email: hostAccount.email,
@@ -164,10 +206,12 @@ async function solveMidflowChallenge(page, hostAccount, tag, wlog) {
             recovery: hostAccount.recovery_email || '',
             totp_secret: hostAccount.totp_secret || undefined,
         }, wlog);
-        wlog && wlog.info && wlog.info(`${tag} mid-flow challenge solved`);
+        wlog && wlog.info && wlog.info(`${tag} mid-flow challenge solved; final url=${page.url().substring(0, 120)}`);
+        await takeScreenshot(page, `remove_challenge_after_solve`, wlog);
         return true;
     } catch (e) {
         wlog && wlog.warn && wlog.warn(`${tag} challenge solving failed: ${e.message}`);
+        await takeScreenshot(page, `remove_challenge_solve_failed`, wlog);
         return false;
     }
 }
@@ -271,16 +315,19 @@ async function clickRemoveAndConfirm(page, tag, wlog, hostAccount) {
         return false;
     }
     log(`confirmed: "${step3.text}" (in dialog: ${step3.inDialog})`);
-    await sleep(3500);
 
-    // 点完确认可能触发 Google 的 "Verify it's you" 二次验证（尤其是敏感操作如移除家庭成员）
-    // 用 hostAccount.totp_secret 走一遍 login 状态机解开
+    // 点完确认等页面稳定 1.5s，然后打一张截图看 Google 跳到哪（debug 用）
+    await sleep(1500);
+    log(`post-confirm url=${page.url().substring(0, 120)}`);
+    await takeScreenshot(page, `remove_after_confirm`, wlog);
+
+    // 检测并解开 2FA/verify-it's-you 挑战
     const solved = await solveMidflowChallenge(page, hostAccount, tag, wlog);
     if (!solved) {
         await takeScreenshot(page, `remove_challenge_unsolved`, wlog);
         return false;
     }
-    await sleep(1500);
+    await sleep(2000);
     return true;
 }
 
