@@ -180,6 +180,53 @@ async function abandonMember(memberId) {
     return mapRow(rows[0]);
 }
 
+async function updateAntigravity(memberId, partial) {
+    // JSONB 合并: 已有值 || partial（partial 优先）
+    const sql = `
+        UPDATE members
+        SET antigravity = COALESCE(antigravity, '{}'::jsonb) || $2::jsonb,
+            updated_at = NOW()
+        WHERE id = $1
+        RETURNING *
+    `;
+    const { rows } = await db.query(sql, [memberId, partial]);
+    return mapRow(rows[0]);
+}
+
+async function listMembersByEmailLower(emails) {
+    if (!emails || !emails.length) return [];
+    const lowered = emails.map(e => String(e).toLowerCase());
+    const { rows } = await db.query(
+        `SELECT * FROM members WHERE LOWER(email) = ANY($1)`,
+        [lowered]
+    );
+    return rows.map(mapRow);
+}
+
+async function listMembersNeedingPush() {
+    const sql = `
+        SELECT * FROM members
+        WHERE status = 'done'
+          AND token IS NOT NULL
+          AND (antigravity IS NULL OR antigravity->>'id' IS NULL)
+        ORDER BY done_at ASC
+    `;
+    const { rows } = await db.query(sql);
+    return rows.map(mapRow);
+}
+
+async function listMembersNeedingFamilyRemoval(hostId) {
+    const sql = `
+        SELECT * FROM members
+        WHERE host_id = $1
+          AND status IN ('joined','done','oauth_failed')
+          AND antigravity->>'disabled' = 'true'
+        ORDER BY id ASC
+    `;
+    const { rows } = await db.query(sql, [hostId]);
+    return rows.map(mapRow);
+}
+
 async function listMembersForStage(stage, { hostIds } = {}) {
     const s = String(stage);
     const useHostFilter = Array.isArray(hostIds);
@@ -253,6 +300,10 @@ module.exports = {
     markRemovedFromFamily,
     resetMember,
     abandonMember,
+    updateAntigravity,
+    listMembersByEmailLower,
+    listMembersNeedingPush,
+    listMembersNeedingFamilyRemoval,
     listMembersForStage,
     countByStatus,
     ABANDON_THRESHOLD,

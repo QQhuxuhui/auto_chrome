@@ -13,6 +13,40 @@ test.before(async () => {
     hostId = host.id;
 });
 
+test('updateAntigravity merges JSONB partial into existing object', async () => {
+    const { member } = await members.upsertMember({ email: 'test-mem-ag1@example.com', password: 'pw' });
+    let updated = await members.updateAntigravity(member.id, { id: 'uuid-1', pushed_at: '2026-04-19T10:00:00Z' });
+    assert.equal(updated.antigravity.id, 'uuid-1');
+    assert.equal(updated.antigravity.pushed_at, '2026-04-19T10:00:00Z');
+    updated = await members.updateAntigravity(member.id, { disabled: true });
+    assert.equal(updated.antigravity.id, 'uuid-1');
+    assert.equal(updated.antigravity.pushed_at, '2026-04-19T10:00:00Z');
+    assert.equal(updated.antigravity.disabled, true);
+});
+
+test('listMembersByEmailLower is case-insensitive', async () => {
+    await members.upsertMember({ email: 'test-mem-AG2@example.com', password: 'pw' });
+    const found = await members.listMembersByEmailLower(['test-mem-ag2@example.com', 'nope@x.com']);
+    assert.equal(found.length, 1);
+    assert.equal(found[0].email.toLowerCase(), 'test-mem-ag2@example.com');
+});
+
+test('listMembersNeedingPush returns only done+unpushed', async () => {
+    const { member: m1 } = await members.upsertMember({ email: 'test-mem-push1@example.com', password: 'pw' });
+    const { member: m2 } = await members.upsertMember({ email: 'test-mem-push2@example.com', password: 'pw' });
+    await members.transitionToInvitePending(m1.id, hostId);
+    await members.transitionToJoined(m1.id);
+    await members.transitionToDone(m1.id, 'RT1', {});
+    await members.transitionToInvitePending(m2.id, hostId);
+    await members.transitionToJoined(m2.id);
+    await members.transitionToDone(m2.id, 'RT2', {});
+    await members.updateAntigravity(m2.id, { id: 'already-pushed-uuid' });
+    const pending = await members.listMembersNeedingPush();
+    const emails = pending.map(p => p.email);
+    assert.ok(emails.includes('test-mem-push1@example.com'));
+    assert.ok(!emails.includes('test-mem-push2@example.com'));
+});
+
 test.after(async () => {
     await db.query('DELETE FROM members WHERE email LIKE $1', ['test-mem-%@example.com']);
     await db.query('DELETE FROM hosts   WHERE email LIKE $1', ['test-mem-host-%@example.com']);
