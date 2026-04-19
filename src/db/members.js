@@ -182,7 +182,7 @@ async function abandonMember(memberId) {
 
 async function listMembersForStage(stage, { hostIds } = {}) {
     const s = String(stage);
-    const useHostFilter = Array.isArray(hostIds) && hostIds.length > 0;
+    const useHostFilter = Array.isArray(hostIds);
     let sql, params;
     if (s === '1') {
         // Stage 1: host assigned at runtime via pickHost; host filter not applicable here.

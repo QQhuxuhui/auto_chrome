@@ -121,3 +121,21 @@ test('listMembersForStage stage 2 respects hostIds filter', async () => {
     await db.query('DELETE FROM members WHERE id IN ($1, $2)', [mA.id, mB.id]);
     await db.query('DELETE FROM hosts WHERE id = $1', [h2.id]);
 });
+
+test('listMembersForStage with empty hostIds returns zero results', async () => {
+    // Seed one member in invite_pending
+    const { member: m } = await members.upsertMember({ email: 'test-mem-empty@example.com', password: 'pw' });
+    await members.transitionToInvitePending(m.id, hostId);
+
+    // Empty array → filter with no matches (NOT "disable filter")
+    const filtered = await members.listMembersForStage(2, { hostIds: [] });
+    const emails = filtered.map(x => x.email);
+    assert.ok(!emails.includes('test-mem-empty@example.com'), 'empty hostIds should exclude all rows');
+
+    // No key → no filter, member is visible
+    const unfiltered = await members.listMembersForStage(2);
+    const unfilteredEmails = unfiltered.map(x => x.email);
+    assert.ok(unfilteredEmails.includes('test-mem-empty@example.com'));
+
+    await db.query('DELETE FROM members WHERE id = $1', [m.id]);
+});

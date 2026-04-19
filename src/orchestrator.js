@@ -114,9 +114,20 @@ async function main() {
             stats.reconcile = await runReconcilePhase({ runId, hostFilter, hostIds });
         } else {
             stats.reconcile = await runReconcilePhase({ runId, hostFilter });
+            // A filter is "explicit" iff the user passed --hosts and/or --host-ids.
+            // If it resolved to zero IDs, pass empty array (stages treat as "no work").
+            // If user passed nothing, don't include hostIds key (stages process all).
+            const explicitFilter = hostFilter.length > 0 || hostIds.length > 0;
+            if (explicitFilter && resolvedHostIds.length === 0) {
+                log(`orchestrator: --hosts/--host-ids filter resolved to zero hosts; stage 2/3 will have zero work`, 'WARN');
+            }
+            const stage23Opts = explicitFilter
+                ? { runId, concurrency, hostIds: resolvedHostIds }
+                : { runId, concurrency };
+
             if (stages.includes('1')) stats.stage1 = await runStage1({ runId, hostFilter, concurrency });
-            if (stages.includes('2')) stats.stage2 = await runStage2({ runId, concurrency, hostIds: resolvedHostIds });
-            if (stages.includes('3')) stats.stage3 = await runStage3({ runId, concurrency, hostIds: resolvedHostIds });
+            if (stages.includes('2')) stats.stage2 = await runStage2(stage23Opts);
+            if (stages.includes('3')) stats.stage3 = await runStage3(stage23Opts);
         }
     } catch (e) {
         finalStatus = 'failed';
