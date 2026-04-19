@@ -12,6 +12,7 @@ const { registerChromeTools } = require('./tools/chrome');
 const { registerGoogleTools } = require('./tools/google');
 const { registerOauthTools } = require('./tools/oauth');
 const { registerSmsTools } = require('./tools/sms');
+const { registerTotpTools } = require('./tools/totp');
 
 // Configure Node fetch to honor HTTPS_PROXY (matches 3_local_oauth.js pattern)
 {
@@ -37,6 +38,7 @@ async function startServer() {
         ...registerGoogleTools({ registry, logger, config }),
         ...registerOauthTools({ logger, config }),
         ...registerSmsTools({ logger, config }),
+        ...registerTotpTools({ logger }),
     };
 
     const server = new Server(
