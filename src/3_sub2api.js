@@ -709,10 +709,13 @@ async function completeValidationFlow(page, validationUrl, member, wlog, { timeo
         let parsedUrl = null;
         try { parsedUrl = url ? new URL(url) : null; } catch (_) { /* ignore */ }
         const path = parsedUrl ? parsedUrl.pathname : '';
+        // uplevelingstep/* is Google's 2FA selection page shown mid-flow; it's
+        // not under /signin/ but must route to googleLogin so the identity_verify
+        // handler can pick an available verification method.
         const onSigninFlow =
             parsedUrl &&
             parsedUrl.host === 'accounts.google.com' &&
-            /^\/(v3\/)?signin\//.test(path) &&
+            (/^\/(v3\/)?signin\//.test(path) || path.startsWith('/uplevelingstep/')) &&
             // /signin/continue is the verify page itself — skip it
             path !== '/signin/continue' &&
             !path.startsWith('/signin/continue/');

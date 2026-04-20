@@ -466,10 +466,15 @@ async function detectPageState(page, wlog) {
         t.includes('条款和隐私')) {
         state = 'tos';
     } else if (u.includes('challenge') && !pageInfo.hasPasswordInput) {
-        // challenge URL 下进一步细分：如果是 SMS 验证页面，走 verify_phone
-        if (t.includes('receive an sms') || t.includes('接收短信') ||
+        // challenge URL 下进一步细分：如果是 SMS 验证页面，走 verify_phone。
+        // challenge/iap = Identity Auth Phone 页（"Verify it's you, Enter a phone
+        // number to get a text message with a verification code"），走 verify_phone
+        // 才能触发 SMS 自动接码 handler，否则会落到 challenge 走 5 分钟人工等待。
+        if (u.includes('challenge/iap') ||
+            t.includes('receive an sms') || t.includes('接收短信') ||
             t.includes('sms code') || t.includes('短信验证码') ||
             t.includes('send an sms') || t.includes('发送短信') ||
+            t.includes('text message with a verification code') ||
             (t.includes('phone number') && (t.includes('send') || t.includes('发送')))) {
             state = 'verify_phone';
         } else {
