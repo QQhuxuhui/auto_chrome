@@ -45,3 +45,15 @@ test('flow falsy + host not joined → accept_failed/fail', () => {
     assert.equal(d.eventType, 'fail');
     assert.equal(d.message, 'acceptInvite returned falsy');
 });
+
+test('rejects invalid hostStatus (case-sensitive, typo)', () => {
+    const { decide, VALID_HOST_STATUSES } = require('./decide');
+    assert.ok(VALID_HOST_STATUSES.length === 5);
+    for (const bad of ['Joined', 'JOINED', 'ok', '', null, undefined]) {
+        assert.throws(
+            () => decide({ flowResult: true, flowError: null, hostStatus: bad }),
+            /invalid hostStatus/,
+            `expected throw for hostStatus=${JSON.stringify(bad)}`,
+        );
+    }
+});

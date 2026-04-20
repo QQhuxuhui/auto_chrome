@@ -13,7 +13,12 @@
  *   - flow truthy → accept_failed/accept_failed_unconfirmed (warn)
  *   - flow falsy  → accept_failed/fail
  */
+const VALID_HOST_STATUSES = ['joined', 'pending', 'unknown', 'timeout', 'degraded'];
+
 function decide({ flowResult, flowError, hostStatus }) {
+    if (!VALID_HOST_STATUSES.includes(hostStatus)) {
+        throw new TypeError(`decide: invalid hostStatus '${hostStatus}', expected one of ${VALID_HOST_STATUSES.join(', ')}`);
+    }
     const joined = hostStatus === 'joined';
 
     if (flowError) {
@@ -57,4 +62,4 @@ function decide({ flowResult, flowError, hostStatus }) {
     };
 }
 
-module.exports = { decide };
+module.exports = { decide, VALID_HOST_STATUSES };
