@@ -163,6 +163,10 @@ async function processOneHost({ host, members, concurrency, runId, chromePath })
             browser: hmChrome.browser,
             page: hmPage,
             loginFn: async (page) => {
+                // Bootstrap: googleLogin's state machine needs the page to be on
+                // a Google signin URL; a fresh newPage() starts at about:blank and
+                // deadloops the state machine on 'blank' 8x. Mirror reconcile.js:772.
+                await page.goto('https://accounts.google.com/signin', { waitUntil: 'networkidle2', timeout: 30000 }).catch(() => {});
                 await googleLogin(page, hostAccount, wlog);
                 await page.goto(FAMILY_URL, { waitUntil: 'networkidle2', timeout: 30000 }).catch(() => {});
                 const cal = await initialFamilyMap(page, wlog);
