@@ -38,11 +38,49 @@
                    class="px-3 py-1 bg-slate-800 rounded flex-1">
         </div>
         <table class="data card">
-            <thead><tr><th>邮箱</th><th>占用</th><th>已停用</th><th>操作</th></tr></thead>
+            <thead><tr>
+                <th>邮箱</th>
+                <th>密码</th>
+                <th>辅助邮箱</th>
+                <th>FA 验证码</th>
+                <th>占用</th>
+                <th>已停用</th>
+                <th>操作</th>
+            </tr></thead>
             <tbody>
                 <template x-for="h in hosts" :key="h.id">
                     <tr>
                         <td class="mono" x-text="h.email"></td>
+                        <td>
+                            <template x-if="h.password">
+                                <span>
+                                    <span class="mono" x-text="revealed['host-'+h.id] ? h.password : '••••••'"></span>
+                                    <button @click="toggleReveal('host', h.id)" class="ml-1 text-xs text-blue-400"
+                                            x-text="revealed['host-'+h.id] ? '隐' : '显'"></button>
+                                    <button @click="copyCred(h.password)" class="ml-1 text-xs text-blue-400">复制</button>
+                                </span>
+                            </template>
+                            <template x-if="!h.password"><span>—</span></template>
+                        </td>
+                        <td class="mono text-xs">
+                            <template x-if="h.recovery_email">
+                                <span>
+                                    <span x-text="h.recovery_email"></span>
+                                    <button @click="copyCred(h.recovery_email)" class="ml-1 text-blue-400">复制</button>
+                                </span>
+                            </template>
+                            <template x-if="!h.recovery_email"><span>—</span></template>
+                        </td>
+                        <td>
+                            <template x-if="h.totp_secret">
+                                <span>
+                                    <span class="mono text-sm tracking-widest" x-text="(totpCache['host-'+h.id] || {}).code || '…'"></span>
+                                    <span class="ml-1 text-xs text-slate-400" x-text="ttlFor('host-'+h.id) > 0 ? ttlFor('host-'+h.id)+'s' : ''"></span>
+                                    <button @click="copyCred((totpCache['host-'+h.id] || {}).code)" class="ml-1 text-xs text-blue-400">复制</button>
+                                </span>
+                            </template>
+                            <template x-if="!h.totp_secret"><span>—</span></template>
+                        </td>
                         <td><span x-text="`${h.slot_used} / 5`"></span></td>
                         <td>
                             <input type="checkbox" :checked="h.disabled" @change="toggleDisabled(h)">
@@ -52,7 +90,7 @@
                         </td>
                     </tr>
                 </template>
-                <tr x-show="!hosts.length"><td colspan="4" class="text-center text-slate-500 py-4">暂无母号</td></tr>
+                <tr x-show="!hosts.length"><td colspan="7" class="text-center text-slate-500 py-4">暂无母号</td></tr>
             </tbody>
         </table>
     </section>
@@ -74,11 +112,52 @@
                    class="px-3 py-1 bg-slate-800 rounded flex-1">
         </div>
         <table class="data card">
-            <thead><tr><th>邮箱</th><th>状态</th><th>母号</th><th>失败次数</th><th>凭证</th><th>平台状态</th><th>操作</th></tr></thead>
+            <thead><tr>
+                <th>邮箱</th>
+                <th>密码</th>
+                <th>辅助邮箱</th>
+                <th>FA 验证码</th>
+                <th>状态</th>
+                <th>母号</th>
+                <th>失败次数</th>
+                <th>凭证</th>
+                <th>平台状态</th>
+                <th>操作</th>
+            </tr></thead>
             <tbody>
                 <template x-for="m in members" :key="m.id">
                     <tr>
                         <td class="mono" x-text="m.email"></td>
+                        <td>
+                            <template x-if="m.password">
+                                <span>
+                                    <span class="mono" x-text="revealed['member-'+m.id] ? m.password : '••••••'"></span>
+                                    <button @click="toggleReveal('member', m.id)" class="ml-1 text-xs text-blue-400"
+                                            x-text="revealed['member-'+m.id] ? '隐' : '显'"></button>
+                                    <button @click="copyCred(m.password)" class="ml-1 text-xs text-blue-400">复制</button>
+                                </span>
+                            </template>
+                            <template x-if="!m.password"><span>—</span></template>
+                        </td>
+                        <td class="mono text-xs">
+                            <template x-if="m.recovery_email">
+                                <span>
+                                    <span x-text="m.recovery_email"></span>
+                                    <button @click="copyCred(m.recovery_email)" class="ml-1 text-blue-400">复制</button>
+                                </span>
+                            </template>
+                            <template x-if="!m.recovery_email"><span>—</span></template>
+                        </td>
+                        <td>
+                            <template x-if="m.totp_secret">
+                                <span>
+                                    <span class="mono text-sm tracking-widest" x-text="(totpCache['member-'+m.id] || {}).code || '…'"></span>
+                                    <span class="ml-1 text-xs text-slate-400" x-text="ttlFor('member-'+m.id) > 0 ? ttlFor('member-'+m.id)+'s' : ''"></span>
+                                    <button @click="copyCred((totpCache['member-'+m.id] || {}).code)" class="ml-1 text-xs text-blue-400">复制</button>
+                                </span>
+                            </template>
+                            <template x-if="!m.totp_secret"><span>—</span></template>
+                        </td>
                         <td><span class="pill" :class="m.status" x-text="statusLabel(m.status)"></span></td>
                         <td class="mono text-xs">
                             <span x-text="m.host_id ? hostEmailById(m.host_id) : '—'"></span>
@@ -120,19 +199,24 @@
                         <td class="space-x-2 text-sm">
                             <button @click="openDetail(m)" class="text-blue-400">详情</button>
                             <button @click="openEdit(m)" class="text-cyan-400">编辑</button>
-                            <template x-if="m.status === 'done' && (!m.antigravity || !m.antigravity.id)">
+                            <!-- 有凭证（refresh token）就显示推送按钮，不再受 status/disabled 约束。
+                                 未推过 → "推送"；已推过 → "重推"（覆盖平台记录）。 -->
+                            <template x-if="m.token && (!m.antigravity || !m.antigravity.id)">
                                 <button @click="pushMember(m)" class="text-green-400">推送</button>
                             </template>
-                            <template x-if="m.antigravity && m.antigravity.id && m.antigravity.disabled">
-                                <button @click="pushMember(m)" class="text-green-400" title="重新推送">重推</button>
+                            <template x-if="m.token && m.antigravity && m.antigravity.id">
+                                <button @click="pushMember(m)" class="text-green-400"
+                                        :title="m.antigravity.disabled ? '平台已封禁，重新推送' : '覆盖平台记录重新推送'">重推</button>
                             </template>
+                            <button @click="clearFailCount(m)" class="text-lime-400" x-show="m.fail_count > 0"
+                                    title="把失败次数清零，让 stage 2/3 能重新选到这个账号">清零</button>
                             <button @click="resetMember(m)" class="text-yellow-400">重置</button>
                             <button @click="abandonMember(m)" class="text-orange-400">放弃</button>
                             <button @click="deleteMember(m)" class="text-red-400">删除</button>
                         </td>
                     </tr>
                 </template>
-                <tr x-show="!members.length"><td colspan="7" class="text-center text-slate-500 py-4">暂无子号</td></tr>
+                <tr x-show="!members.length"><td colspan="10" class="text-center text-slate-500 py-4">暂无子号</td></tr>
             </tbody>
         </table>
     </section>
@@ -224,8 +308,11 @@
                             </div>
                         </template>
                         <div class="flex gap-2 mt-2">
-                            <template x-if="detail.status === 'done' && (!detail.antigravity || !detail.antigravity.id)">
+                            <template x-if="detail.token && (!detail.antigravity || !detail.antigravity.id)">
                                 <button @click="pushMemberById(detail.id); detailOpen=false" class="px-2 py-1 bg-green-800 hover:bg-green-700 rounded text-xs">推送到平台</button>
+                            </template>
+                            <template x-if="detail.token && detail.antigravity && detail.antigravity.id">
+                                <button @click="pushMemberById(detail.id); detailOpen=false" class="px-2 py-1 bg-green-800 hover:bg-green-700 rounded text-xs">重新推送</button>
                             </template>
                             <template x-if="detail.antigravity && detail.antigravity.id">
                                 <button @click="deleteFromPlatform(detail.id); detailOpen=false" class="px-2 py-1 bg-red-900 hover:bg-red-800 rounded text-xs">从平台删除</button>
@@ -277,6 +364,13 @@ function accounts() {
         editOpen: false,
         editForm: null,
         pendingPushCount: 0,
+        // 每行的密码遮蔽状态：key 为 "host-<id>" / "member-<id>"，布尔值 true 表示已显示。
+        revealed: {},
+        // TOTP 代码缓存：key 同上，值为 { code, expiresAt(秒) }。
+        totpCache: {},
+        // 每秒自增一次，用于让 ttlFor() 每秒重新求值（Alpine 依赖此字段变化触发 re-render）。
+        tick: 0,
+        _totpTimer: null,
         statusLabel(s) {
             return {
                 'new': '待处理',
@@ -292,6 +386,59 @@ function accounts() {
         },
         async load() {
             await Promise.all([this.loadHosts(), this.loadMembers(), this.loadMigrate()]);
+            // Kick off the TOTP ticker once data is loaded.
+            if (!this._totpTimer) {
+                this._totpTimer = setInterval(() => {
+                    this.tick = (this.tick + 1) % 1_000_000;
+                    this.refreshTOTP();
+                }, 1000);
+                this.refreshTOTP();
+            }
+        },
+        toggleReveal(kind, id) {
+            const key = `${kind}-${id}`;
+            this.revealed = { ...this.revealed, [key]: !this.revealed[key] };
+        },
+        async copyCred(text) {
+            if (!text) return;
+            const ok = await App.copyText(text);
+            if (!ok) alert('复制失败');
+        },
+        ttlFor(key) {
+            // Binding reads `this.tick` so Alpine re-evaluates each second.
+            void this.tick;
+            const entry = this.totpCache[key];
+            if (!entry) return 0;
+            const now = Math.floor(Date.now() / 1000);
+            return Math.max(0, entry.expiresAt - now);
+        },
+        async refreshTOTP() {
+            if (typeof window.TOTP === 'undefined') return;
+            const now = Math.floor(Date.now() / 1000);
+            const rows = [
+                ...this.hosts.filter(h => h.totp_secret).map(h => ({ key: `host-${h.id}`, secret: h.totp_secret })),
+                ...this.members.filter(m => m.totp_secret).map(m => ({ key: `member-${m.id}`, secret: m.totp_secret })),
+            ];
+            let mutated = false;
+            const next = { ...this.totpCache };
+            for (const row of rows) {
+                const cached = next[row.key];
+                if (cached && cached.expiresAt > now) continue;  // still valid
+                try {
+                    const { code, remainingSeconds } = await window.TOTP.getTOTPWithTTL(row.secret);
+                    next[row.key] = { code, expiresAt: now + remainingSeconds };
+                    mutated = true;
+                } catch (_) {
+                    next[row.key] = { code: 'ERR', expiresAt: now + 30 };
+                    mutated = true;
+                }
+            }
+            // Evict cache entries for rows that no longer exist to avoid unbounded growth.
+            const liveKeys = new Set(rows.map(r => r.key));
+            for (const k of Object.keys(next)) {
+                if (!liveKeys.has(k)) { delete next[k]; mutated = true; }
+            }
+            if (mutated) this.totpCache = next;
         },
         async loadHosts() {
             const q = this.hostSearch ? `?search=${encodeURIComponent(this.hostSearch)}` : '';
@@ -384,6 +531,13 @@ function accounts() {
             try { await App.api('PATCH', `/api/members/${m.id}?action=reset`, {}); await this.loadMembers(); }
             catch (e) { alert(e.message); }
         },
+        async clearFailCount(m) {
+            if (!confirm(`把 ${m.email} 的失败次数 (${m.fail_count}) 清零？状态/母号绑定保持不变。`)) return;
+            try {
+                await App.api('PATCH', `/api/members/${m.id}?action=clear_fail_count`, {});
+                await this.loadMembers();
+            } catch (e) { alert('清零失败：' + e.message); }
+        },
         async abandonMember(m) {
             if (!confirm(`确定放弃 ${m.email}？`)) return;
             try { await App.api('PATCH', `/api/members/${m.id}?action=abandon`, {}); await this.loadMembers(); }
@@ -431,5 +585,6 @@ function accounts() {
 }
 </script>
 <script src="/public/js/app.js"></script>
+<script src="/public/js/totp.js"></script>
 </body>
 </html>

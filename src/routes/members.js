@@ -57,6 +57,23 @@ module.exports = async function routes(app) {
         const action = req.query.action;
         if (action === 'reset') return members.resetMember(id);
         if (action === 'abandon') return members.abandonMember(id);
+        if (action === 'clear_fail_count') {
+            const before = await members.getMemberById(id);
+            if (!before) return reply.code(404).send({ error: 'not found' });
+            const row = await members.clearFailCount(id);
+            if (before.fail_count && row) {
+                try {
+                    await events.logEvent({
+                        memberId: id,
+                        hostId: row.host_id || null,
+                        stage: 'manual',
+                        eventType: 'note',
+                        message: `manual edit: fail_count cleared (${before.fail_count} → 0)`,
+                    });
+                } catch (_) { /* audit failure must not break main path */ }
+            }
+            return row;
+        }
 
         const before = await members.getMemberById(id);
         if (!before) return reply.code(404).send({ error: 'not found' });

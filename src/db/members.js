@@ -185,6 +185,22 @@ async function resetMember(memberId) {
     return mapRow(rows[0]);
 }
 
+/**
+ * Clear fail_count + last_error without touching status/host_id. Lets an
+ * operator take a member that crossed the ABANDON_THRESHOLD and put it back
+ * in play for the next stage run without losing any other state.
+ */
+async function clearFailCount(memberId) {
+    const sql = `
+        UPDATE members
+        SET fail_count = 0, last_error = NULL, last_error_at = NULL, updated_at = NOW()
+        WHERE id = $1
+        RETURNING *
+    `;
+    const { rows } = await db.query(sql, [memberId]);
+    return mapRow(rows[0]);
+}
+
 async function abandonMember(memberId) {
     const sql = `
         UPDATE members
@@ -316,6 +332,7 @@ module.exports = {
     markRemovedFromFamily,
     resetMember,
     abandonMember,
+    clearFailCount,
     updateAntigravity,
     listMembersByEmailLower,
     listMembersNeedingPush,
