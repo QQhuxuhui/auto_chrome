@@ -7,7 +7,10 @@
  */
 module.exports = require('./stages/accept');
 
-// CLI entry — delegate to stages/accept when run directly
+// CLI entry — delegate to stages/accept when run directly. Note: unlike
+// 1_invite / 3_local_oauth, this shim does not install SIGINT/SIGTERM
+// cleanup — when invoked via orchestrator (primary path) the parent
+// forwards signals to the child; direct CLI invocation is dev-only.
 if (require.main === module) {
     const { runStage2 } = require('./stages/accept');
     let cli_concurrency = parseInt(process.env.CONCURRENCY, 10) || 1;
