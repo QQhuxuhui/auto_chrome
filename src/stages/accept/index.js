@@ -148,73 +148,78 @@ async function processOneHost({ host, members, concurrency, runId, chromePath })
         wlog.warn(`Could not launch host monitor Chrome: ${e.message}; falling back to no-monitor mode`);
         return runHostWithoutMonitor({ host, members, concurrency, runId, chromePath });
     }
-    const hmPage = await newPage(hmChrome.browser);
-
-    const hostAccount = {
-        email: host.email, pass: host.password,
-        recovery: host.recovery_email || '',
-        totp_secret: host.totp_secret || undefined,
-    };
-
-    const hm = new HostMonitor({
-        host,
-        browser: hmChrome.browser,
-        page: hmPage,
-        loginFn: async (page) => {
-            await googleLogin(page, hostAccount, wlog);
-            await page.goto(FAMILY_URL, { waitUntil: 'networkidle2', timeout: 30000 }).catch(() => {});
-            const cal = await initialFamilyMap(page, wlog);
-            Object.assign(hm.state, cal);
-        },
-        scrapeFn: async (page) => scrapeFamilyListPage(page, wlog),
-        wlog,
-        initialFamilyMap: {},
-    });
-    await hm.start();
 
     const workers = [];
-    for (let w = 0; w < Math.min(concurrency, members.length); w++) {
-        const wChrome = await launchRealChrome(chromePath, w);
-        workers.push({ id: w, ...wChrome });
-        if (w < concurrency - 1) await sleep(rand(2000, 3000));
-    }
+    let hm = null;
+    try {
+        const hmPage = await newPage(hmChrome.browser);
+        const hostAccount = {
+            email: host.email, pass: host.password,
+            recovery: host.recovery_email || '',
+            totp_secret: host.totp_secret || undefined,
+        };
+        hm = new HostMonitor({
+            host,
+            browser: hmChrome.browser,
+            page: hmPage,
+            loginFn: async (page) => {
+                await googleLogin(page, hostAccount, wlog);
+                await page.goto(FAMILY_URL, { waitUntil: 'networkidle2', timeout: 30000 }).catch(() => {});
+                const cal = await initialFamilyMap(page, wlog);
+                Object.assign(hm.state, cal);
+            },
+            scrapeFn: async (page) => scrapeFamilyListPage(page, wlog),
+            wlog,
+            initialFamilyMap: {},
+        });
+        await hm.start();
 
-    let idx = 0;
-    const stats = { ok: 0, ng: 0 };
-    async function workerFn(worker) {
-        const wl = createWorkerLogger(worker.id);
-        while (true) {
-            const i = idx++;
-            if (i >= members.length) break;
-            const m = members[i];
-            try {
-                const dec = await processOneMember(m, worker, hm, chromePath, wl, runId);
-                if (dec.finalStatus === 'done') stats.ok++; else stats.ng++;
-            } catch (e) {
-                wl.error(`Stage2 [${m.email}]: ${e.message}`);
-                stats.ng++;
+        for (let w = 0; w < Math.min(concurrency, members.length); w++) {
+            const wChrome = await launchRealChrome(chromePath, w);
+            workers.push({ id: w, ...wChrome });
+            if (w < concurrency - 1) await sleep(rand(2000, 3000));
+        }
+
+        let idx = 0;
+        const stats = { ok: 0, ng: 0 };
+        async function workerFn(worker) {
+            const wl = createWorkerLogger(worker.id);
+            while (true) {
+                const i = idx++;
+                if (i >= members.length) break;
+                const m = members[i];
+                try {
+                    const dec = await processOneMember(m, worker, hm, chromePath, wl, runId);
+                    if (dec.finalStatus === 'done') stats.ok++; else stats.ng++;
+                } catch (e) {
+                    wl.error(`Stage2 [${m.email}]: ${e.message}`);
+                    stats.ng++;
+                }
+                await sleep(rand(1000, 2000));
             }
-            await sleep(rand(1000, 2000));
+        }
+        await Promise.all(workers.map(w => workerFn(w)));
+
+        // One extra poll-tick before teardown so any in-flight scrape can fire
+        try {
+            await new Promise((resolve) => {
+                const to = setTimeout(resolve, Math.min(hm.intervalMs + 2000, 10_000));
+                hm.once('scrape-done', () => { clearTimeout(to); resolve(); });
+            });
+        } catch (_) {}
+
+        return stats;
+    } finally {
+        if (hm) {
+            try { await hm.stop(); } catch (_) {}
+        }
+        try { hmChrome.browser.close(); } catch (_) {}
+        try { hmChrome.proc.kill(); } catch (_) {}
+        for (const w of workers) {
+            try { w.browser.close(); } catch (_) {}
+            try { w.proc.kill(); } catch (_) {}
         }
     }
-    await Promise.all(workers.map(w => workerFn(w)));
-
-    // One extra poll-tick before teardown so any in-flight scrape can fire
-    try {
-        await new Promise((resolve) => {
-            const to = setTimeout(resolve, Math.min(hm.intervalMs + 2000, 10_000));
-            hm.once('scrape-done', () => { clearTimeout(to); resolve(); });
-        });
-    } catch (_) {}
-
-    await hm.stop();
-    try { hmChrome.browser.close(); } catch (_) {}
-    try { hmChrome.proc.kill(); } catch (_) {}
-    for (const w of workers) {
-        try { w.browser.close(); } catch (_) {}
-        try { w.proc.kill(); } catch (_) {}
-    }
-    return stats;
 }
 
 async function runStage2({ runId, concurrency = 1, hostIds } = {}) {
