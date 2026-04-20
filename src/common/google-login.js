@@ -896,17 +896,20 @@ async function googleLogin(page, account, wlog, opts = {}) {
                     break;
                 }
 
-                // 按优先级尝试选择验证方式：备用邮箱 > 验证码 > 手机短信
+                // 优先级：Google 验证器 (TOTP) > 辅助邮箱 > 手机短信。
+                // TOTP 凭我们存的 totp_secret 直接生成，最稳；辅助邮箱其次；
+                // 手机短信依赖外部 SMS 供应商（成功率最低），垫底。
                 const methodPriority = [
+                    {
+                        name: 'authenticator',
+                        keywords: ['authenticator', 'google 验证', '验证码应用', '两步验证',
+                            'get a code from', 'get a verification code from'],
+                        condition: () => !!account.totp_secret,
+                    },
                     {
                         name: 'recovery_email',
                         keywords: ['确认您的辅助邮箱', '辅助邮箱', 'recovery email', 'confirm your recovery email'],
                         condition: () => !!account.recovery,
-                    },
-                    {
-                        name: 'authenticator',
-                        keywords: ['authenticator', 'google 验证', '验证码应用', '两步验证'],
-                        condition: () => true,
                     },
                     {
                         name: 'phone',
