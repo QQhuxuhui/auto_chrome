@@ -92,7 +92,7 @@
         <div class="space-y-4">
             <div>
                 <div class="text-sm mb-1">阶段</div>
-                <label class="mr-3"><input type="checkbox" x-model="form.stages1"> 1 发邀请</label>
+                <label class="mr-3"><input type="checkbox" x-model="form.stages1" @change="onToggleStage1($event)"> 1 发邀请</label>
                 <label class="mr-3"><input type="checkbox" x-model="form.stages2"> 2 接受邀请</label>
                 <label><input type="checkbox" x-model="form.stages3"> 3 授权</label>
             </div>
@@ -111,11 +111,12 @@
                     </div>
                     <div class="max-h-48 overflow-y-auto border border-slate-700 rounded p-2 space-y-1">
                         <template x-for="h in hostsList" :key="h.id">
-                            <label class="block hover:bg-slate-800/50 rounded px-1 py-0.5" :class="(!form.removeUnknown && h.slot_free === 0) ? 'opacity-50' : ''">
-                                <input type="checkbox" :value="h.email" x-model="form.selectedHosts" :disabled="!form.removeUnknown && h.slot_free === 0">
+                            <label class="block hover:bg-slate-800/50 rounded px-1 py-0.5" :class="isHostBlocked(h) ? 'opacity-50' : ''">
+                                <input type="checkbox" :value="h.email" x-model="form.selectedHosts" :disabled="isHostBlocked(h)">
                                 <span x-text="h.email" class="mono"></span>
                                 <span class="text-xs text-slate-400 ml-1" x-text="`(空位 ${h.slot_free}/5)`"></span>
-                                <span x-show="h.slot_free === 0 && !form.removeUnknown" class="text-xs text-red-400 ml-1">已满</span>
+                                <!-- 红：阶段 1 会被拒（hard block）。琥珀：满员 + removeUnknown，reconcile 可能回收空位（信息性，与阶段 1 无关）。 -->
+                                <span x-show="form.stages1 && h.slot_free === 0 && !form.removeUnknown" class="text-xs text-red-400 ml-1">已满</span>
                                 <span x-show="h.slot_free === 0 && form.removeUnknown" class="text-xs text-amber-400 ml-1">已满（reconcile 可能回收空位）</span>
                             </label>
                         </template>
@@ -194,12 +195,32 @@ function dashboard() {
             this.openStart = true;
             await this.reloadHosts();
         },
+        isHostBlocked(h) {
+            // Stage-1 invite capacity: blocked iff stage 1 is on, removeUnknown is off, and the host is full.
+            return this.form.stages1 && !this.form.removeUnknown && h.slot_free === 0;
+        },
         selectAllHosts() {
-            // 勾了「删除未知家庭成员」时，满员 host 也可选（reconcile 后可能回收空位）
-            const pool = this.form.removeUnknown
-                ? this.hostsList
-                : this.hostsList.filter(h => h.slot_free > 0);
-            this.form.selectedHosts = pool.map(h => h.email);
+            this.form.selectedHosts = this.hostsList
+                .filter(h => !this.isHostBlocked(h))
+                .map(h => h.email);
+        },
+        onToggleStage1(e) {
+            // Only act on unchecked→checked. x-model has already written form.stages1 at this point, so isHostBlocked sees the new value.
+            if (!e.target.checked) return;
+            const conflicts = this.hostsList
+                .filter(h => this.isHostBlocked(h) && this.form.selectedHosts.includes(h.email))
+                .map(h => h.email);
+            if (conflicts.length === 0) return;
+            const ok = confirm(
+                `已选中 ${conflicts.length} 个已满母号：\n${conflicts.join('\n')}\n\n` +
+                `它们无法接收新邀请。确认后将自动从已选列表中移除这些母号。\n\n继续？`
+            );
+            if (ok) {
+                const drop = new Set(conflicts);
+                this.form.selectedHosts = this.form.selectedHosts.filter(email => !drop.has(email));
+            } else {
+                this.form.stages1 = false;
+            }
         },
         async submitStart() {
             this.error = '';

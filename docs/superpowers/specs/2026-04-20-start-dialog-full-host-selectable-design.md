@@ -35,12 +35,18 @@
 
 | 位置 | 条件 |
 |---|---|
-| `<input :disabled="...">` | `form.stages1 && !form.removeUnknown && h.slot_free === 0` |
+| `<input :disabled="...">` | `isHostBlocked(h)` ≡ `form.stages1 && !form.removeUnknown && h.slot_free === 0` |
 | 外层 `<label>` 的 `opacity-50` | 同上 |
 | 「已满」红字徽标 | `form.stages1 && h.slot_free === 0 && !form.removeUnknown` |
-| 「已满（reconcile 可能回收空位）」琥珀色徽标 | `form.stages1 && h.slot_free === 0 && form.removeUnknown` |
+| 「已满（reconcile 可能回收空位）」琥珀色徽标 | `h.slot_free === 0 && form.removeUnknown`（与阶段 1 无关，信息性展示） |
 
-「空位 N/5」灰色数字**永远显示**，仅作信息。
+「空位 N/5」灰色数字**永远显示**，仅作信息。红字「已满」只在阶段 1 被勾
+且未勾 `removeUnknown` 时提示「此 host 会被阻止」。琥珀徽标在任何勾
+`removeUnknown` 的场景下都显示，提醒用户"此 host 现在满员，但 reconcile
+阶段可能回收空位"。
+
+`isHostBlocked(h)` 作为独立方法挂在 Alpine 组件上，供 HTML 与 JS 复用
+（`selectAllHosts` 用它过滤、onToggleStage1 的语义里隐含同一条件）。
 
 ### 3.2 全选按钮
 
@@ -110,6 +116,7 @@ if (!form.removeUnknown) {
 | 3 | 只勾阶段 2 → 选中已满 host → 回勾阶段 1 → 点「继续」 | 阶段 1 保持勾选，已满 host 从选中里消失 |
 | 4 | 同上最后一步点「取消」 | 阶段 1 checkbox 恢复未勾，已满 host 仍在选中里 |
 | 5 | 勾 `removeUnknown` + 阶段 1 | 已满 host 可选，显示琥珀色「已满（reconcile 可能回收空位）」（回归） |
+| 5b | 仅勾 `removeUnknown`（不勾阶段 1） | 已满 host 可选；琥珀徽标**仍显示**（信息性） |
 | 6 | 未勾阶段 1 时点「全选」 | 列表全选（含已满） |
 | 7 | 勾阶段 1 未勾 removeUnknown 时点「全选」 | 只选 `slot_free > 0` 的（回归） |
 
