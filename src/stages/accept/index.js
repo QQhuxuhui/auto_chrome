@@ -25,11 +25,18 @@ const eventsDb = require('../../db/events');
 
 const { acceptInvite } = require('./member-worker');
 const { HostMonitor, awaitHostConfirmation } = require('./host-monitor');
-const { scrapeFamilyListPage, FAMILY_URL } = require('./family-scrape-fast');
+const { FAMILY_URL } = require('./family-scrape-fast');
+const { hostScrapeFn } = require('./host-scrape');
 const { decide } = require('./decide');
 const { scrapeFamilyMembers } = require('../reconcile');
 
 const HOST_MONITOR_GRACE_MS = parseInt(process.env.HOST_MONITOR_GRACE_MS, 10) || 120_000;
+// In manual mode we trigger a fresh scrape right after the user closes their
+// browser, so we only need a short follow-up window for awaitHostConfirmation.
+const MANUAL_CONFIRM_TIMEOUT_MS = parseInt(process.env.MANUAL_CONFIRM_TIMEOUT_MS, 10) || 15_000;
+function isManualMode() {
+    return String(process.env.ACCEPT_MODE || '').toLowerCase() === 'manual';
+}
 
 async function launchHostMonitorChrome(chromePath, host) {
     const dataDir = path.resolve(__dirname, '..', '..', `chrome_data_temp_pipeline_H${host.id}`);
@@ -65,23 +72,49 @@ async function processOneMember(member, worker, hm, chromePath, wlog, runId) {
         stage: 'stage2', eventType: 'start',
     });
 
+    const manual = isManualMode();
+
     let flowResult = null, flowError = null;
     try {
         const alive = await isChromeAlive(worker);
         if (!alive) await restartChrome(chromePath, worker);
-        const hardTimeoutMs = parseInt(process.env.ACCEPT_HARD_TIMEOUT_MS, 10)
-            || (parseInt(process.env.INVITE_WAIT_TIMEOUT, 10) || 300) * 1000 + 300_000;
-        flowResult = await Promise.race([
-            acceptInvite(memberAccount, worker.browser, worker.id),
-            new Promise((_, rej) => setTimeout(() => rej(new Error(`hard_timeout ${hardTimeoutMs}ms`)), hardTimeoutMs)),
-        ]);
+        if (manual) {
+            // Manual mode: user paces the flow, no outer hard timeout. The
+            // browser disconnect they produce is the done-signal inside acceptInvite.
+            flowResult = await acceptInvite(memberAccount, worker.browser, worker.id);
+        } else {
+            const hardTimeoutMs = parseInt(process.env.ACCEPT_HARD_TIMEOUT_MS, 10)
+                || (parseInt(process.env.INVITE_WAIT_TIMEOUT, 10) || 300) * 1000 + 300_000;
+            flowResult = await Promise.race([
+                acceptInvite(memberAccount, worker.browser, worker.id),
+                new Promise((_, rej) => setTimeout(() => rej(new Error(`hard_timeout ${hardTimeoutMs}ms`)), hardTimeoutMs)),
+            ]);
+        }
     } catch (e) {
         flowError = e;
     }
 
-    const hostStatus = await awaitHostConfirmation(hm, member.email.toLowerCase(), {
-        timeoutMs: HOST_MONITOR_GRACE_MS,
-    });
+    // Host confirmation branches:
+    //   1. manual + host monitor alive → trigger an immediate scrape, then
+    //      awaitHostConfirmation with a short window.
+    //   2. manual + no monitor (runHostWithoutMonitor fallback, hm.degraded=true)
+    //      → skip awaitHostConfirmation (would instantly return 'degraded' and
+    //      wrongly mark a successful manual click as accept_failed). Trust the
+    //      flowResult instead; decide() has a 'manual_no_monitor' branch.
+    //   3. auto mode → unchanged.
+    let hostStatus;
+    if (manual && hm && hm.degraded) {
+        wlog.warn(`  [manual] no host monitor for ${member.email}; trusting browser-close signal`);
+        hostStatus = 'manual_no_monitor';
+    } else {
+        if (manual && hm && typeof hm.triggerScrape === 'function' && !hm.degraded) {
+            wlog.info(`  [manual] forcing host-monitor scrape for ${member.email}`);
+            await hm.triggerScrape();
+        }
+        hostStatus = await awaitHostConfirmation(hm, member.email.toLowerCase(), {
+            timeoutMs: manual ? MANUAL_CONFIRM_TIMEOUT_MS : HOST_MONITOR_GRACE_MS,
+        });
+    }
 
     const dec = decide({ flowResult, flowError, hostStatus });
 
@@ -172,7 +205,7 @@ async function processOneHost({ host, members, concurrency, runId, chromePath })
                 const cal = await initialFamilyMap(page, wlog);
                 Object.assign(hm.state, cal);
             },
-            scrapeFn: async (page) => scrapeFamilyListPage(page, wlog),
+            scrapeFn: async (page) => hostScrapeFn(page, wlog),
             wlog,
             initialFamilyMap: {},
         });

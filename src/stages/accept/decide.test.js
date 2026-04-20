@@ -48,7 +48,7 @@ test('flow falsy + host not joined → accept_failed/fail', () => {
 
 test('rejects invalid hostStatus (case-sensitive, typo)', () => {
     const { decide, VALID_HOST_STATUSES } = require('./decide');
-    assert.ok(VALID_HOST_STATUSES.length === 5);
+    assert.ok(VALID_HOST_STATUSES.length === 6);
     for (const bad of ['Joined', 'JOINED', 'ok', '', null, undefined]) {
         assert.throws(
             () => decide({ flowResult: true, flowError: null, hostStatus: bad }),
@@ -56,4 +56,27 @@ test('rejects invalid hostStatus (case-sensitive, typo)', () => {
             `expected throw for hostStatus=${JSON.stringify(bad)}`,
         );
     }
+});
+
+// ─── manual_no_monitor: trust the user's browser-close signal when no monitor ───
+
+test('flow truthy + manual_no_monitor → done/success (user manually confirmed)', () => {
+    const d = decide({ flowResult: true, flowError: null, hostStatus: 'manual_no_monitor' });
+    assert.equal(d.finalStatus, 'done');
+    assert.equal(d.eventType, 'success');
+    assert.match(d.message, /manual.*no.*monitor/i);
+});
+
+test('flow threw + manual_no_monitor → accept_failed/fail (user bailed mid-flow)', () => {
+    const err = new Error('browser closed early');
+    const d = decide({ flowResult: null, flowError: err, hostStatus: 'manual_no_monitor' });
+    assert.equal(d.finalStatus, 'accept_failed');
+    assert.equal(d.eventType, 'fail');
+    assert.equal(d.message, 'browser closed early');
+});
+
+test('flow falsy + manual_no_monitor → accept_failed/fail', () => {
+    const d = decide({ flowResult: false, flowError: null, hostStatus: 'manual_no_monitor' });
+    assert.equal(d.finalStatus, 'accept_failed');
+    assert.equal(d.eventType, 'fail');
 });

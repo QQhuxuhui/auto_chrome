@@ -39,6 +39,7 @@ class HostMonitor extends EventEmitter {
         this.stopped = false;
         this._consecutiveFails = 0;
         this._timer = null;
+        this._scrapeInFlight = null;
     }
 
     async start() {
@@ -59,25 +60,38 @@ class HostMonitor extends EventEmitter {
 
     _scheduleNext() {
         if (this.stopped || this.degraded) return;
+        // Idempotent: replace any existing pending timer rather than leaking one.
+        if (this._timer) clearTimeout(this._timer);
         this._timer = setTimeout(() => {
+            this._timer = null;
             this._scrapeOnce().catch(() => {}).finally(() => this._scheduleNext());
         }, this.intervalMs);
     }
 
     async _scrapeOnce() {
-        try {
-            const result = await this.scrapeFn(this.page, this.wlog);
-            this._consecutiveFails = 0;
-            this._applyScrape(result);
-            this.emit('scrape-done', result);
-        } catch (e) {
-            this._consecutiveFails++;
-            this.wlog.warn(`HostMonitor ${this.host.email}: scrape #${this._consecutiveFails} failed: ${e.message}`);
-            if (this._consecutiveFails >= this.maxScrapeFails) {
-                this._setDegraded();
+        // Mutex: real Puppeteer pages can't serve two concurrent scrapes safely
+        // (page.goto / page.evaluate would race). If a scrape is already running,
+        // hand the in-flight promise back so callers observe the same result.
+        if (this._scrapeInFlight) return this._scrapeInFlight;
+        this._scrapeInFlight = (async () => {
+            try {
+                const result = await this.scrapeFn(this.page, this.wlog);
+                this._consecutiveFails = 0;
+                this._applyScrape(result);
+                this.emit('scrape-done', result);
+                return result;
+            } catch (e) {
+                this._consecutiveFails++;
+                this.wlog.warn(`HostMonitor ${this.host.email}: scrape #${this._consecutiveFails} failed: ${e.message}`);
+                if (this._consecutiveFails >= this.maxScrapeFails) {
+                    this._setDegraded();
+                }
+                throw e;
+            } finally {
+                this._scrapeInFlight = null;
             }
-            throw e;
-        }
+        })();
+        return this._scrapeInFlight;
     }
 
     _applyScrape({ pending, joinedHrefs }) {
@@ -116,6 +130,30 @@ class HostMonitor extends EventEmitter {
     async stop() {
         this.stopped = true;
         if (this._timer) { clearTimeout(this._timer); this._timer = null; }
+    }
+
+    /**
+     * Force a fresh scrape right now — cancels the pending scheduled scrape,
+     * runs scrape immediately (emitting scrape-done on success), then reschedules
+     * the next tick. No-op on stopped/degraded monitors.
+     *
+     * Used by manual-accept flow so subscribers (awaitHostConfirmation) can see
+     * the post-manual-click state without waiting the full poll interval.
+     */
+    async triggerScrape() {
+        if (this.stopped || this.degraded) return;
+        if (this._scrapeInFlight) {
+            // A scrape is already running (from either the periodic timer or a
+            // concurrent triggerScrape). Its result will reflect current state,
+            // and its owning path will reschedule — just ride along.
+            await this._scrapeInFlight.catch(() => { });
+            return;
+        }
+        if (this._timer) { clearTimeout(this._timer); this._timer = null; }
+        try {
+            await this._scrapeOnce();
+        } catch (_) { /* already counted/logged by _scrapeOnce */ }
+        this._scheduleNext();
     }
 }
 

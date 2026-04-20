@@ -137,6 +137,101 @@ test('awaitHostConfirmation returns timeout when host never flips', async () => 
     assert.equal(status, 'pending');
 });
 
+test('triggerScrape forces a scrape immediately without waiting for interval', async () => {
+    const deps = mkFakeDeps();
+    const hm = new HostMonitor({
+        host: { id: 1, email: 'h@x.com' },
+        fakeBrowser: {}, fakePage: {},
+        loginFn: deps.loginFn, scrapeFn: deps.scrapeFn,
+        intervalMs: 60_000,  // way longer than test will take
+        initialFamilyMap: {},
+    });
+    await hm.start();
+    const before = deps.scrapeCalls;  // typically 1 from start()
+    await hm.triggerScrape();
+    const after = deps.scrapeCalls;
+    await hm.stop();
+    assert.equal(after, before + 1, `expected +1 scrape from triggerScrape, got ${after - before}`);
+});
+
+test('triggerScrape cancels scheduled timer so there is no overlap', async () => {
+    const deps = mkFakeDeps();
+    const hm = new HostMonitor({
+        host: { id: 1, email: 'h@x.com' },
+        fakeBrowser: {}, fakePage: {},
+        loginFn: deps.loginFn, scrapeFn: deps.scrapeFn,
+        intervalMs: 30,
+        initialFamilyMap: {},
+    });
+    await hm.start();
+    // start() → initial scrape (1) + schedules next. Immediately triggerScrape (2).
+    // The original scheduled one should have been cancelled, so next fires ≥30ms after trigger.
+    await hm.triggerScrape();
+    const afterTrigger = deps.scrapeCalls;
+    // Wait shorter than interval — no additional scrapes from overlap.
+    await new Promise(r => setTimeout(r, 10));
+    await hm.stop();
+    assert.equal(deps.scrapeCalls, afterTrigger,
+        `no extra scrape within 10ms of triggerScrape; got ${deps.scrapeCalls - afterTrigger}`);
+});
+
+test('triggerScrape awaits an already in-flight scrape instead of starting a parallel one', async () => {
+    // Model real Puppeteer: two concurrent scrapes on the same page produce races.
+    let inFlight = 0, maxInFlight = 0, scrapeCalls = 0;
+    let unblock = null;
+    const blockingScrape = async () => {
+        scrapeCalls++;
+        inFlight++;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        await new Promise(r => { unblock = r; });
+        inFlight--;
+        return { pending: [], joinedHrefs: [], scrapedAt: Date.now() };
+    };
+    const hm = new HostMonitor({
+        host: { id: 1, email: 'h@x.com' },
+        fakeBrowser: {}, fakePage: {},
+        loginFn: async () => {},
+        scrapeFn: blockingScrape,
+        intervalMs: 60_000,
+        initialFamilyMap: {},
+    });
+    // start() kicks off scrape #1, which is still blocked because we haven't called unblock().
+    const startP = hm.start();
+    await new Promise(r => setTimeout(r, 10));
+    assert.equal(inFlight, 1, 'start()ed scrape should be mid-flight');
+
+    // triggerScrape while another is in-flight should not spawn a second.
+    const trigP = hm.triggerScrape();
+    await new Promise(r => setTimeout(r, 10));
+    assert.equal(maxInFlight, 1, `expected maxInFlight=1, got ${maxInFlight}`);
+
+    // Release the single in-flight scrape, both awaits resolve from the same promise.
+    unblock();
+    await Promise.all([startP, trigP]);
+    await hm.stop();
+    // scrapeCalls could be 1 (perfect reuse) or 2 (trigger ran after first resolved).
+    // Either is acceptable — the important invariant is no overlap.
+});
+
+test('triggerScrape is a no-op on degraded monitor', async () => {
+    const hm = new HostMonitor({
+        host: { id: 1, email: 'h@x.com' },
+        fakeBrowser: {}, fakePage: {},
+        loginFn: async () => { throw new Error('boom'); },
+        scrapeFn: async () => ({ pending: [], joinedHrefs: [], scrapedAt: Date.now() }),
+        intervalMs: 1000,
+        initialFamilyMap: {},
+    });
+    await hm.start();  // login throws → degraded
+    assert.equal(hm.degraded, true);
+    let scrapes = 0;
+    const origScrapeFn = hm.scrapeFn;
+    hm.scrapeFn = async (p) => { scrapes++; return origScrapeFn(p); };
+    await hm.triggerScrape();
+    assert.equal(scrapes, 0);
+    await hm.stop();
+});
+
 test('awaitHostConfirmation returns degraded immediately when monitor is degraded', async () => {
     const { awaitHostConfirmation } = require('./host-monitor');
     const hm = new HostMonitor({

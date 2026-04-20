@@ -25,6 +25,13 @@ const { isInviteRow } = require('../../stages/stage2-matcher');
 const INVITE_WAIT_TIMEOUT = parseInt(process.env.INVITE_WAIT_TIMEOUT, 10) || 600;
 const INVITE_POLL_INTERVAL = parseInt(process.env.INVITE_POLL_INTERVAL, 10) || 30;
 
+// Manual mode: after Gmail loads, hand off to the user to click the invite
+// link themselves. The browser being closed is the done-signal. The orchestrator
+// then triggers a host-monitor scrape to confirm joined status.
+function isManualMode() {
+    return String(process.env.ACCEPT_MODE || '').toLowerCase() === 'manual';
+}
+
 // 追加 ?hl=en 强制 Gmail UI 为英文（tabs、按钮等），
 // 但邮件正文仍是发送方原语言
 const GMAIL_URL = 'https://mail.google.com/mail/u/0/?hl=en';
@@ -207,6 +214,21 @@ async function acceptInvite(memberAccount, browser, workerId) {
             if (primaryLink) primaryLink.click();
         }).catch(() => { });
         await sleep(1000);
+
+        // Manual mode: stop here. Let the user click the invite link themselves;
+        // treat browser close as the done signal. Orchestrator will trigger a
+        // host-monitor scrape after this returns to confirm the joined state.
+        if (isManualMode()) {
+            wlog.info(`  [manual] Gmail ready for ${memberAccount.email}.`);
+            wlog.info(`  [manual] 请在浏览器里点击邀请邮件的接受链接并完成确认；全部完成后关闭浏览器窗口。`);
+            await new Promise((resolve) => {
+                const done = () => { browser.off('disconnected', done); resolve(); };
+                browser.once('disconnected', done);
+            });
+            wlog.success(`  [manual] browser closed — ${memberAccount.email} handed back to host-monitor for verification`);
+            timer.step('Manual close');
+            return true;
+        }
 
         // 2. 搜索邀请邮件（轮询）
         // 使用多语言关键词 + URL pattern 双重匹配：URL pattern "family/join" 对所有
@@ -869,7 +891,9 @@ async function acceptInvite(memberAccount, browser, workerId) {
 
     } finally {
         await page.close().catch(() => { });
-        await clearBrowserSession(browser, wlog);
+        // Manual mode: browser is already disconnected (user closed it). Any
+        // CDP call will throw — swallow so we don't mask the real outcome.
+        await clearBrowserSession(browser, wlog).catch(() => { });
     }
 }
 

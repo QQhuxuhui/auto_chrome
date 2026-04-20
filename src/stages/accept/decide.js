@@ -13,13 +13,18 @@
  *   - flow truthy → accept_failed/accept_failed_unconfirmed (warn)
  *   - flow falsy  → accept_failed/fail
  */
-const VALID_HOST_STATUSES = ['joined', 'pending', 'unknown', 'timeout', 'degraded'];
+// 'manual_no_monitor': manual-accept flow ran without a working HostMonitor.
+// We have no host-side verification, so we trust the user's browser-close
+// gesture (flowResult=true) as the done-signal. This avoids recording a
+// successful manual click as a failure just because monitor startup broke.
+const VALID_HOST_STATUSES = ['joined', 'pending', 'unknown', 'timeout', 'degraded', 'manual_no_monitor'];
 
 function decide({ flowResult, flowError, hostStatus }) {
     if (!VALID_HOST_STATUSES.includes(hostStatus)) {
         throw new TypeError(`decide: invalid hostStatus '${hostStatus}', expected one of ${VALID_HOST_STATUSES.join(', ')}`);
     }
     const joined = hostStatus === 'joined';
+    const manualNoMonitor = hostStatus === 'manual_no_monitor';
 
     if (flowError) {
         if (joined) {
@@ -39,6 +44,13 @@ function decide({ flowResult, flowError, hostStatus }) {
     if (flowResult) {
         if (joined) {
             return { finalStatus: 'done', eventType: 'success', message: null };
+        }
+        if (manualNoMonitor) {
+            return {
+                finalStatus: 'done',
+                eventType: 'success',
+                message: 'manual flow, no host monitor — trusting user browser-close signal',
+            };
         }
         return {
             finalStatus: 'accept_failed',

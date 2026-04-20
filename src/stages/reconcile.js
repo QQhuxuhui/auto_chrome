@@ -100,15 +100,19 @@ async function scrapeFamilyMembers(page, wlog) {
             wlog && wlog.warn && wlog.warn(`scrape: failed to click anchor for ${info.href}`);
             continue;
         }
-        const email = await extractDetailEmail(page);
+        // 新版 UI 列表页对 pending / joined 都只显示姓名，必须在详情页用按钮信号判定。
+        const { email, isPending } = await extractDetailInfo(page, wlog);
         if (email) {
+            // isPending null（不可判）时保守视作 pending —— 宁可让 stage2 多跑一次，
+            // 也不能把未接受的邀请误翻成 joined（那会导致 stage3 对没成员的账号做 OAuth）。
+            const pending = isPending === false ? false : true;
             results.push({
                 email,
                 href: info.href,
                 name: info.text || null,
-                isPending: false,
+                isPending: pending,
             });
-            wlog && wlog.info && wlog.info(`scrape: joined ${email} (${info.text})`);
+            wlog && wlog.info && wlog.info(`scrape: ${pending ? 'pending' : 'joined'} ${email} (${info.text})`);
         } else {
             wlog && wlog.warn && wlog.warn(`scrape: could not parse email on detail ${info.href}`);
         }
@@ -120,31 +124,67 @@ async function scrapeFamilyMembers(page, wlog) {
     return results;
 }
 
-async function reconcileAgainstDB(hostRecord, googleEmails, runId) {
+/**
+ * Pure decision function: given local members and Google-side emails (split
+ * into joined vs still-pending buckets), compute the list of status transitions.
+ *
+ * Rules:
+ *   - invite_pending → joined  iff email appears as a JOINED member on Google
+ *     (pending-invitation visibility is not enough — the invite has been sent
+ *     but not yet accepted, so flipping to joined is wrong)
+ *   - joined/done → removed_from_family iff email is NOT on Google at all
+ *     (neither joined nor pending). If it resurfaces as a pending invite,
+ *     leave it alone so stage 2 has a chance.
+ *
+ * `googleLists` back-compat: a plain array is treated as joinedEmails.
+ *
+ * `opts.partialScrape=true`: caller observed Chrome crash, anchor-click
+ * failure, or any other signal that the scan did NOT see every family
+ * member. In that case we can't safely infer "not in family" and therefore
+ * skip the removal branch entirely. Additive changes (invite_pending →
+ * joined) are still safe because they're based on emails we actually saw.
+ */
+function computeReconcileChanges(localMembers, googleLists, opts) {
+    const lists = Array.isArray(googleLists)
+        ? { joinedEmails: googleLists, pendingEmails: [] }
+        : (googleLists || { joinedEmails: [], pendingEmails: [] });
+    const partialScrape = !!(opts && opts.partialScrape);
+    const joinedSet = new Set((lists.joinedEmails || []).map(e => String(e).toLowerCase()));
+    const pendingSet = new Set((lists.pendingEmails || []).map(e => String(e).toLowerCase()));
+
     const changes = [];
-    const all = await membersDb.listMembers({ hostId: hostRecord.id, pageSize: 10000 });
-    const googleSet = new Set(googleEmails.map(e => e.toLowerCase()));
-
-    for (const m of all) {
+    for (const m of localMembers || []) {
         const emailLower = (m.email || '').toLowerCase();
-        const inFamily = googleSet.has(emailLower);
+        const isJoined = joinedSet.has(emailLower);
+        const inFamily = isJoined || pendingSet.has(emailLower);
 
-        if (inFamily && m.status === 'invite_pending') {
-            await membersDb.transitionToJoined(m.id);
+        if (isJoined && m.status === 'invite_pending') {
+            changes.push({ id: m.id, from: 'invite_pending', to: 'joined' });
+        } else if (!partialScrape && !inFamily && (m.status === 'joined' || m.status === 'done')) {
+            changes.push({ id: m.id, from: m.status, to: 'removed_from_family' });
+        }
+    }
+    return changes;
+}
+
+async function reconcileAgainstDB(hostRecord, googleLists, runId, opts) {
+    const all = await membersDb.listMembers({ hostId: hostRecord.id, pageSize: 10000 });
+    const changes = computeReconcileChanges(all, googleLists, opts);
+    for (const c of changes) {
+        if (c.to === 'joined') {
+            await membersDb.transitionToJoined(c.id);
             await eventsDb.logEvent({
-                memberId: m.id, hostId: hostRecord.id, runId,
+                memberId: c.id, hostId: hostRecord.id, runId,
                 stage: 'reconcile', eventType: 'note',
                 message: 'invite_pending → joined via family page',
             });
-            changes.push({ id: m.id, from: 'invite_pending', to: 'joined' });
-        } else if (!inFamily && (m.status === 'joined' || m.status === 'done')) {
-            await membersDb.markRemovedFromFamily(m.id);
+        } else if (c.to === 'removed_from_family') {
+            await membersDb.markRemovedFromFamily(c.id);
             await eventsDb.logEvent({
-                memberId: m.id, hostId: hostRecord.id, runId,
+                memberId: c.id, hostId: hostRecord.id, runId,
                 stage: 'reconcile', eventType: 'note',
-                message: `${m.status} → removed_from_family (not in google family)`,
+                message: `${c.from} → removed_from_family (not in google family)`,
             });
-            changes.push({ id: m.id, from: m.status, to: 'removed_from_family' });
         }
     }
     return { changes };
@@ -594,9 +634,20 @@ async function clickFamilyAnchorByHref(page, href, wlog) {
 }
 
 /**
- * 抓取当前 detail 页面上显示的成员 email（带 data-email 属性或 text node）。
+ * 抓取当前 detail 页面上的成员 email + 判断是 pending 邀请还是 joined 成员。
+ *
+ * Google 新版 family UI 的列表页 pending 和 joined 都渲染成"姓名 + Member"样式，
+ * 列表页的锚点 innerText 通常不含 email，href 也都是 /family/member/g/... —— 无法
+ * 从列表区分二者。唯一可靠信号在详情页：
+ *   pending: "Cancel invitation" / "Revoke invitation" 按钮；body 常见 "Invitation sent"
+ *   joined:  "Remove member" / "Family member details" 按钮/标题
+ *
+ * 返回 { email, isPending }：
+ *   isPending: true  — 检测到 pending 按钮或文案
+ *   isPending: false — 检测到 joined 按钮或文案
+ *   isPending: null  — 无法判定（调用方应保守处理，避免误翻 DB）
  */
-async function extractDetailEmail(page, wlog) {
+async function extractDetailInfo(page, wlog) {
     const result = await page.evaluate((emailPattern) => {
         const re = new RegExp(emailPattern, 'g');
         const main = document.querySelector('main, [role="main"]');
@@ -609,37 +660,64 @@ async function extractDetailEmail(page, wlog) {
         while ((m = re.exec(mainText)) !== null) mainMatches.push(m[1].toLowerCase());
         re.lastIndex = 0;
         while ((m = re.exec(bodyText)) !== null) bodyMatches.push(m[1].toLowerCase());
+
+        const pendingBtnRe = /cancel\s*invit|revoke\s*invit|withdraw\s*invit|取消邀请|撤销邀请|招待を取り消す/i;
+        const joinedBtnRe  = /remove\s*member|remove.*from.*family|family\s*member\s*details|移除成员|从家庭.*移除|移出家庭/i;
+        const pendingTextRe = /invitation\s*sent|invite\s*sent|awaiting\s*accept|邀请已发送|等待.*接受|招待.*送信/i;
+
+        let sawPendingBtn = false, sawJoinedBtn = false;
+        for (const el of document.querySelectorAll('button, a, [role="button"], [role="menuitem"], h1, h2')) {
+            const t = ((el.textContent || '') + ' ' + (el.getAttribute('aria-label') || '')).trim();
+            if (!t) continue;
+            if (pendingBtnRe.test(t)) sawPendingBtn = true;
+            if (joinedBtnRe.test(t))  sawJoinedBtn = true;
+        }
+        const sawPendingText = pendingTextRe.test(bodyText);
+
         return {
             mainText: mainText.substring(0, 500),
             bodyText: bodyText.substring(0, 500),
-            mainMatches,
-            bodyMatches,
-            mainFound: !!main,
+            mainMatches, bodyMatches, mainFound: !!main,
+            sawPendingBtn, sawJoinedBtn, sawPendingText,
         };
     }, EMAIL_RE.source).catch((e) => ({ error: e.message }));
 
     if (result && result.error) {
-        wlog && wlog.warn && wlog.warn(`extractDetailEmail evaluate error: ${result.error}`);
-        return null;
+        wlog && wlog.warn && wlog.warn(`extractDetailInfo evaluate error: ${result.error}`);
+        return { email: null, isPending: null };
     }
 
-    // 优先 main，否则 body
-    const first = (result.mainMatches && result.mainMatches[0])
+    const email = (result.mainMatches && result.mainMatches[0])
         || (result.bodyMatches && result.bodyMatches[0])
         || null;
 
-    if (!first) {
+    // 按钮信号优先；都没有时 fallback 到 body 文案；还不行就判不了。
+    let isPending = null;
+    if (result.sawPendingBtn && !result.sawJoinedBtn) isPending = true;
+    else if (result.sawJoinedBtn && !result.sawPendingBtn) isPending = false;
+    else if (result.sawPendingText) isPending = true;
+
+    if (!email) {
         wlog && wlog.warn && wlog.warn(
-            `extractDetailEmail: no email in page. ` +
+            `extractDetailInfo: no email in page. ` +
             `main=${result.mainFound ? 'yes' : 'missing'} ` +
-            `mainTextLen=${(result.mainText || '').length} ` +
-            `bodyTextLen=${(result.bodyText || '').length} ` +
             `mainMatches=${JSON.stringify(result.mainMatches || [])} ` +
             `bodyMatches=${JSON.stringify(result.bodyMatches || [])} ` +
             `bodyHead="${(result.bodyText || '').substring(0, 200).replace(/\n/g, ' | ')}"`
         );
+    } else if (isPending === null) {
+        wlog && wlog.warn && wlog.warn(
+            `extractDetailInfo: could not classify ${email} ` +
+            `(pendingBtn=${result.sawPendingBtn} joinedBtn=${result.sawJoinedBtn} pendingText=${result.sawPendingText})`
+        );
     }
-    return first;
+    return { email, isPending };
+}
+
+// Backward-compatible wrapper — returns just email.
+async function extractDetailEmail(page, wlog) {
+    const info = await extractDetailInfo(page, wlog);
+    return info.email;
 }
 
 /**
@@ -804,7 +882,14 @@ async function reconcileHost(hostRecord, browser, runId, wlog, options = {}) {
         };
 
         // ========== 2. 列表页枚举所有 anchor ==========
-        await page.goto(FAMILY_URL, { waitUntil: 'networkidle2', timeout: 30000 }).catch(() => { });
+        // Treat any failure here (navigation error, evaluate exception) as a
+        // partial scrape — we would otherwise get an empty anchorInfo and
+        // wrongly infer "nobody is in the family".
+        let partialScrape = false;
+        const listNavOk = await page.goto(FAMILY_URL, { waitUntil: 'networkidle2', timeout: 30000 })
+            .then(() => true)
+            .catch((e) => { wlog && wlog.warn && wlog.warn(`reconcile: family page nav failed: ${e.message}`); return false; });
+        if (!listNavOk) partialScrape = true;
         await sleep(2000);
 
         const anchorInfo = await page.evaluate(() => {
@@ -828,30 +913,43 @@ async function reconcileHost(hostRecord, browser, runId, wlog, options = {}) {
                 });
             }
             return out;
-        }).catch(() => []);
+        }).catch((e) => { wlog && wlog.warn && wlog.warn(`reconcile: anchor evaluate failed: ${e.message}`); return null; });
+        if (anchorInfo === null) partialScrape = true;
+        const anchors = anchorInfo || [];
 
-        wlog && wlog.info && wlog.info(`reconcile: ${anchorInfo.length} family anchor(s) on list page`);
+        wlog && wlog.info && wlog.info(`reconcile: ${anchors.length} family anchor(s) on list page`);
 
         // ========== 3. 一次性遍历：visit detail → 决策 → 当场移除 ==========
-        const seenEmails = [];  // 用于末尾 reconcileAgainstDB
+        // href 区分 /family/member/ (joined) vs /family/invitation/ (pending invite)
+        // —— reconcileAgainstDB 只凭 joinedEmails 触发 invite_pending → joined，
+        // 否则未接受的邀请会被误判为已加入，导致 stage2 直接跳过。
+        const seenJoinedEmails = [];
+        const seenPendingEmails = [];
         const removedCount = { disabled: 0, unknown: 0, failed: 0 };
 
-        for (const info of anchorInfo) {
+        for (const info of anchors) {
             let email = info.listPageEmail;
+            // 列表页能直接看到 email —— Google 老 UI 专属 pending invite 样式。
+            let detailIsPending = email ? true : null;
             let onDetailPage = false;
 
             if (!email) {
-                // joined member: 用 click 进详情页拿邮箱（不用 goto — 带自然 referrer）
+                // 新 UI：pending 和 joined 列表都只显示姓名，必须进详情页按按钮区分。
                 if (!/\/family\/details/.test(page.url())) {
                     await page.goto(FAMILY_URL, { waitUntil: 'networkidle2', timeout: 20000 }).catch(() => { });
                     await sleep(2000);
                 }
                 const clicked = await clickFamilyAnchorByHref(page, info.href, wlog);
                 if (!clicked) {
+                    // 典型场景：Chrome 崩溃/断开后每个 anchor 都会命中这里。
+                    // 标记 partialScrape 让下游跳过 "not in family → removed"。
+                    partialScrape = true;
                     wlog && wlog.warn && wlog.warn(`reconcile: click navigation failed for ${info.href}, skipping`);
                     continue;
                 }
-                email = await extractDetailEmail(page);
+                const info2 = await extractDetailInfo(page, wlog);
+                email = info2.email;
+                detailIsPending = info2.isPending;
                 onDetailPage = true;
                 if (!email) {
                     wlog && wlog.warn && wlog.warn(`reconcile: on ${page.url().substring(0,80)} but no email extractable`);
@@ -859,6 +957,8 @@ async function reconcileHost(hostRecord, browser, runId, wlog, options = {}) {
             }
 
             if (!email) {
+                // 详情页打开了但 email 抽不出来：也是扫描不完整的信号，后面不能据此判定谁"被移出"。
+                partialScrape = true;
                 wlog && wlog.warn && wlog.warn(`reconcile: could not extract email for ${info.href} (text="${info.text}")`);
                 if (onDetailPage) {
                     await page.goto(FAMILY_URL, { waitUntil: 'networkidle2', timeout: 20000 }).catch(() => { });
@@ -867,7 +967,13 @@ async function reconcileHost(hostRecord, browser, runId, wlog, options = {}) {
                 continue;
             }
 
-            seenEmails.push(email);
+            // 判不出时保守归到 pending —— 宁可让 stage2 重跑，也不要把待接受邀请误翻成 joined。
+            const treatAsPending = detailIsPending === false ? false : true;
+            if (treatAsPending) {
+                seenPendingEmails.push(email);
+            } else {
+                seenJoinedEmails.push(email);
+            }
 
             const emailLower = email.toLowerCase();
             const disabledLocal = disabledByEmail.get(emailLower);
@@ -953,14 +1059,22 @@ async function reconcileHost(hostRecord, browser, runId, wlog, options = {}) {
             }
         }
 
-        wlog && wlog.info && wlog.info(`reconcile: host ${hostRecord.email} — saw ${seenEmails.length} member(s): [${seenEmails.join(', ')}], removed disabled=${removedCount.disabled} unknown=${removedCount.unknown} failed=${removedCount.failed}`);
+        wlog && wlog.info && wlog.info(`reconcile: host ${hostRecord.email} — saw joined=${seenJoinedEmails.length} [${seenJoinedEmails.join(', ')}] pending=${seenPendingEmails.length} [${seenPendingEmails.join(', ')}], removed disabled=${removedCount.disabled} unknown=${removedCount.unknown} failed=${removedCount.failed}${partialScrape ? ' (PARTIAL — skipping removals)' : ''}`);
 
-        // 4. 对本地 DB 做最终 reconcile（本地有但 Google 没有的 joined/done → removed_from_family）
-        return reconcileAgainstDB(hostRecord, seenEmails, runId);
+        // 4. 对本地 DB 做最终 reconcile（只有真·joined 才翻 invite_pending → joined；
+        //    pending 邀请让 stage2 继续处理）
+        // partialScrape=true 时跳过 "not in family → removed_from_family" 分支：
+        // 我们没扫完就无法安全断言某人真的不在家庭里。
+        return reconcileAgainstDB(
+            hostRecord,
+            { joinedEmails: seenJoinedEmails, pendingEmails: seenPendingEmails },
+            runId,
+            { partialScrape },
+        );
     } finally {
         await page.close().catch(() => { });
         await clearBrowserSession(browser, wlog);
     }
 }
 
-module.exports = { scrapeFamilyMembers, reconcileAgainstDB, reconcileHost, computeUnknownEmails, FAMILY_URL };
+module.exports = { scrapeFamilyMembers, reconcileAgainstDB, reconcileHost, computeUnknownEmails, computeReconcileChanges, FAMILY_URL };
