@@ -130,12 +130,6 @@ const CLI_OPTS = {
 
 const HARD_TIMEOUT_MS = parseInt(process.env.STAGE3_HARD_TIMEOUT_MS, 10) || 360000;
 
-function shouldForceReauth(memberEmail, opts) {
-    if (opts.reauthAll) return true;
-    const target = String(memberEmail).toLowerCase();
-    return (opts.reauthList || []).some(e => String(e).toLowerCase() === target);
-}
-
 // ============ OAuth 回调服务器 ============
 
 function buildAuthUrl(port) {
@@ -369,13 +363,9 @@ async function processMember({ member, host, browser, workerId, opts }) {
     const name = accountName(host.email, member.email);
     wlog.info(`>> processMember name=${name} email=${member.email}`);
 
-    // 跳过已存在且 verified 的（除非 force reauth）
-    const existing = findCredentialByName(name);
-    const forceReauth = shouldForceReauth(member.email, opts);
-    if (existing && existing.verified_at && !forceReauth) {
-        wlog.success(`  [skip] already verified (verified_at=${existing.verified_at})`);
-        return { status: 'skipped' };
-    }
+    // 总是重新走完整 OAuth：即便缓存里已有 verified 凭证也要重新认证，换新 refresh_token。
+    // (历史上这里有 `[skip] already verified` 捷径 + --reauth-all / --reauth= 反向开关；
+    //  已移除，默认行为=总是重跑。)
 
     await clearBrowserSession(browser, wlog);
     const page = await newPage(browser);
@@ -496,7 +486,7 @@ async function runStage3({ runId, concurrency = 1, hostIds } = {}) {
     if (!chromePath) throw new Error('Chrome not found');
 
     const work = await membersDb.listMembersForStage(3, { hostIds });
-    log(`Stage3: ${work.length} pending oauth`);
+    log(`Stage3: ${work.length} pending oauth (eligible statuses: joined, oauth_failed)`);
     if (!work.length) return { ok: 0, ng: 0 };
 
     const workers = _workers3 = [];
