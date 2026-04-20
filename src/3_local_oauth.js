@@ -24,14 +24,16 @@ const path = require('path');
 const { randomUUID } = require('crypto');
 
 // Node 内置 fetch (undici) 默认不读 HTTPS_PROXY 环境变量。
-// 若环境里配置了代理（如 WSL2 下的 127.0.0.1:10808），需要显式注入 dispatcher。
+// 用 EnvHttpProxyAgent —— 自动读取 HTTP(S)_PROXY 且尊重 NO_PROXY，
+// 避免把 localhost:9234 (Chrome debug port) 这类请求也推到代理去，
+// 导致 launchRealChrome 的端口探测 30s 超时。
 {
     const proxyUrl = process.env.HTTPS_PROXY || process.env.https_proxy
         || process.env.HTTP_PROXY || process.env.http_proxy;
     if (proxyUrl) {
-        const { setGlobalDispatcher, ProxyAgent } = require('undici');
-        setGlobalDispatcher(new ProxyAgent(proxyUrl));
-        console.log(`[proxy] Node fetch routed through ${proxyUrl}`);
+        const { setGlobalDispatcher, EnvHttpProxyAgent } = require('undici');
+        setGlobalDispatcher(new EnvHttpProxyAgent());
+        console.log(`[proxy] Node fetch via EnvHttpProxyAgent (${proxyUrl}, honors NO_PROXY)`);
     }
 }
 
