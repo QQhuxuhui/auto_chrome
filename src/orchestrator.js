@@ -4,12 +4,13 @@
  * from CLI (run_pipeline.sh).
  *
  * Flags:
- *   --run-id <N>       : pipeline_runs.id (required)
- *   --stages "1,2,3"   : comma-separated stages
- *   --hosts "a@x,b@x"  : optional host email filter
- *   --concurrency <N>  : worker count (default 1)
- *   --reconcile-only   : skip stages, run reconcile only
- *   --host-ids "1,2"   : only for --reconcile-only, restrict host IDs
+ *   --run-id <N>             : pipeline_runs.id (required)
+ *   --stages "1,2,3"         : comma-separated stages
+ *   --stages "reconcile,3"   : optional inline reconcile before selected stages
+ *   --hosts "a@x,b@x"        : optional host email filter
+ *   --concurrency <N>        : worker count (default 1)
+ *   --reconcile-only         : skip stages, run reconcile only
+ *   --host-ids "1,2"         : only for --reconcile-only, restrict host IDs
  */
 require('dotenv').config({ path: require('path').resolve(__dirname, '..', '.env') });
 const { log, createWorkerLogger } = require('./common/logger');
@@ -64,6 +65,18 @@ function parseExplicitHostSelection(flags) {
     };
 }
 
+function parseStageSelection(value) {
+    const stages = String(value || '1,2,3').split(',').map(s => s.trim()).filter(Boolean);
+    const set = new Set(stages);
+    return {
+        stages,
+        runInlineReconcile: set.has('reconcile'),
+        runStage1: set.has('1'),
+        runStage2: set.has('2'),
+        runStage3: set.has('3'),
+    };
+}
+
 async function runReconcilePhase({ runId, hostFilter, hostIds, removeUnknown }) {
     const chromePath = findChrome();
     if (!chromePath) throw new Error('Chrome not found');
@@ -106,7 +119,7 @@ async function main() {
     const runId = flags['run-id'] ? parseInt(flags['run-id'], 10) : null;
     if (!runId) { log('orchestrator: --run-id is required', 'ERROR'); process.exit(2); }
 
-    const stages = (flags.stages || '1,2,3').split(',').map(s => s.trim()).filter(Boolean);
+    const stageSelection = parseStageSelection(flags.stages);
     const concurrency = flags.concurrency ? parseInt(flags.concurrency, 10) : 1;
     const reconcileOnly = !!flags['reconcile-only'];
     const removeUnknown = !!flags['remove-unknown'];
@@ -143,17 +156,15 @@ async function main() {
                 : { runId, removeUnknown };
             stats.reconcile = await runReconcilePhase(reconcileOpts);
         } else {
-            // Stage 3 alone doesn't benefit from reconcile (it operates on
-            // already-joined members; the only side-benefit would be catching
-            // members Google removed, but that's rare and reconcile's cost —
-            // log into every host Chrome — dwarfs the win). Skip reconcile
-            // when stages are exactly ['3'].
-            const stage3Only = stages.length === 1 && stages[0] === '3';
-            if (stage3Only) {
-                log('orchestrator: stage 3 only, skipping reconcile prelude');
-            } else {
-                const reconcileOpts = explicitFilter ? { runId, hostFilter, hostIds: resolvedHostIds, removeUnknown } : { runId, removeUnknown };
+            const stage3Only = stageSelection.stages.length === 1 && stageSelection.stages[0] === '3';
+            const shouldReconcile = stageSelection.runInlineReconcile || !stage3Only;
+            if (shouldReconcile) {
+                const reconcileOpts = explicitFilter
+                    ? { runId, hostFilter, hostIds: resolvedHostIds, removeUnknown }
+                    : { runId, removeUnknown };
                 stats.reconcile = await runReconcilePhase(reconcileOpts);
+            } else {
+                log('orchestrator: stage 3 only, skipping reconcile prelude');
             }
             if (explicitFilter && resolvedHostIds.length === 0) {
                 log(`orchestrator: --hosts/--host-ids filter resolved to zero hosts; stage 2/3 will have zero work`, 'WARN');
@@ -162,9 +173,9 @@ async function main() {
                 ? { runId, concurrency, hostIds: resolvedHostIds }
                 : { runId, concurrency };
 
-            if (stages.includes('1')) stats.stage1 = await runStage1({ runId, hostFilter, concurrency });
-            if (stages.includes('2')) stats.stage2 = await runStage2(stage23Opts);
-            if (stages.includes('3')) stats.stage3 = await runStage3(stage23Opts);
+            if (stageSelection.runStage1) stats.stage1 = await runStage1({ runId, hostFilter, concurrency });
+            if (stageSelection.runStage2) stats.stage2 = await runStage2(stage23Opts);
+            if (stageSelection.runStage3) stats.stage3 = await runStage3(stage23Opts);
         }
     } catch (e) {
         finalStatus = 'failed';
@@ -191,4 +202,4 @@ if (require.main === module) {
     });
 }
 
-module.exports = { parseFlags, parseExplicitHostSelection, runReconcilePhase };
+module.exports = { parseFlags, parseExplicitHostSelection, parseStageSelection, runReconcilePhase };

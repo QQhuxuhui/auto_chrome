@@ -24,9 +24,13 @@
  *   - 03-detail-url.txt               详情页 URL
  */
 
-require('dotenv').config({ path: require('path').resolve(__dirname, '..', '.env') });
-const fs = require('fs');
 const path = require('path');
+const fs = require('fs');
+
+// src/node_modules 到 require 搜索路径（让本脚本能 require 项目里的包）
+module.paths.unshift(path.join(__dirname, '..', 'src', 'node_modules'));
+
+require('dotenv').config({ path: path.resolve(__dirname, '..', '.env') });
 const { log, createWorkerLogger } = require('../src/common/logger');
 const {
     findChrome, launchRealChrome, newPage, sleep, clearBrowserSession,
@@ -147,53 +151,33 @@ async function main() {
         });
         await dumpFile('01-list-rows.json', rows);
 
-        // ========== 2. 点第一个"非 host 自己、不含 @"(name-only) 的行 ==========
-        console.log('Searching for a name-only member row to click...');
-        const pickResult = await page.evaluate((hostEmailLower) => {
-            const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-            let node;
-            const candidates = [];
-            const seen = new Set();
-            while ((node = walker.nextNode())) {
-                const t = String(node.nodeValue || '').trim();
-                if (!t || t.length > 200) continue;
-                // 只找 name-only（不含 @ 的行）
-                if (t.includes('@')) continue;
-                // 排除明显是 host 自己：含 "Family manager" 或含 host email 片段
-                let el = node.parentElement;
-                while (el && el !== document.body) {
-                    const r = el.getBoundingClientRect();
-                    if (r.width > 200 && r.height >= 40 && r.height <= 200) {
-                        if (!seen.has(el)) {
-                            const blockText = (el.textContent || '').toLowerCase();
-                            // 跳过含 "Family manager" / "家庭管理员" 等的行
-                            if (blockText.includes('family manager') || blockText.includes('家庭管理员')) break;
-                            // 跳过含 @ 的（pending invite）
-                            if (blockText.includes('@')) break;
-                            // 跳过含 hostEmail 前缀的（host 自己）
-                            if (hostEmailLower && blockText.includes(hostEmailLower.split('@')[0])) break;
-                            // 跳过"Member" 单独文本行（可能是空容器）
-                            if (blockText === 'member' || blockText === '成员') break;
-                            seen.add(el);
-                            candidates.push({
-                                el, text: (el.textContent || '').trim().substring(0, 100),
-                                tag: el.tagName, role: el.getAttribute('role') || '',
-                                width: r.width, height: r.height, top: r.top,
-                            });
-                        }
-                        break;
-                    }
-                    el = el.parentElement;
-                }
-            }
-            if (!candidates.length) return { ok: false, reason: 'no_name_only_row' };
-            // 选第一个（页面上最上面的）
-            candidates.sort((a, b) => a.top - b.top);
-            const chosen = candidates[0];
+        // ========== 2. 找 <a href="family/member/..."> 跳过 host 自己，点第一个 member ==========
+        console.log('Searching for a member anchor to click (skip host)...');
+        const pickResult = await page.evaluate(() => {
+            const anchors = Array.from(document.querySelectorAll('a[href*="family/member"]'));
+            // 每个 anchor 文本里第一个 div 一般是姓名 + "Member"/"Family manager"
+            const rows = anchors.map(a => {
+                const r = a.getBoundingClientRect();
+                const text = (a.textContent || '').trim();
+                return {
+                    el: a, text, href: a.getAttribute('href'),
+                    isManager: /family manager|家庭管理员/i.test(text),
+                    visible: r.width > 50 && r.height > 30,
+                    top: r.top, width: r.width, height: r.height,
+                };
+            });
+            const visibleMembers = rows.filter(r => r.visible && !r.isManager);
+            if (!visibleMembers.length) return { ok: false, reason: 'no_non_manager_anchor', totalAnchors: anchors.length };
+            visibleMembers.sort((a, b) => a.top - b.top);
+            const chosen = visibleMembers[0];
             chosen.el.setAttribute('data-debug-click-target', '1');
             chosen.el.scrollIntoView({ block: 'center' });
-            return { ok: true, text: chosen.text, tag: chosen.tag, role: chosen.role };
-        }, host.email.toLowerCase()).catch(e => ({ ok: false, error: e.message }));
+            return {
+                ok: true, text: chosen.text, href: chosen.href,
+                width: chosen.width, height: chosen.height, top: chosen.top,
+                totalAnchors: anchors.length, nonManagerCount: visibleMembers.length,
+            };
+        }).catch(e => ({ ok: false, error: e.message }));
 
         await dumpFile('02-clicked-row-info.json', pickResult);
         console.log(`  picked: ${JSON.stringify(pickResult)}`);
