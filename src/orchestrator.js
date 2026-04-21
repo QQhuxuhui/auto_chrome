@@ -143,8 +143,18 @@ async function main() {
                 : { runId, removeUnknown };
             stats.reconcile = await runReconcilePhase(reconcileOpts);
         } else {
-            const reconcileOpts = explicitFilter ? { runId, hostFilter, hostIds: resolvedHostIds, removeUnknown } : { runId, removeUnknown };
-            stats.reconcile = await runReconcilePhase(reconcileOpts);
+            // Stage 3 alone doesn't benefit from reconcile (it operates on
+            // already-joined members; the only side-benefit would be catching
+            // members Google removed, but that's rare and reconcile's cost —
+            // log into every host Chrome — dwarfs the win). Skip reconcile
+            // when stages are exactly ['3'].
+            const stage3Only = stages.length === 1 && stages[0] === '3';
+            if (stage3Only) {
+                log('orchestrator: stage 3 only, skipping reconcile prelude');
+            } else {
+                const reconcileOpts = explicitFilter ? { runId, hostFilter, hostIds: resolvedHostIds, removeUnknown } : { runId, removeUnknown };
+                stats.reconcile = await runReconcilePhase(reconcileOpts);
+            }
             if (explicitFilter && resolvedHostIds.length === 0) {
                 log(`orchestrator: --hosts/--host-ids filter resolved to zero hosts; stage 2/3 will have zero work`, 'WARN');
             }
