@@ -989,7 +989,13 @@ async function reconcileHost(hostRecord, browser, runId, wlog, options = {}) {
             }
 
             // 需要移除
-            const reason = disabledLocal ? 'platform disabled' : 'unknown';
+            let reason;
+            if (disabledLocal) {
+                const ag = disabledLocal.antigravity || {};
+                reason = ag.disabled ? 'platform disabled' : (ag.is_forbidden ? 'quota forbidden' : 'platform banned');
+            } else {
+                reason = 'unknown';
+            }
             const tag = `[remove ${email}/${reason}]`;
             wlog && wlog.info && wlog.info(`${tag} will remove from ${hostRecord.email}'s family`);
 
@@ -1034,11 +1040,19 @@ async function reconcileHost(hostRecord, browser, runId, wlog, options = {}) {
                     catch (e) { wlog && wlog.warn && wlog.warn(`DELETE platform ${agId} failed: ${e.message}`); }
                 }
                 await membersDb.markRemovedFromFamily(disabledLocal.id);
-                await membersDb.updateAntigravity(disabledLocal.id, { id: null, disabled: false, disabled_reason: null });
+                await membersDb.updateAntigravity(disabledLocal.id, {
+                    id: null,
+                    disabled: false, disabled_reason: null,
+                    is_forbidden: false, forbidden_reason: null,
+                });
+                const ag = disabledLocal.antigravity || {};
+                const msgReason = ag.disabled
+                    ? `disabled: ${ag.disabled_reason || 'unknown'}`
+                    : `quota forbidden: ${ag.forbidden_reason || 'credits exhausted'}`;
                 await eventsDb.logEvent({
                     memberId: disabledLocal.id, hostId: hostRecord.id, runId,
                     stage: 'reconcile', eventType: 'note',
-                    message: `removed from family + antigravity (platform disabled: ${disabledLocal.antigravity?.disabled_reason || 'unknown'})`,
+                    message: `removed from family + antigravity (${msgReason})`,
                 });
                 removedCount.disabled++;
             } else {

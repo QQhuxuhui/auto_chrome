@@ -71,6 +71,7 @@ async function upsertMember({ email, password, recovery_email, totp_secret, note
 const VALID_STATUSES = new Set([
     'new', 'invite_pending', 'invite_failed', 'joined',
     'accept_failed', 'oauth_failed', 'done', 'abandoned', 'removed_from_family',
+    'join_failed_region',
 ]);
 
 async function updateMember(id, patch) {
@@ -247,12 +248,39 @@ async function listMembersNeedingPush() {
     return rows.map(mapRow);
 }
 
+/**
+ * Return distinct host_ids that currently own at least one member qualifying
+ * for family-removal. Used by "执行清理" to avoid logging into every enabled
+ * host when only a few carry banned members.
+ */
+async function listHostIdsNeedingCleanup() {
+    const sql = `
+        SELECT DISTINCT host_id
+        FROM members
+        WHERE host_id IS NOT NULL
+          AND status IN ('joined','done','oauth_failed')
+          AND (
+            antigravity->>'disabled' = 'true'
+            OR antigravity->>'is_forbidden' = 'true'
+          )
+        ORDER BY host_id
+    `;
+    const { rows } = await db.query(sql);
+    return rows.map(r => r.host_id);
+}
+
 async function listMembersNeedingFamilyRemoval(hostId) {
+    // "需要清理" = 远端已 disabled（refresh_token invalid_grant 等不可恢复情况）
+    // 或 quota.is_forbidden=true（credits 耗尽，运营上视同封禁）。两种 reconcile 都会
+    // 把账号从 host 家庭组踢掉 + 从平台 DELETE + 本地标 removed_from_family。
     const sql = `
         SELECT * FROM members
         WHERE host_id = $1
           AND status IN ('joined','done','oauth_failed')
-          AND antigravity->>'disabled' = 'true'
+          AND (
+            antigravity->>'disabled' = 'true'
+            OR antigravity->>'is_forbidden' = 'true'
+          )
         ORDER BY id ASC
     `;
     const { rows } = await db.query(sql, [hostId]);
@@ -337,6 +365,7 @@ module.exports = {
     listMembersByEmailLower,
     listMembersNeedingPush,
     listMembersNeedingFamilyRemoval,
+    listHostIdsNeedingCleanup,
     listMembersForStage,
     countByStatus,
     ABANDON_THRESHOLD,

@@ -15,6 +15,20 @@ body {
 }
 .mono { font-family: 'JetBrains Mono', ui-monospace, monospace; }
 .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; }
+select.pill {
+    appearance: none;
+    -webkit-appearance: none;
+    border: none;
+    cursor: pointer;
+    padding-right: 22px;
+    background-repeat: no-repeat;
+    background-position: right 6px center;
+    background-size: 8px 5px;
+    background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 8 5" fill="%23e5e7eb"><path d="M0 0 L4 5 L8 0 Z"/></svg>');
+}
+select.pill:hover { filter: brightness(1.2); }
+select.pill:focus { outline: 2px solid rgba(52,211,153,0.5); outline-offset: 1px; }
+select.pill option { background: #0a0a0f; color: #e5e7eb; }
 .pill.new { background: #1e293b; color: #94a3b8; }
 .pill.invite_pending { background: #1e40af; color: #bfdbfe; }
 .pill.invite_failed, .pill.accept_failed, .pill.oauth_failed { background: #7f1d1d; color: #fecaca; }
@@ -22,6 +36,7 @@ body {
 .pill.done { background: #14532d; color: #a7f3d0; }
 .pill.abandoned { background: #44403c; color: #d6d3d1; }
 .pill.removed_from_family { background: #581c87; color: #e9d5ff; }
+.pill.join_failed_region { background: #9a3412; color: #fed7aa; }
 .drawer {
     position: fixed; top: 0; right: 0; height: 100vh; width: min(560px, 100%);
     background: #0a0a0f; border-left: 1px solid rgba(100,100,150,0.3);

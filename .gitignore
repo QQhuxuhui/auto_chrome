@@ -21,6 +21,10 @@ sub2api.txt
 # Chrome temp data
 src/chrome_data_temp_auth_*/
 src/chrome_data_temp_pipeline_*/
+src/chrome_data_temp_host_login_*/
+
+# Runtime logs
+logs/
 
 # Debug screenshots
 src/debug_*.png
