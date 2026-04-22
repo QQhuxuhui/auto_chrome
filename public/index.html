@@ -144,6 +144,15 @@
                     登录 host 后，凡是 Google 家庭里但不在本系统内的成员将被移除（host 自己不会被动）。默认关。
                 </div>
             </div>
+            <div>
+                <label class="text-sm">
+                    <input type="checkbox" x-model="form.manualMode">
+                    手动模式（跳过母号登录）
+                </label>
+                <div class="text-xs text-slate-400 ml-5 mt-1">
+                    阶段 2 不启动 host 监听、仅跑子号 accept flow；阶段 2/3（无阶段 1）时也跳过 reconcile 前奏。你自己盯着浏览器完成流程。
+                </div>
+            </div>
             <div class="flex gap-2 pt-2">
                 <button @click="openStart = false" class="px-3 py-1 bg-slate-700 rounded">取消</button>
                 <button @click="submitStart()" class="px-3 py-1 bg-emerald-700 rounded">开始</button>
@@ -160,7 +169,7 @@ function dashboard() {
         ag: { total: 0, disabled: 0, validation_blocked: 0, is_forbidden: 0, orphans: 0, last_sync: null },
         openStart: false,
         hostsList: [],
-        form: { stages1: true, stages2: true, stages3: true, hostMode: 'auto', selectedHosts: [], concurrency: 1, removeUnknown: false },
+        form: { stages1: true, stages2: true, stages3: true, hostMode: 'auto', selectedHosts: [], concurrency: 1, removeUnknown: false, manualMode: false },
         error: '',
         interval: null,
         statusLabel(s) {
@@ -245,6 +254,7 @@ function dashboard() {
                     hostFilter,
                     concurrency: this.form.concurrency,
                     removeUnknownMembers: this.form.removeUnknown,
+                    manualMode: this.form.manualMode,
                 });
                 this.openStart = false;
                 this.load();

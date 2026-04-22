@@ -11,6 +11,7 @@
  *   --concurrency <N>        : worker count (default 1)
  *   --reconcile-only         : skip stages, run reconcile only
  *   --host-ids "1,2"         : only for --reconcile-only, restrict host IDs
+ *   --manual                 : skip host login (stage 2 host-monitor + reconcile prelude when stages ⊆ {2,3})
  */
 require('dotenv').config({ path: require('path').resolve(__dirname, '..', '.env') });
 const { log, createWorkerLogger } = require('./common/logger');
@@ -134,6 +135,11 @@ async function main() {
     const reconcileOnly = !!flags['reconcile-only'];
     const removeUnknown = !!flags['remove-unknown'];
     const { hostFilter, hostIds, explicitFilter } = parseExplicitHostSelection(flags);
+
+    if (flags.manual) {
+        process.env.ACCEPT_MODE = 'manual';
+        log('orchestrator: --manual flag set, ACCEPT_MODE=manual for this run');
+    }
 
     // Resolve hostFilter (emails) → hostIds for stage 2/3 filtering.
     // Stage 1 uses hostFilter (emails) directly via pickHost; no change there.
