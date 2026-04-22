@@ -42,7 +42,7 @@
         <div class="card p-4">
             <h3 class="font-semibold mb-2">子号状态</h3>
             <ul class="text-sm space-y-1">
-                <template x-for="s in ['new','invite_pending','joined','done','invite_failed','accept_failed','oauth_failed','abandoned','removed_from_family']" :key="s">
+                <template x-for="s in ['new','invite_pending','joined','done','invite_failed','accept_failed','oauth_failed','join_failed_region','abandoned','removed_from_family']" :key="s">
                     <li class="flex justify-between">
                         <span x-text="statusLabel(s)" class="mono"></span>
                         <span x-text="status.byStatus[s] || 0"></span>
@@ -63,9 +63,13 @@
             <h3 class="font-semibold mb-2">Antigravity 平台</h3>
             <ul class="text-sm space-y-1">
                 <li class="flex justify-between"><span>平台总账号</span><span x-text="ag.total || 0"></span></li>
-                <li class="flex justify-between"><span>disabled</span><span x-text="ag.disabled || 0" class="text-red-400"></span></li>
+                <li class="flex justify-between">
+                    <span>封禁</span>
+                    <span class="text-red-400"
+                          :title="`invalid_grant: ${ag.disabled || 0} · 配额耗尽: ${ag.is_forbidden || 0}`"
+                          x-text="(ag.disabled || 0) + (ag.is_forbidden || 0)"></span>
+                </li>
                 <li class="flex justify-between"><span>需验证</span><span x-text="ag.validation_blocked || 0" class="text-yellow-400"></span></li>
-                <li class="flex justify-between"><span>quota 禁用</span><span x-text="ag.is_forbidden || 0" class="text-orange-400"></span></li>
                 <li class="flex justify-between"><span>未关联本地</span><span x-text="ag.orphans || 0"></span></li>
                 <li class="flex justify-between text-xs text-slate-400 pt-1 border-t border-slate-700/50 mt-1">
                     <span>最近同步</span><span x-text="ag.last_sync || '从未'"></span>
@@ -170,6 +174,7 @@ function dashboard() {
                 'done': '已完成',
                 'abandoned': '已放弃',
                 'removed_from_family': '已移除',
+                'join_failed_region': '加入失败（地区不符）',
             }[s] || s;
         },
         async load() {
@@ -256,15 +261,22 @@ function dashboard() {
             try {
                 const r = await App.api('POST', '/api/antigravity/sync');
                 this.ag.last_sync = new Date().toLocaleTimeString();
-                alert(`同步完成：匹配 ${r.matched}，新 disabled ${r.newly_disabled.length}，orphan ${r.orphans.length}`);
+                const nd = r.newly_disabled?.length || 0;
+                const nf = r.newly_forbidden?.length || 0;
+                alert(`同步完成：匹配 ${r.matched}，新封禁 ${nd + nf}（invalid_grant ${nd}，配额 ${nf}），orphan ${r.orphans.length}`);
                 this.load();
             } catch (e) { alert('同步失败：' + e.message); }
         },
         async agCleanup() {
-            if (!confirm('执行清理会登录 host、扫描 family 页并移除 disabled 成员。确认？')) return;
+            if (!confirm('执行清理：后端自动挑出"挂有已封禁 member"的 host，只登这些 host 扫 family 页 + 移除（含 invalid_grant + 配额耗尽）。确认？')) return;
             try {
                 const r = await App.api('POST', '/api/reconcile');
-                alert(`清理流程已启动（run #${r.runId}）。打开运行历史看进度。`);
+                if (r.skipped) {
+                    alert(`没有 host 需要清理：${r.reason}`);
+                } else {
+                    const n = Array.isArray(r.hostIds) ? r.hostIds.length : '?';
+                    alert(`清理已启动 run #${r.runId}，登录 ${n} 个 host（自动筛选）。`);
+                }
                 this.load();
             } catch (e) { alert('启动清理失败：' + e.message); }
         },

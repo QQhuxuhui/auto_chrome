@@ -1006,12 +1006,23 @@ async function googleLogin(page, account, wlog, opts = {}) {
                 await sleep(1000);
                 break;
 
+            case 'chrome_error': {
+                // page.goto 失败留下的 chrome-error:// 页。不处理会被 'unknown'
+                // 的 URL 白名单漏判成"已登录"直接 return，导致调用方误以为成功。
+                // 这里主动重试导航回 signin，让下一轮状态检测拿到正常页面。
+                wlog.warn(`  chrome-error page detected, re-navigating to signin`);
+                await page.goto('https://accounts.google.com/signin', { waitUntil: 'networkidle2', timeout: 30000 }).catch(() => { });
+                await sleep(2000);
+                break;
+            }
+
             case 'unknown': {
                 // 检查是否已经到达目标页面（非 Google 登录页）
                 const currentUrl = page.url();
                 if (!currentUrl.includes('accounts.google.com') &&
                     !currentUrl.includes('about:blank') &&
                     !currentUrl.startsWith('chrome://') &&
+                    !currentUrl.startsWith('chrome-error://') &&  // 防御：即使 detectPageState 改动漏掉也不会误判
                     !currentUrl.includes('workspace.google.com') &&
                     !currentUrl.includes('google.com/gmail') &&
                     !currentUrl.includes('accounts.youtube.com')) {

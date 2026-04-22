@@ -30,7 +30,8 @@ CREATE TABLE IF NOT EXISTS members (
     'oauth_failed',
     'done',
     'abandoned',
-    'removed_from_family'
+    'removed_from_family',
+    'join_failed_region'
   )),
 
   host_id         BIGINT REFERENCES hosts(id) ON DELETE SET NULL,
@@ -82,3 +83,30 @@ CREATE TABLE IF NOT EXISTS pipeline_runs (
   error        TEXT,
   stats        JSONB
 );
+
+-- Migrations for existing DBs (idempotent: safe to run on fresh DBs too).
+-- The CREATE TABLE IF NOT EXISTS above won't update a pre-existing members
+-- table's status CHECK constraint, so we drop+re-add here to pick up any new
+-- allowed values (e.g. 'join_failed_region' added for manual region-mismatch
+-- tagging).
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.tables
+    WHERE table_schema = 'public' AND table_name = 'members'
+  ) THEN
+    ALTER TABLE members DROP CONSTRAINT IF EXISTS members_status_check;
+    ALTER TABLE members ADD CONSTRAINT members_status_check CHECK (status IN (
+      'new',
+      'invite_pending',
+      'invite_failed',
+      'joined',
+      'accept_failed',
+      'oauth_failed',
+      'done',
+      'abandoned',
+      'removed_from_family',
+      'join_failed_region'
+    ));
+  END IF;
+END $$;

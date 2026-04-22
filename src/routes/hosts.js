@@ -1,5 +1,12 @@
+const path = require('path');
+const { fork } = require('child_process');
 const hosts = require('../db/hosts');
 const { parseAccounts } = require('../common/state');
+
+// In-memory registry of active "manual login" sessions keyed by hostId, so
+// double-clicking 登录 doesn't spawn a second Chrome for the same host (which
+// would fail to lock the shared profile dir).
+const activeLoginSessions = new Map(); // hostId → { pid, startedAt }
 
 function adaptAccount(a) {
     return {
@@ -64,6 +71,49 @@ module.exports = async function routes(app) {
             page: page ? parseInt(page, 10) : undefined,
             pageSize: pageSize ? parseInt(pageSize, 10) : undefined,
         });
+    });
+
+    // Spawn a manual-login session for the host: forks host-login.js which
+    // launches Chrome, auto-logs-in, opens the family page, then blocks until
+    // the user closes the Chrome window. The HTTP request returns as soon as
+    // Chrome is spawned — it doesn't wait for the session to end.
+    app.post('/api/hosts/:id/login', async (req, reply) => {
+        const id = parseInt(req.params.id, 10);
+        const host = await hosts.getHostById(id);
+        if (!host) return reply.code(404).send({ error: 'host not found' });
+
+        const existing = activeLoginSessions.get(id);
+        if (existing) {
+            // Is it actually alive? If the child crashed without emitting 'exit'
+            // (edge case), fall through by clearing.
+            try {
+                process.kill(existing.pid, 0);
+                return reply.code(409).send({
+                    error: `login session already active for ${host.email}`,
+                    pid: existing.pid,
+                    startedAt: existing.startedAt,
+                });
+            } catch (_) {
+                activeLoginSessions.delete(id);
+            }
+        }
+
+        const scriptPath = path.resolve(__dirname, '..', 'host-login.js');
+        const child = fork(scriptPath, ['--host-id', String(id)], {
+            stdio: ['ignore', 'inherit', 'inherit', 'ipc'],
+            detached: false,
+        });
+        const session = { pid: child.pid, startedAt: new Date().toISOString() };
+        activeLoginSessions.set(id, session);
+        child.on('exit', () => { activeLoginSessions.delete(id); });
+        return { hostId: id, email: host.email, pid: child.pid, startedAt: session.startedAt };
+    });
+
+    // Expose active sessions so UI can grey out the button / show status.
+    app.get('/api/hosts/login-sessions', async () => {
+        return Array.from(activeLoginSessions.entries()).map(([hostId, s]) => ({
+            hostId, pid: s.pid, startedAt: s.startedAt,
+        }));
     });
 };
 

@@ -26,8 +26,11 @@
     </div>
 
     <div class="flex gap-2 border-b border-slate-700">
-        <button @click="tab='hosts'" :class="tab==='hosts' ? 'text-white font-semibold border-b-2 border-emerald-500' : 'text-slate-400'" class="px-4 py-2">母号</button>
-        <button @click="tab='members'" :class="tab==='members' ? 'text-white font-semibold border-b-2 border-emerald-500' : 'text-slate-400'" class="px-4 py-2">子号</button>
+        <button @click="switchTab('hosts')" :class="tab==='hosts' ? 'text-white font-semibold border-b-2 border-emerald-500' : 'text-slate-400'" class="px-4 py-2">母号</button>
+        <button @click="switchTab('members')" :class="tab==='members' ? 'text-white font-semibold border-b-2 border-emerald-500' : 'text-slate-400'" class="px-4 py-2">子号</button>
+        <button @click="switchTab('archived')" :class="tab==='archived' ? 'text-white font-semibold border-b-2 border-emerald-500' : 'text-slate-400'" class="px-4 py-2">
+            已废弃<span class="ml-1 text-xs text-slate-500" x-text="archivedCount ? `(${archivedCount})` : ''"></span>
+        </button>
     </div>
 
     <!-- Hosts tab -->
@@ -85,8 +88,16 @@
                         <td>
                             <input type="checkbox" :checked="h.disabled" @change="toggleDisabled(h)">
                         </td>
-                        <td>
-                            <button @click="deleteHost(h)" class="text-red-400 text-sm">删除</button>
+                        <td class="space-x-2 text-sm">
+                            <template x-if="!activeLoginSessions[h.id]">
+                                <button @click="loginHost(h)" class="text-emerald-400"
+                                        title="打开 Chrome 登录并进入家庭成员页，手动关闭浏览器结束">登录</button>
+                            </template>
+                            <template x-if="activeLoginSessions[h.id]">
+                                <span class="text-slate-500"
+                                      :title="`已登录 pid=${activeLoginSessions[h.id]}，关浏览器后按钮恢复`">已登录</span>
+                            </template>
+                            <button @click="deleteHost(h)" class="text-red-400">删除</button>
                         </td>
                     </tr>
                 </template>
@@ -95,16 +106,22 @@
         </table>
     </section>
 
-    <!-- Members tab -->
-    <section x-show="tab==='members'">
+    <!-- Members tab (active + archived share the same table) -->
+    <section x-show="tab==='members' || tab==='archived'">
         <div class="flex gap-2 mb-3">
-            <button @click="openBulk='members'" class="px-3 py-1 bg-slate-700 rounded">+ 批量导入</button>
-            <button @click="pushAllPending()" class="px-3 py-1 bg-emerald-700 hover:bg-emerald-600 rounded">
+            <button x-show="tab==='members'" @click="openBulk='members'" class="px-3 py-1 bg-slate-700 rounded">+ 批量导入</button>
+            <button x-show="tab==='members'" @click="pushAllPending()" class="px-3 py-1 bg-emerald-700 hover:bg-emerald-600 rounded">
                 批量推送待推送（<span x-text="pendingPushCount"></span>）
             </button>
-            <select x-model="memberStatusFilter" @change="loadMembers()" class="px-2 py-1 bg-slate-800 rounded">
+            <select x-show="tab==='members'" x-model="memberStatusFilter" @change="loadMembers()" class="px-2 py-1 bg-slate-800 rounded">
                 <option value="">全部状态</option>
-                <template x-for="s in ['new','invite_pending','invite_failed','joined','accept_failed','oauth_failed','done','abandoned','removed_from_family']" :key="s">
+                <template x-for="s in ACTIVE_STATUSES" :key="s">
+                    <option :value="s" x-text="statusLabel(s)"></option>
+                </template>
+            </select>
+            <select x-show="tab==='archived'" x-model="memberStatusFilter" @change="loadMembers()" class="px-2 py-1 bg-slate-800 rounded">
+                <option value="">全部已废弃</option>
+                <template x-for="s in ARCHIVED_STATUSES" :key="s">
                     <option :value="s" x-text="statusLabel(s)"></option>
                 </template>
             </select>
@@ -158,7 +175,16 @@
                             </template>
                             <template x-if="!m.totp_secret"><span>—</span></template>
                         </td>
-                        <td><span class="pill" :class="m.status" x-text="statusLabel(m.status)"></span></td>
+                        <td>
+                            <select class="pill" :class="m.status"
+                                    :value="m.status"
+                                    @change="updateStatus(m, $event.target.value)"
+                                    title="点击修改状态">
+                                <template x-for="s in ALL_STATUSES" :key="s">
+                                    <option :value="s" :selected="s === m.status" x-text="statusLabel(s)"></option>
+                                </template>
+                            </select>
+                        </td>
                         <td class="mono text-xs">
                             <span x-text="m.host_id ? hostEmailById(m.host_id) : '—'"></span>
                         </td>
@@ -183,15 +209,17 @@
                             </template>
                             <template x-if="m.antigravity && m.antigravity.id">
                                 <template x-if="m.antigravity.disabled">
-                                    <span class="pill invite_failed">❌ 已封禁</span>
+                                    <span class="pill invite_failed"
+                                          :title="m.antigravity.disabled_reason || ''">❌ 已封禁</span>
                                 </template>
-                                <template x-if="!m.antigravity.disabled && m.antigravity.validation_blocked">
+                                <template x-if="!m.antigravity.disabled && m.antigravity.is_forbidden">
+                                    <span class="pill invite_failed"
+                                          :title="m.antigravity.forbidden_reason || 'AI credits 耗尽'">❌ 配额封禁</span>
+                                </template>
+                                <template x-if="!m.antigravity.disabled && !m.antigravity.is_forbidden && m.antigravity.validation_blocked">
                                     <span class="pill oauth_failed">⚠️ 需验证</span>
                                 </template>
-                                <template x-if="!m.antigravity.disabled && !m.antigravity.validation_blocked && m.antigravity.is_forbidden">
-                                    <span class="pill accept_failed">⚠️ quota 禁</span>
-                                </template>
-                                <template x-if="!m.antigravity.disabled && !m.antigravity.validation_blocked && !m.antigravity.is_forbidden">
+                                <template x-if="!m.antigravity.disabled && !m.antigravity.is_forbidden && !m.antigravity.validation_blocked">
                                     <span class="pill done">✅ 正常</span>
                                 </template>
                             </template>
@@ -246,7 +274,7 @@
                 <div>
                     <div class="text-sm mb-1">状态</div>
                     <select x-model="editForm.status" class="bg-slate-800 px-2 py-1 rounded w-full">
-                        <template x-for="s in ['new','invite_pending','invite_failed','joined','accept_failed','oauth_failed','done','abandoned','removed_from_family']" :key="s">
+                        <template x-for="s in ALL_STATUSES" :key="s">
                             <option :value="s" x-text="`${statusLabel(s)} (${s})`"></option>
                         </template>
                     </select>
@@ -364,6 +392,13 @@ function accounts() {
         editOpen: false,
         editForm: null,
         pendingPushCount: 0,
+        archivedCount: 0,
+        // { hostId: pid } — non-empty means a manual login Chrome is running; button greys out.
+        activeLoginSessions: {},
+        _loginSessionsTimer: null,
+        ALL_STATUSES: ['new','invite_pending','invite_failed','joined','accept_failed','oauth_failed','join_failed_region','done','abandoned','removed_from_family'],
+        ACTIVE_STATUSES: ['new','invite_pending','invite_failed','joined','accept_failed','oauth_failed','join_failed_region','done'],
+        ARCHIVED_STATUSES: ['abandoned','removed_from_family'],
         // 每行的密码遮蔽状态：key 为 "host-<id>" / "member-<id>"，布尔值 true 表示已显示。
         revealed: {},
         // TOTP 代码缓存：key 同上，值为 { code, expiresAt(秒) }。
@@ -382,10 +417,11 @@ function accounts() {
                 'done': '已完成',
                 'abandoned': '已放弃',
                 'removed_from_family': '已移除',
+                'join_failed_region': '加入失败（地区不符）',
             }[s] || s;
         },
         async load() {
-            await Promise.all([this.loadHosts(), this.loadMembers(), this.loadMigrate()]);
+            await Promise.all([this.loadHosts(), this.loadMembers(), this.loadMigrate(), this.loadArchivedCount(), this.loadLoginSessions()]);
             // Kick off the TOTP ticker once data is loaded.
             if (!this._totpTimer) {
                 this._totpTimer = setInterval(() => {
@@ -394,6 +430,55 @@ function accounts() {
                 }, 1000);
                 this.refreshTOTP();
             }
+            // Poll active login sessions every 3s so the button label flips back
+            // from "已登录" to "登录" as soon as the user closes Chrome.
+            if (!this._loginSessionsTimer) {
+                this._loginSessionsTimer = setInterval(() => this.loadLoginSessions(), 3000);
+            }
+        },
+        async loadLoginSessions() {
+            try {
+                const rows = await App.api('GET', '/api/hosts/login-sessions');
+                const map = {};
+                for (const r of rows) map[r.hostId] = r.pid;
+                this.activeLoginSessions = map;
+            } catch (_) { /* non-critical */ }
+        },
+        async loginHost(h) {
+            try {
+                const r = await App.api('POST', `/api/hosts/${h.id}/login`);
+                this.activeLoginSessions = { ...this.activeLoginSessions, [h.id]: r.pid };
+                alert(`已启动登录（pid ${r.pid}）。Chrome 打开后会自动登入并跳到家庭成员页。关闭浏览器 = 结束会话。`);
+            } catch (e) {
+                alert('启动登录失败：' + (e.message || e));
+            }
+        },
+        switchTab(t) {
+            if (this.tab === t) return;
+            this.tab = t;
+            // Active / archived tabs use disjoint status filter option sets; reset to avoid stale filter.
+            if (t === 'members' || t === 'archived') {
+                this.memberStatusFilter = '';
+                this.loadMembers();
+            }
+        },
+        async updateStatus(m, newStatus) {
+            if (!newStatus || newStatus === m.status) return;
+            const previous = m.status;
+            try {
+                await App.api('PATCH', `/api/members/${m.id}`, { status: newStatus });
+                await this.loadMembers();
+            } catch (e) {
+                alert('状态更新失败：' + e.message);
+                m.status = previous;
+            }
+        },
+        async loadArchivedCount() {
+            try {
+                const s = await App.api('GET', '/api/status');
+                const by = s.byStatus || {};
+                this.archivedCount = this.ARCHIVED_STATUSES.reduce((sum, k) => sum + (by[k] || 0), 0);
+            } catch (_) { /* non-critical */ }
         },
         toggleReveal(kind, id) {
             const key = `${kind}-${id}`;
@@ -449,12 +534,21 @@ function accounts() {
         async loadMembers() {
             const q = new URLSearchParams();
             if (this.memberSearch) q.set('search', this.memberSearch);
-            if (this.memberStatusFilter) q.set('status', this.memberStatusFilter);
-            const qs = q.toString() ? `?${q.toString()}` : '';
+            // Tab determines the status-filter baseline: archived tab shows only
+            // abandoned/removed_from_family; members tab defaults to the active
+            // set (excluding archived). User's per-tab status picker narrows further.
+            if (this.tab === 'archived') {
+                q.set('status', this.memberStatusFilter || this.ARCHIVED_STATUSES.join(','));
+            } else {
+                q.set('status', this.memberStatusFilter || this.ACTIVE_STATUSES.join(','));
+            }
+            const qs = `?${q.toString()}`;
             this.members = await App.api('GET', `/api/members${qs}`);
             this.pendingPushCount = this.members.filter(m =>
                 m.status === 'done' && (!m.antigravity || !m.antigravity.id)
             ).length;
+            // Keep the "已废弃" tab badge in sync with any mutation that reloads members.
+            this.loadArchivedCount();
         },
         async loadMigrate() {
             try { this.migrate = await App.api('GET', '/api/migrate/detect'); }

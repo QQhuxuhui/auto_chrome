@@ -27,7 +27,7 @@ async function syncFromRemote() {
     const locals = await membersDb.listMembersByEmailLower(emailsLower);
     const localByEmail = new Map(locals.map(m => [m.email.toLowerCase(), m]));
 
-    const out = { matched: 0, updated: 0, newly_disabled: [], orphans: [] };
+    const out = { matched: 0, updated: 0, newly_disabled: [], newly_forbidden: [], orphans: [] };
 
     for (const acct of accounts) {
         const emailLower = String(acct.email || '').toLowerCase();
@@ -39,11 +39,16 @@ async function syncFromRemote() {
         }
         out.matched++;
         const wasDisabled = !!(local.antigravity && local.antigravity.disabled);
+        const wasForbidden = !!(local.antigravity && local.antigravity.is_forbidden);
         const mirror = pickMirror(acct);
         await membersDb.updateAntigravity(local.id, mirror);
         out.updated++;
         if (!wasDisabled && mirror.disabled) {
             out.newly_disabled.push({ memberId: local.id, email: local.email, reason: mirror.disabled_reason });
+        }
+        // quota.is_forbidden 0→1 也当封禁上报（运营上视同 disabled）
+        if (!wasForbidden && mirror.is_forbidden) {
+            out.newly_forbidden.push({ memberId: local.id, email: local.email, reason: mirror.forbidden_reason });
         }
     }
     return out;
