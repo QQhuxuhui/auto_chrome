@@ -890,6 +890,9 @@ async function detectPageState(page, wlog) {
     } catch (_) { }
 
     if (pageUrl.startsWith('chrome://')) return { state: 'chrome_internal', url: pageUrl };
+    // chrome-error://chromewebdata/ 是 goto 瞬间失败时 Chrome 显示的错误页。
+    // 不识别会落到 DOM 探测 → 'unknown'，状态机会白白消耗 MAX_STEPS 才退出。
+    if (pageUrl.startsWith('chrome-error://')) return { state: 'chrome_error', url: pageUrl };
     if (pageUrl === 'about:blank') return { state: 'blank', url: pageUrl };
 
     const pageInfo = await page.evaluate(() => {
@@ -1621,6 +1624,15 @@ async function auth(account, browser, workerId) {
                     wlog.debug('  Chrome internal/blank page, waiting...');
                     await sleep(1000);
                     break;
+
+                case 'chrome_error': {
+                    // page.goto 失败留下的 chrome-error:// 页。主动重试导航回 signin，
+                    // 让下一轮状态检测拿到正常页面，避免状态机空转到 MAX_STEPS。
+                    wlog.warn('  chrome-error page detected, re-navigating to signin');
+                    await page.goto('https://accounts.google.com/signin', { waitUntil: 'networkidle2', timeout: 30000 }).catch(() => { });
+                    await sleep(2000);
+                    break;
+                }
 
                 case 'unknown': {
                     wlog.warn('  Unknown page state');

@@ -298,6 +298,10 @@ async function detectPageState(page, wlog) {
     } catch (_) { }
 
     if (pageUrl.startsWith('chrome://')) return { state: 'chrome_internal', url: pageUrl };
+    // chrome-error://chromewebdata/ 是 goto 瞬间失败时 Chrome 显示的错误页。
+    // 不识别的话会落到 DOM 探测 → 'unknown'，再撞上 google-login.js 里 'unknown'
+    // 分支的 URL 白名单漏（chrome-error:// 不在排除列表），被误判成"已登录"。
+    if (pageUrl.startsWith('chrome-error://')) return { state: 'chrome_error', url: pageUrl };
     if (pageUrl === 'about:blank') return { state: 'blank', url: pageUrl };
 
     const pageInfo = await page.evaluate(() => {
