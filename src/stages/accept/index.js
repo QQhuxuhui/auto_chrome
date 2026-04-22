@@ -174,6 +174,11 @@ async function processOneHost({ host, members, concurrency, runId, chromePath })
     const wlog = createWorkerLogger(`H${host.id}`);
     wlog.info(`Stage2 host ${host.email}: ${members.length} pending member(s)`);
 
+    if (isManualMode()) {
+        wlog.info(`Stage2 manual mode: skipping host-monitor, going straight to member workers`);
+        return runHostWithoutMonitor({ host, members, concurrency, runId, chromePath });
+    }
+
     let hmChrome;
     try {
         hmChrome = await launchHostMonitorChrome(chromePath, host);

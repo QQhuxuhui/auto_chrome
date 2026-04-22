@@ -77,6 +77,16 @@ function parseStageSelection(value) {
     };
 }
 
+function shouldRunReconcile(stageSelection, env) {
+    if (stageSelection.runInlineReconcile) return true;
+    const stages = stageSelection.stages || [];
+    if (stages.length === 0) return true;
+    const stage3Only = stages.length === 1 && stages[0] === '3';
+    const manualMode = String((env || {}).ACCEPT_MODE || '').toLowerCase() === 'manual';
+    const manualStage23Subset = manualMode && stages.every(s => s === '2' || s === '3');
+    return !(stage3Only || manualStage23Subset);
+}
+
 async function runReconcilePhase({ runId, hostFilter, hostIds, removeUnknown }) {
     const chromePath = findChrome();
     if (!chromePath) throw new Error('Chrome not found');
@@ -156,15 +166,20 @@ async function main() {
                 : { runId, removeUnknown };
             stats.reconcile = await runReconcilePhase(reconcileOpts);
         } else {
-            const stage3Only = stageSelection.stages.length === 1 && stageSelection.stages[0] === '3';
-            const shouldReconcile = stageSelection.runInlineReconcile || !stage3Only;
-            if (shouldReconcile) {
+            if (shouldRunReconcile(stageSelection, process.env)) {
                 const reconcileOpts = explicitFilter
                     ? { runId, hostFilter, hostIds: resolvedHostIds, removeUnknown }
                     : { runId, removeUnknown };
                 stats.reconcile = await runReconcilePhase(reconcileOpts);
             } else {
-                log('orchestrator: stage 3 only, skipping reconcile prelude');
+                const manualMode = String(process.env.ACCEPT_MODE || '').toLowerCase() === 'manual';
+                const stages = stageSelection.stages;
+                const stage3Only = stages.length === 1 && stages[0] === '3';
+                if (stage3Only && !manualMode) {
+                    log('orchestrator: stage 3 only, skipping reconcile prelude');
+                } else {
+                    log('orchestrator: manual mode, stages ⊆ {2,3}, skipping reconcile prelude');
+                }
             }
             if (explicitFilter && resolvedHostIds.length === 0) {
                 log(`orchestrator: --hosts/--host-ids filter resolved to zero hosts; stage 2/3 will have zero work`, 'WARN');
@@ -202,4 +217,4 @@ if (require.main === module) {
     });
 }
 
-module.exports = { parseFlags, parseExplicitHostSelection, parseStageSelection, runReconcilePhase };
+module.exports = { parseFlags, parseExplicitHostSelection, parseStageSelection, shouldRunReconcile, runReconcilePhase };

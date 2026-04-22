@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert');
-const { parseExplicitHostSelection, parseStageSelection } = require('../orchestrator');
+const { parseExplicitHostSelection, parseStageSelection, shouldRunReconcile } = require('../orchestrator');
 
 test('parseExplicitHostSelection: absent flags mean no explicit filter', () => {
     assert.deepEqual(parseExplicitHostSelection({}), {
@@ -54,4 +54,59 @@ test('parseStageSelection: reconcile must be explicitly requested', () => {
         runStage2: false,
         runStage3: true,
     });
+});
+
+// shouldRunReconcile — gates the reconcile prelude before stages 1/2/3.
+// True = run reconcile; false = skip.
+
+test('shouldRunReconcile: stage 3 only in auto mode → skip (original gate)', () => {
+    assert.equal(shouldRunReconcile(parseStageSelection('3'), {}), false);
+});
+
+test('shouldRunReconcile: stage 3 only in manual mode → skip', () => {
+    assert.equal(shouldRunReconcile(parseStageSelection('3'), { ACCEPT_MODE: 'manual' }), false);
+});
+
+test('shouldRunReconcile: stage 2 only in auto mode → run (host-authoritative needs it)', () => {
+    assert.equal(shouldRunReconcile(parseStageSelection('2'), {}), true);
+});
+
+test('shouldRunReconcile: stage 2 only in manual mode → skip', () => {
+    assert.equal(shouldRunReconcile(parseStageSelection('2'), { ACCEPT_MODE: 'manual' }), false);
+});
+
+test('shouldRunReconcile: stage 2+3 in manual mode → skip', () => {
+    assert.equal(shouldRunReconcile(parseStageSelection('2,3'), { ACCEPT_MODE: 'manual' }), false);
+});
+
+test('shouldRunReconcile: stage 2+3 in auto mode → run', () => {
+    assert.equal(shouldRunReconcile(parseStageSelection('2,3'), {}), true);
+});
+
+test('shouldRunReconcile: stage 1+2+3 in manual mode → run (stage 1 needs capacity)', () => {
+    assert.equal(shouldRunReconcile(parseStageSelection('1,2,3'), { ACCEPT_MODE: 'manual' }), true);
+});
+
+test('shouldRunReconcile: stage 1+2 in manual mode → run (stage 1 needs capacity)', () => {
+    assert.equal(shouldRunReconcile(parseStageSelection('1,2'), { ACCEPT_MODE: 'manual' }), true);
+});
+
+test('shouldRunReconcile: stage 1 only in manual mode → run', () => {
+    assert.equal(shouldRunReconcile(parseStageSelection('1'), { ACCEPT_MODE: 'manual' }), true);
+});
+
+test('shouldRunReconcile: ACCEPT_MODE is case-insensitive', () => {
+    assert.equal(shouldRunReconcile(parseStageSelection('2'), { ACCEPT_MODE: 'MANUAL' }), false);
+    assert.equal(shouldRunReconcile(parseStageSelection('2'), { ACCEPT_MODE: 'Manual' }), false);
+});
+
+test('shouldRunReconcile: ACCEPT_MODE=auto or unset behaves the same', () => {
+    assert.equal(shouldRunReconcile(parseStageSelection('2'), { ACCEPT_MODE: 'auto' }), true);
+    assert.equal(shouldRunReconcile(parseStageSelection('2'), {}), true);
+});
+
+test('shouldRunReconcile: explicit reconcile token always wins', () => {
+    assert.equal(shouldRunReconcile(parseStageSelection('reconcile,3'), { ACCEPT_MODE: 'manual' }), true);
+    assert.equal(shouldRunReconcile(parseStageSelection('reconcile,2'), { ACCEPT_MODE: 'manual' }), true);
+    assert.equal(shouldRunReconcile(parseStageSelection('reconcile,2,3'), { ACCEPT_MODE: 'manual' }), true);
 });
