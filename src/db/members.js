@@ -11,7 +11,7 @@ function mapRow(row) {
     return { ...row };
 }
 
-async function listMembers({ status, hostId, search, hasToken, page = 1, pageSize = 500 } = {}) {
+async function listMembers({ status, hostId, unbound, search, hasToken, page = 1, pageSize = 500 } = {}) {
     const params = [];
     const where = ['TRUE'];
     if (status) {
@@ -19,7 +19,11 @@ async function listMembers({ status, hostId, search, hasToken, page = 1, pageSiz
         params.push(arr);
         where.push(`status = ANY($${params.length})`);
     }
-    if (hostId) {
+    // `unbound` 比 hostId 优先：调用方要么指定 host，要么明确要"没绑 host 的"，
+    // 两者互斥，同时给就只看 unbound。
+    if (unbound) {
+        where.push(`host_id IS NULL`);
+    } else if (hostId) {
         params.push(hostId);
         where.push(`host_id = $${params.length}`);
     }

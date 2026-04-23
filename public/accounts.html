@@ -50,10 +50,14 @@
                 <th>已停用</th>
                 <th>操作</th>
             </tr></thead>
-            <tbody>
-                <template x-for="h in hosts" :key="h.id">
+            <template x-for="h in hosts" :key="h.id">
+                <tbody>
                     <tr>
-                        <td class="mono" x-text="h.email"></td>
+                        <td class="mono">
+                            <div x-text="h.email"></div>
+                            <div x-show="h.notes" class="text-xs text-slate-400 mt-0.5 whitespace-pre-wrap break-all"
+                                 x-text="h.notes"></div>
+                        </td>
                         <td>
                             <template x-if="h.password">
                                 <span>
@@ -89,6 +93,8 @@
                             <input type="checkbox" :checked="h.disabled" @change="toggleDisabled(h)">
                         </td>
                         <td class="space-x-2 text-sm">
+                            <button @click="openHostManage(h)" class="text-cyan-400"
+                                    title="打开管理面板：编辑备注 / 查看修改已绑定子号 / 绑定待处理子号">管理</button>
                             <template x-if="!activeLoginSessions[h.id]">
                                 <button @click="loginHost(h)" class="text-emerald-400"
                                         title="打开 Chrome 登录并进入家庭成员页，手动关闭浏览器结束">登录</button>
@@ -100,8 +106,10 @@
                             <button @click="deleteHost(h)" class="text-red-400">删除</button>
                         </td>
                     </tr>
-                </template>
-                <tr x-show="!hosts.length"><td colspan="7" class="text-center text-slate-500 py-4">暂无母号</td></tr>
+                </tbody>
+            </template>
+            <tbody x-show="!hosts.length">
+                <tr><td colspan="7" class="text-center text-slate-500 py-4">暂无母号</td></tr>
             </tbody>
         </table>
     </section>
@@ -371,6 +379,108 @@
             </div>
         </template>
     </div>
+
+    <!-- Host manage drawer: 备注 + 已绑定子号（改状态/解绑）+ 从"待处理"池里绑新 -->
+    <div x-show="hostManaging" class="backdrop open" @click="closeHostManage()"></div>
+    <div x-show="hostManaging" class="drawer open" @click.stop style="width: min(680px, 100%);">
+        <template x-if="hostManaging">
+            <div class="space-y-4">
+                <h2 class="text-lg font-semibold">
+                    管理母号 <span class="mono text-base" x-text="hostManaging.email"></span>
+                    <span class="text-xs text-slate-400 ml-2" x-text="`占用 ${hostManaging.slot_used}/5`"></span>
+                </h2>
+
+                <!-- 备注 -->
+                <div>
+                    <div class="text-sm mb-1">备注</div>
+                    <textarea rows="3" class="w-full bg-slate-900 p-2 text-sm rounded"
+                              :value="hostNotesDraft[hostManaging.id] ?? (hostManaging.notes || '')"
+                              @input="hostNotesDraft[hostManaging.id] = $event.target.value"
+                              placeholder="备注（留空即清除）"></textarea>
+                    <div class="mt-1 flex gap-2">
+                        <button @click="saveHostNotes(hostManaging)"
+                                class="px-3 py-1 bg-emerald-700 hover:bg-emerald-600 rounded text-sm">保存备注</button>
+                        <button @click="hostNotesDraft[hostManaging.id] = hostManaging.notes || ''"
+                                class="px-3 py-1 bg-slate-700 rounded text-sm">重置</button>
+                    </div>
+                </div>
+
+                <!-- 已绑定子号 -->
+                <div>
+                    <div class="text-sm mb-1">
+                        已绑定子号 <span class="text-xs text-slate-400" x-text="`(${(hostMembers[hostManaging.id] || []).length})`"></span>
+                    </div>
+                    <table class="w-full text-sm">
+                        <thead>
+                            <tr class="text-left text-slate-500 text-xs border-b border-slate-700/40">
+                                <th class="py-1">邮箱</th>
+                                <th class="py-1">状态</th>
+                                <th class="py-1">失败</th>
+                                <th class="py-1">操作</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <template x-for="m in (hostMembers[hostManaging.id] || [])" :key="m.id">
+                                <tr class="border-t border-slate-700/20">
+                                    <td class="py-1 mono text-xs" x-text="m.email"></td>
+                                    <td class="py-1">
+                                        <select class="pill" :class="m.status"
+                                                :value="m.status"
+                                                @change="updateMemberStatusFromHost(hostManaging, m, $event.target.value)">
+                                            <template x-for="s in ALL_STATUSES" :key="s">
+                                                <option :value="s" :selected="s === m.status" x-text="statusLabel(s)"></option>
+                                            </template>
+                                        </select>
+                                    </td>
+                                    <td class="py-1" x-text="m.fail_count"></td>
+                                    <td class="py-1">
+                                        <button @click="unbindMemberFromHost(hostManaging, m)"
+                                                class="text-orange-400 text-xs">解绑</button>
+                                    </td>
+                                </tr>
+                            </template>
+                            <tr x-show="!(hostMembers[hostManaging.id] || []).length">
+                                <td colspan="4" class="py-2 text-center text-slate-500 text-xs">（无绑定）</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- 绑定待处理子号 -->
+                <div class="pt-2 border-t border-slate-700/40">
+                    <div class="text-sm mb-1">
+                        绑定待处理子号
+                        <span class="text-xs text-slate-400"
+                              x-text="`(池中 status=new 未绑: ${hostUnboundMembers.length})`"></span>
+                    </div>
+                    <div x-show="hostManaging.slot_used >= 5" class="text-xs text-amber-400 mb-1">
+                        ⚠️ 已达家庭上限 5/5，仍可绑，但 reconcile 可能把多余成员剔除
+                    </div>
+                    <div class="flex gap-2 items-center">
+                        <select x-model="hostBindChoice[hostManaging.id]" class="flex-1 px-2 py-1 bg-slate-800 rounded text-sm">
+                            <option value="">选择一个待处理子号</option>
+                            <template x-for="u in hostUnboundMembers" :key="u.id">
+                                <option :value="u.id" x-text="u.email"></option>
+                            </template>
+                        </select>
+                        <button @click="bindMemberToHost(hostManaging)"
+                                :disabled="!hostBindChoice[hostManaging.id]"
+                                :class="hostBindChoice[hostManaging.id] ? 'bg-emerald-700 hover:bg-emerald-600 text-white' : 'bg-slate-800 text-slate-500 cursor-not-allowed'"
+                                class="px-3 py-1 rounded text-sm">绑定</button>
+                        <button @click="loadUnboundMembers()" class="text-xs text-slate-400 hover:text-slate-200"
+                                title="重新拉取 status=new 且未绑 host 的子号">🔄</button>
+                    </div>
+                    <div x-show="!hostUnboundMembers.length" class="mt-1 text-xs text-slate-500">
+                        当前池里没有 status=new 的未绑子号。批量导入新子号后回来点 🔄 刷新。
+                    </div>
+                </div>
+
+                <div class="flex gap-2 pt-2">
+                    <button @click="closeHostManage()" class="px-3 py-1 bg-slate-700 rounded">关闭</button>
+                </div>
+            </div>
+        </template>
+    </div>
 </main>
 
 <script>
@@ -396,6 +506,14 @@ function accounts() {
         // { hostId: pid } — non-empty means a manual login Chrome is running; button greys out.
         activeLoginSessions: {},
         _loginSessionsTimer: null,
+        // Host management drawer state (one drawer at a time). `hostManaging` is
+        // the currently-open host object or null. Other maps are keyed by hostId
+        // so drafts / cached lookups survive drawer close → re-open.
+        hostManaging: null,      // currently-open host row (or null)
+        hostMembers: {},         // { hostId: [bound member rows] }
+        hostUnboundMembers: [],  // pool of status=new AND host_id IS NULL members
+        hostNotesDraft: {},      // { hostId: string | undefined } — in-progress edits
+        hostBindChoice: {},      // { hostId: memberId selected in the bind dropdown }
         ALL_STATUSES: ['new','invite_pending','invite_failed','joined','accept_failed','oauth_failed','join_failed_region','done','abandoned','removed_from_family'],
         ACTIVE_STATUSES: ['new','invite_pending','invite_failed','joined','accept_failed','oauth_failed','join_failed_region','done'],
         ARCHIVED_STATUSES: ['abandoned','removed_from_family'],
@@ -451,6 +569,75 @@ function accounts() {
                 alert(`已启动登录（pid ${r.pid}）。Chrome 打开后会自动登入并跳到家庭成员页。关闭浏览器 = 结束会话。`);
             } catch (e) {
                 alert('启动登录失败：' + (e.message || e));
+            }
+        },
+        // ---------- 母号管理 drawer / 成员绑定 ----------
+        async openHostManage(h) {
+            this.hostManaging = h;
+            if (this.hostNotesDraft[h.id] === undefined) {
+                this.hostNotesDraft = { ...this.hostNotesDraft, [h.id]: h.notes || '' };
+            }
+            await Promise.all([this.loadHostMembers(h.id), this.loadUnboundMembers()]);
+        },
+        closeHostManage() {
+            this.hostManaging = null;
+        },
+        async loadHostMembers(hostId) {
+            // 只拉 ACTIVE_STATUSES（排除 abandoned / removed_from_family）。
+            // 那些已废弃的 member 在"已废弃" tab 专门展示，host 管理面板关心的是当前仍在家庭组里或待处理的绑定。
+            const statusParam = this.ACTIVE_STATUSES.join(',');
+            const rows = await App.api('GET', `/api/members?host_id=${hostId}&status=${statusParam}&pageSize=10000`);
+            this.hostMembers = { ...this.hostMembers, [hostId]: rows };
+        },
+        async loadUnboundMembers() {
+            // 限定 status=new（"待处理"）— 用户只想从新导入/重置过的子号里选。
+            // 想改成更宽的范围（比如加上 invite_failed）就在这里扩 status list。
+            const rows = await App.api('GET', `/api/members?unbound=1&status=new&pageSize=10000`);
+            this.hostUnboundMembers = rows;
+        },
+        // 刷完 hosts 后把 drawer 里的 hostManaging 对象替换成新一行，让 slot_used
+        // / notes 等字段跟着更新；否则用户看到的还是旧值。
+        _rebindHostManaging(hostId) {
+            if (!this.hostManaging || String(this.hostManaging.id) !== String(hostId)) return;
+            const fresh = this.hosts.find(x => String(x.id) === String(hostId));
+            if (fresh) this.hostManaging = fresh;
+        },
+        async saveHostNotes(h) {
+            const draft = this.hostNotesDraft[h.id] ?? '';
+            const next = draft.trim() === '' ? null : draft;
+            try {
+                await App.api('PATCH', `/api/hosts/${h.id}`, { notes: next });
+                await this.loadHosts();
+                this._rebindHostManaging(h.id);
+            } catch (e) { alert('保存备注失败：' + (e.message || e)); }
+        },
+        async bindMemberToHost(h) {
+            const memberId = this.hostBindChoice[h.id];
+            if (!memberId) return;
+            try {
+                await App.api('PATCH', `/api/members/${memberId}`, { host_id: parseInt(h.id, 10) });
+                this.hostBindChoice = { ...this.hostBindChoice, [h.id]: '' };
+                await Promise.all([this.loadHostMembers(h.id), this.loadUnboundMembers(), this.loadHosts()]);
+                this._rebindHostManaging(h.id);
+            } catch (e) { alert('绑定失败：' + (e.message || e)); }
+        },
+        async unbindMemberFromHost(h, m) {
+            if (!confirm(`确定把 ${m.email} 从 ${h.email} 解绑（host_id 置 null）？状态保持 ${this.statusLabel(m.status)} 不变。`)) return;
+            try {
+                await App.api('PATCH', `/api/members/${m.id}`, { host_id: null });
+                await Promise.all([this.loadHostMembers(h.id), this.loadUnboundMembers(), this.loadHosts()]);
+                this._rebindHostManaging(h.id);
+            } catch (e) { alert('解绑失败：' + (e.message || e)); }
+        },
+        async updateMemberStatusFromHost(h, m, newStatus) {
+            if (!newStatus || newStatus === m.status) return;
+            const previous = m.status;
+            try {
+                await App.api('PATCH', `/api/members/${m.id}`, { status: newStatus });
+                await Promise.all([this.loadHostMembers(h.id), this.loadMembers()]);
+            } catch (e) {
+                alert('状态更新失败：' + (e.message || e));
+                m.status = previous;
             }
         },
         switchTab(t) {

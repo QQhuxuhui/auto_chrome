@@ -4,10 +4,11 @@ const { parseLinesToAccounts } = require('./hosts');
 
 module.exports = async function routes(app) {
     app.get('/api/members', async (req) => {
-        const { status, host_id, search, has_token, page, pageSize } = req.query;
+        const { status, host_id, unbound, search, has_token, page, pageSize } = req.query;
         return members.listMembers({
             status,
             hostId: host_id ? parseInt(host_id, 10) : undefined,
+            unbound: unbound === '1' || unbound === 'true',
             search,
             hasToken: has_token !== undefined ? (has_token === '1' || has_token === 'true') : undefined,
             page: page ? parseInt(page, 10) : undefined,
