@@ -32,9 +32,11 @@ function isManualMode() {
     return String(process.env.ACCEPT_MODE || '').toLowerCase() === 'manual';
 }
 
-// 追加 ?hl=en 强制 Gmail UI 为英文（tabs、按钮等），
-// 但邮件正文仍是发送方原语言
-const GMAIL_URL = 'https://mail.google.com/mail/u/0/?hl=en';
+// 用 https://gmail.com 作为入口：未登录会被 Google 301 到 accounts.google.com/signin，
+// googleLogin 走完再 301 回 mail.google.com 收件箱。Chrome 启动已经带了
+// --lang=en-US + --accept-lang=en-US,en，所以即便不带 ?hl=en 参数，Gmail UI
+// 也会是英文（pipeline 里匹配 "Primary" tab 等依赖这个）。
+const GMAIL_URL = 'https://gmail.com';
 
 // ============ 条件暂停（人工干预） ============
 // 用法：

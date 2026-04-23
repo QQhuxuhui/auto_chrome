@@ -278,17 +278,35 @@ function dashboard() {
             } catch (e) { alert('同步失败：' + e.message); }
         },
         async agCleanup() {
-            if (!confirm('执行清理：后端自动挑出"挂有已封禁 member"的 host，只登这些 host 扫 family 页 + 移除（含 invalid_grant + 配额耗尽）。确认？')) return;
             try {
-                const r = await App.api('POST', '/api/reconcile');
-                if (r.skipped) {
-                    alert(`没有 host 需要清理：${r.reason}`);
-                } else {
-                    const n = Array.isArray(r.hostIds) ? r.hostIds.length : '?';
-                    alert(`清理已启动 run #${r.runId}，登录 ${n} 个 host（自动筛选）。`);
+                // 先 dry-run：让用户看到具体动几个、分布怎么样再按确认
+                const preview = await App.api('POST', '/api/antigravity/cleanup', { dryRun: true });
+                if (!preview.total_unusable) {
+                    alert('平台上没有 disabled / 配额耗尽的账号，无需清理。');
+                    return;
                 }
+                const msg = [
+                    `准备清理 ${preview.total_unusable} 个不可用账号：`,
+                    `  · 平台 DELETE: ${preview.platform_deleted.length} matched + ${preview.orphan_deleted.length} orphan`,
+                    `  · 本地 unbind + status→abandoned: ${preview.local_updated.length}`,
+                    `  · 已在废弃列表、无需再改: ${preview.local_unchanged.length}`,
+                    '',
+                    '确认执行？（此操作不可逆，Antigravity 平台记录会被永久删除）',
+                ].join('\n');
+                if (!confirm(msg)) return;
+
+                const r = await App.api('POST', '/api/antigravity/cleanup', {});
+                const failMsg = r.platform_delete_failed.length
+                    ? `\n\n平台 DELETE 失败 ${r.platform_delete_failed.length} 个：\n` +
+                      r.platform_delete_failed.map(x => `  ${x.email}: ${x.error}`).join('\n')
+                    : '';
+                alert(
+                    `清理完成：\n` +
+                    `  · 平台删除 ${r.platform_deleted.length + r.orphan_deleted.length}（matched ${r.platform_deleted.length} + orphan ${r.orphan_deleted.length}）\n` +
+                    `  · 本地更新 ${r.local_updated.length}` + failMsg
+                );
                 this.load();
-            } catch (e) { alert('启动清理失败：' + e.message); }
+            } catch (e) { alert('清理失败：' + e.message); }
         },
     };
 }
