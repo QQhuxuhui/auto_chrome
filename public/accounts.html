@@ -95,6 +95,20 @@
                         <td class="space-x-2 text-sm">
                             <button @click="openHostManage(h)" class="text-cyan-400"
                                     title="打开管理面板：编辑备注 / 查看修改已绑定子号 / 绑定待处理子号">管理</button>
+                            <button @click="copyHostMembers(h)" class="text-blue-400"
+                                    title="复制此母号下活跃子号的邮箱到剪贴板，一行一个（不含已废弃）">复制子号</button>
+                            <button @click="openHostStart(h)" class="text-amber-400"
+                                    :disabled="h.disabled"
+                                    :class="h.disabled ? 'text-slate-500 cursor-not-allowed' : 'text-amber-400'"
+                                    :title="h.disabled ? '母号已停用，不能启动' : '只针对这个母号启动流水线'">启动</button>
+                            <template x-if="h.slot_used < 5">
+                                <button @click="quickBindHost(h)" class="text-purple-400"
+                                        :title="`从 status=new 未绑池里绑 ${5 - h.slot_used} 个子号，状态转为邀请中`"
+                                        x-text="`一键+${5 - h.slot_used}`"></button>
+                            </template>
+                            <template x-if="h.slot_used >= 5">
+                                <span class="text-slate-500" title="已达家庭上限 5/5，无需添加">已满</span>
+                            </template>
                             <template x-if="!activeLoginSessions[h.id]">
                                 <button @click="loginHost(h)" class="text-emerald-400"
                                         title="打开 Chrome 登录并进入家庭成员页，手动关闭浏览器结束">登录</button>
@@ -121,6 +135,10 @@
             <button x-show="tab==='members'" @click="pushAllPending()" class="px-3 py-1 bg-emerald-700 hover:bg-emerald-600 rounded">
                 批量推送待推送（<span x-text="pendingPushCount"></span>）
             </button>
+            <button x-show="selectedMemberCount() > 0" @click="deleteSelectedMembers()"
+                    class="px-3 py-1 bg-red-800 hover:bg-red-700 rounded">
+                批量删除 <span x-text="`(${selectedMemberCount()})`"></span>
+            </button>
             <select x-show="tab==='members'" x-model="memberStatusFilter" @change="loadMembers()" class="px-2 py-1 bg-slate-800 rounded">
                 <option value="">全部状态</option>
                 <template x-for="s in ACTIVE_STATUSES" :key="s">
@@ -138,6 +156,13 @@
         </div>
         <table class="data card">
             <thead><tr>
+                <th class="w-8">
+                    <input type="checkbox"
+                           :checked="members.length > 0 && selectedMemberCount() === members.length"
+                           :indeterminate.prop="selectedMemberCount() > 0 && selectedMemberCount() < members.length"
+                           @change="toggleSelectAllMembers($event.target.checked)"
+                           title="全选 / 全不选（仅当前页可见）">
+                </th>
                 <th>邮箱</th>
                 <th>密码</th>
                 <th>辅助邮箱</th>
@@ -152,6 +177,11 @@
             <tbody>
                 <template x-for="m in members" :key="m.id">
                     <tr>
+                        <td class="w-8">
+                            <input type="checkbox"
+                                   :checked="!!selectedMemberIds[m.id]"
+                                   @change="toggleMemberSelection(m.id, $event.target.checked)">
+                        </td>
                         <td class="mono" x-text="m.email"></td>
                         <td>
                             <template x-if="m.password">
@@ -252,7 +282,7 @@
                         </td>
                     </tr>
                 </template>
-                <tr x-show="!members.length"><td colspan="10" class="text-center text-slate-500 py-4">暂无子号</td></tr>
+                <tr x-show="!members.length"><td colspan="11" class="text-center text-slate-500 py-4">暂无子号</td></tr>
             </tbody>
         </table>
     </section>
@@ -481,6 +511,64 @@
             </div>
         </template>
     </div>
+
+    <!-- Host start drawer: 针对单个母号启动流水线（hostFilter=[h.email]） -->
+    <div x-show="hostStartOpen" class="backdrop open" @click="closeHostStart()"></div>
+    <div x-show="hostStartOpen" class="drawer open" @click.stop>
+        <template x-if="hostStartHost">
+            <div class="space-y-4">
+                <h2 class="text-lg font-semibold">
+                    启动流程 <span class="mono text-base" x-text="hostStartHost.email"></span>
+                </h2>
+                <div class="text-xs text-slate-400" x-text="`当前占用 ${hostStartHost.slot_used}/5`"></div>
+
+                <div>
+                    <div class="text-sm mb-1">阶段</div>
+                    <label class="mr-3"><input type="checkbox" x-model="hostStartForm.stages1"> 1 发邀请</label>
+                    <label class="mr-3"><input type="checkbox" x-model="hostStartForm.stages2"> 2 接受邀请</label>
+                    <label><input type="checkbox" x-model="hostStartForm.stages3"> 3 授权</label>
+                    <div x-show="hostStartForm.stages1 && hostStartHost.slot_used >= 5" class="text-xs text-red-400 mt-1">
+                        ⚠️ 母号已满 5/5，阶段 1 发不出去（除非勾上"删除未知家庭成员"让 reconcile 回收空位）
+                    </div>
+                </div>
+
+                <div>
+                    <label class="text-sm">并发数
+                        <select x-model.number="hostStartForm.concurrency" class="ml-2 bg-slate-800 px-2 py-1 rounded">
+                            <option>1</option><option>2</option><option>3</option><option>4</option><option>5</option>
+                        </select>
+                    </label>
+                    <div class="text-xs text-slate-500 mt-1">单母号场景 1-2 足够；更多是 Stage 2/3 子号并行数。</div>
+                </div>
+
+                <div>
+                    <label class="text-sm">
+                        <input type="checkbox" x-model="hostStartForm.removeUnknown">
+                        删除未知家庭成员
+                    </label>
+                    <div class="text-xs text-slate-400 ml-5 mt-0.5">
+                        登录 host 后把 Google 家庭里但不在本系统内的成员移除（host 自己不动）。
+                    </div>
+                </div>
+
+                <div>
+                    <label class="text-sm">
+                        <input type="checkbox" x-model="hostStartForm.manualMode">
+                        手动模式（跳过母号登录）
+                    </label>
+                    <div class="text-xs text-slate-400 ml-5 mt-0.5">
+                        Stage 2 不启动 host 监听、只跑子号 accept；Stage 2/3（无 1）时也跳过 reconcile 前奏。
+                    </div>
+                </div>
+
+                <div class="flex gap-2 pt-2">
+                    <button @click="closeHostStart()" class="px-3 py-1 bg-slate-700 rounded">取消</button>
+                    <button @click="submitHostStart()" class="px-3 py-1 bg-emerald-700 hover:bg-emerald-600 rounded">开始</button>
+                </div>
+                <div x-show="hostStartError" class="text-red-400 text-sm" x-text="hostStartError"></div>
+            </div>
+        </template>
+    </div>
 </main>
 
 <script>
@@ -514,6 +602,13 @@ function accounts() {
         hostUnboundMembers: [],  // pool of status=new AND host_id IS NULL members
         hostNotesDraft: {},      // { hostId: string | undefined } — in-progress edits
         hostBindChoice: {},      // { hostId: memberId selected in the bind dropdown }
+        // 子号多选（批量删除用）；key 是 member id，true 表示选中
+        selectedMemberIds: {},
+        // 单母号启动流水线 drawer
+        hostStartOpen: false,
+        hostStartHost: null,
+        hostStartForm: { stages1: true, stages2: true, stages3: true, concurrency: 1, removeUnknown: false, manualMode: false },
+        hostStartError: '',
         ALL_STATUSES: ['new','invite_pending','invite_failed','joined','accept_failed','oauth_failed','join_failed_region','done','abandoned','removed_from_family'],
         ACTIVE_STATUSES: ['new','invite_pending','invite_failed','joined','accept_failed','oauth_failed','join_failed_region','done'],
         ARCHIVED_STATUSES: ['abandoned','removed_from_family'],
@@ -570,6 +665,86 @@ function accounts() {
             } catch (e) {
                 alert('启动登录失败：' + (e.message || e));
             }
+        },
+        async copyHostMembers(h) {
+            // 和管理 drawer 的"已绑定子号"列表口径一致：host_id=h.id 且 status 在
+            // ACTIVE_STATUSES（排除 abandoned / removed_from_family）。
+            try {
+                const statusParam = this.ACTIVE_STATUSES.join(',');
+                const rows = await App.api('GET', `/api/members?host_id=${h.id}&status=${statusParam}&pageSize=10000`);
+                if (!rows.length) { alert(`${h.email} 下没有活跃子号可复制`); return; }
+                const text = rows.map(m => m.email).join('\n');
+                const ok = await App.copyText(text);
+                alert(ok ? `已复制 ${rows.length} 个子号邮箱到剪贴板` : `复制失败，下面是内容手动复制：\n\n${text}`);
+            } catch (e) { alert('复制失败：' + (e.message || e)); }
+        },
+        // ---------- 单母号启动流水线 ----------
+        openHostStart(h) {
+            if (h.disabled) { alert('该母号已停用，不能启动'); return; }
+            this.hostStartHost = h;
+            this.hostStartError = '';
+            // 默认：阶段全不选（每次人工挑），手动模式开，并发数 = 当前绑定数
+            // clamp 到 [1,5] 因为下拉就 5 个选项而且 0 并发没意义。
+            const slotUsed = Math.max(1, Math.min(5, Number(h.slot_used || 0) || 1));
+            this.hostStartForm = {
+                stages1: false,
+                stages2: false,
+                stages3: false,
+                concurrency: slotUsed,
+                removeUnknown: false,
+                manualMode: true,
+            };
+            this.hostStartOpen = true;
+        },
+        closeHostStart() {
+            this.hostStartOpen = false;
+            this.hostStartHost = null;
+            this.hostStartError = '';
+        },
+        async submitHostStart() {
+            this.hostStartError = '';
+            const h = this.hostStartHost;
+            if (!h) return;
+            const stages = [];
+            if (this.hostStartForm.stages1) stages.push('1');
+            if (this.hostStartForm.stages2) stages.push('2');
+            if (this.hostStartForm.stages3) stages.push('3');
+            if (!stages.length) { this.hostStartError = '请至少选择一个阶段'; return; }
+            try {
+                const r = await App.api('POST', '/api/pipeline/start', {
+                    stages: stages.join(','),
+                    hostFilter: [h.email],     // 只跑这一个母号
+                    concurrency: this.hostStartForm.concurrency,
+                    removeUnknownMembers: this.hostStartForm.removeUnknown,
+                    manualMode: this.hostStartForm.manualMode,
+                });
+                const runId = r.runId ?? r.id ?? '?';
+                alert(`已启动 run #${runId}\n  host: ${h.email}\n  stages: ${stages.join(',')}\n  concurrency: ${this.hostStartForm.concurrency}\n\n到"运行历史"页跟进度。`);
+                this.closeHostStart();
+            } catch (e) {
+                this.hostStartError = e.message || String(e);
+            }
+        },
+        async quickBindHost(h) {
+            const slotFree = Math.max(0, 5 - Number(h.slot_used || 0));
+            if (slotFree <= 0) { alert('该母号已达 5/5，无需添加'); return; }
+            if (!confirm(
+                `一键添加：从 status=new 未绑池里挑 ${slotFree} 个子号，` +
+                `绑到 ${h.email} 并把状态改为 邀请中（invite_pending）。\n\n` +
+                `此操作只改本地 DB，不会在 Google 家庭里真实发邀请。确认？`
+            )) return;
+            try {
+                const r = await App.api('POST', `/api/hosts/${h.id}/quick-bind`, { count: slotFree });
+                const lines = r.members.map(m => '  · ' + m.email);
+                const shortfallNote = r.shortfall > 0 ? `\n\n⚠️ 池里 status=new 数量不够，少绑 ${r.shortfall} 个` : '';
+                alert(`已绑 ${r.bound}/${r.requested}：\n${lines.join('\n')}${shortfallNote}`);
+                await Promise.all([this.loadHosts(), this.loadMembers()]);
+                // 如果这个 host 的管理面板正开着，刷 drawer 里的缓存
+                if (this.hostManaging && String(this.hostManaging.id) === String(h.id)) {
+                    await Promise.all([this.loadHostMembers(h.id), this.loadUnboundMembers()]);
+                    this._rebindHostManaging(h.id);
+                }
+            } catch (e) { alert('一键添加失败：' + (e.message || e)); }
         },
         // ---------- 母号管理 drawer / 成员绑定 ----------
         async openHostManage(h) {
@@ -646,8 +821,39 @@ function accounts() {
             // Active / archived tabs use disjoint status filter option sets; reset to avoid stale filter.
             if (t === 'members' || t === 'archived') {
                 this.memberStatusFilter = '';
+                this.selectedMemberIds = {};  // 防止跨 tab 误删
                 this.loadMembers();
             }
+        },
+        // ---------- 子号多选 / 批量删除 ----------
+        selectedMemberCount() {
+            return Object.keys(this.selectedMemberIds).filter(k => this.selectedMemberIds[k]).length;
+        },
+        toggleMemberSelection(id, checked) {
+            const next = { ...this.selectedMemberIds };
+            if (checked) next[id] = true;
+            else delete next[id];
+            this.selectedMemberIds = next;
+        },
+        toggleSelectAllMembers(checked) {
+            const next = {};
+            if (checked) for (const m of this.members) next[m.id] = true;
+            this.selectedMemberIds = next;
+        },
+        async deleteSelectedMembers() {
+            const ids = Object.keys(this.selectedMemberIds).filter(k => this.selectedMemberIds[k]);
+            if (!ids.length) return;
+            // 取被选中的 email 做 confirm 预览（最多显示前 20 个）
+            const emailById = new Map(this.members.map(m => [String(m.id), m.email]));
+            const sample = ids.slice(0, 20).map(id => '  · ' + (emailById.get(String(id)) || `#${id}`)).join('\n');
+            const more = ids.length > 20 ? `\n  ...以及另外 ${ids.length - 20} 个` : '';
+            if (!confirm(`确定删除以下 ${ids.length} 个子号？此操作不可逆：\n\n${sample}${more}`)) return;
+            try {
+                const r = await App.api('POST', '/api/members/bulk-delete', { ids: ids.map(n => parseInt(n, 10)) });
+                this.selectedMemberIds = {};
+                await this.loadMembers();
+                alert(`已删除 ${r.deleted}/${r.requested}`);
+            } catch (e) { alert('批量删除失败：' + (e.message || e)); }
         },
         async updateStatus(m, newStatus) {
             if (!newStatus || newStatus === m.status) return;

@@ -111,6 +111,45 @@ async function deleteMember(id) {
     await db.query('DELETE FROM members WHERE id = $1', [id]);
 }
 
+async function deleteMembersByIds(ids) {
+    if (!Array.isArray(ids) || ids.length === 0) return 0;
+    const { rowCount } = await db.query(
+        'DELETE FROM members WHERE id = ANY($1::bigint[])',
+        [ids]
+    );
+    return rowCount || 0;
+}
+
+/**
+ * Batch-bind up to `count` members (status='new' AND host_id IS NULL) to a
+ * given host, transitioning them to 'invite_pending' in a single UPDATE.
+ * Used by the "一键添加子号" button on the hosts page — skips Stage 1 Chrome
+ * invite; Stage 2 / manual ops pick them up from here.
+ * Returns the rows actually bound (may be fewer than `count` if the pool is
+ * smaller). Caller is responsible for family-cap enforcement.
+ */
+async function quickBindNewMembersToHost(hostId, count) {
+    if (!Number.isInteger(count) || count <= 0) return [];
+    const sql = `
+        UPDATE members m
+        SET status = 'invite_pending',
+            host_id = $1,
+            invited_at = NOW(),
+            updated_at = NOW()
+        FROM (
+            SELECT id FROM members
+            WHERE status = 'new' AND host_id IS NULL
+            ORDER BY id ASC
+            LIMIT $2
+            FOR UPDATE SKIP LOCKED
+        ) AS pick
+        WHERE m.id = pick.id
+        RETURNING m.id, m.email
+    `;
+    const { rows } = await db.query(sql, [hostId, count]);
+    return rows;
+}
+
 async function transitionToInvitePending(memberId, hostId) {
     const sql = `
         UPDATE members
@@ -357,6 +396,7 @@ module.exports = {
     upsertMember,
     updateMember,
     deleteMember,
+    deleteMembersByIds,
     transitionToInvitePending,
     transitionToJoined,
     transitionToDone,
@@ -370,6 +410,7 @@ module.exports = {
     listMembersNeedingPush,
     listMembersNeedingFamilyRemoval,
     listHostIdsNeedingCleanup,
+    quickBindNewMembersToHost,
     listMembersForStage,
     countByStatus,
     ABANDON_THRESHOLD,

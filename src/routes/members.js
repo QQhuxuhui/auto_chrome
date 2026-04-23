@@ -115,4 +115,17 @@ module.exports = async function routes(app) {
         await members.deleteMember(id);
         reply.code(204).send();
     });
+
+    // Batch delete: body { ids: [1,2,...] }. 一次 SQL 搞定，避免前端 loop。
+    // 注意：没开事务 —— DELETE 是幂等的，部分成功也无副作用。
+    app.post('/api/members/bulk-delete', async (req, reply) => {
+        const body = req.body || {};
+        const raw = Array.isArray(body.ids) ? body.ids : [];
+        const ids = raw
+            .map(x => parseInt(x, 10))
+            .filter(n => Number.isInteger(n) && n > 0);
+        if (!ids.length) return reply.code(400).send({ error: 'ids required (non-empty array)' });
+        const deleted = await members.deleteMembersByIds(ids);
+        return { requested: ids.length, deleted };
+    });
 };
