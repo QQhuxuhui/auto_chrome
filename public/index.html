@@ -42,7 +42,7 @@
         <div class="card p-4">
             <h3 class="font-semibold mb-2">子号状态</h3>
             <ul class="text-sm space-y-1">
-                <template x-for="s in ['new','invite_pending','joined','done','invite_failed','accept_failed','oauth_failed','join_failed_region','abandoned','removed_from_family']" :key="s">
+                <template x-for="s in ['new','invite_pending','joined','done','invite_failed','accept_failed','oauth_failed','join_failed_region','abandoned','removed_from_family','sold']" :key="s">
                     <li class="flex justify-between">
                         <span x-text="statusLabel(s)" class="mono"></span>
                         <span x-text="status.byStatus[s] || 0"></span>
@@ -66,8 +66,8 @@
                 <li class="flex justify-between">
                     <span>封禁</span>
                     <span class="text-red-400"
-                          :title="`invalid_grant: ${ag.disabled || 0} · 配额耗尽: ${ag.is_forbidden || 0}`"
-                          x-text="(ag.disabled || 0) + (ag.is_forbidden || 0)"></span>
+                          :title="`invalid_grant: ${ag.disabled || 0} · 配额耗尽: ${ag.is_forbidden || 0} · 代理禁用: ${ag.proxy_disabled || 0}`"
+                          x-text="(ag.disabled || 0) + (ag.is_forbidden || 0) + (ag.proxy_disabled || 0)"></span>
                 </li>
                 <li class="flex justify-between"><span>需验证</span><span x-text="ag.validation_blocked || 0" class="text-yellow-400"></span></li>
                 <li class="flex justify-between"><span>未关联本地</span><span x-text="ag.orphans || 0"></span></li>
@@ -184,6 +184,7 @@ function dashboard() {
                 'abandoned': '已放弃',
                 'removed_from_family': '已移除',
                 'join_failed_region': '加入失败（地区不符）',
+                'sold': '已出售',
             }[s] || s;
         },
         async load() {
@@ -282,17 +283,22 @@ function dashboard() {
                 // 先 dry-run：让用户看到具体动几个、分布怎么样再按确认
                 const preview = await App.api('POST', '/api/antigravity/cleanup', { dryRun: true });
                 if (!preview.total_unusable) {
-                    alert('平台上没有 disabled / 配额耗尽的账号，无需清理。');
+                    alert('平台上没有 disabled / 配额耗尽 / 代理禁用的账号，无需清理。');
                     return;
                 }
+                // 多租户后:不再 orphan_delete (避免误删别的 worker 的账号),
+                // 取而代之的是 skipped_foreign — 平台账号没有 owner=我的本地映射,
+                // 跳过不动。可能是其他用户推上去的。
+                const skipped = (preview.skipped_foreign || []).length;
                 const msg = [
                     `准备清理 ${preview.total_unusable} 个不可用账号：`,
-                    `  · 平台 DELETE: ${preview.platform_deleted.length} matched + ${preview.orphan_deleted.length} orphan`,
+                    `  · 平台 DELETE (本机所属): ${preview.platform_deleted.length}`,
                     `  · 本地 unbind + status→abandoned: ${preview.local_updated.length}`,
                     `  · 已在废弃列表、无需再改: ${preview.local_unchanged.length}`,
+                    skipped ? `  · 跳过 ${skipped} 个外部账号(非本机所属,可能是其他用户推送)` : null,
                     '',
                     '确认执行？（此操作不可逆，Antigravity 平台记录会被永久删除）',
-                ].join('\n');
+                ].filter(Boolean).join('\n');
                 if (!confirm(msg)) return;
 
                 const r = await App.api('POST', '/api/antigravity/cleanup', {});
@@ -300,10 +306,13 @@ function dashboard() {
                     ? `\n\n平台 DELETE 失败 ${r.platform_delete_failed.length} 个：\n` +
                       r.platform_delete_failed.map(x => `  ${x.email}: ${x.error}`).join('\n')
                     : '';
+                const rSkipped = (r.skipped_foreign || []).length;
                 alert(
                     `清理完成：\n` +
-                    `  · 平台删除 ${r.platform_deleted.length + r.orphan_deleted.length}（matched ${r.platform_deleted.length} + orphan ${r.orphan_deleted.length}）\n` +
-                    `  · 本地更新 ${r.local_updated.length}` + failMsg
+                    `  · 平台删除 ${r.platform_deleted.length}\n` +
+                    `  · 本地更新 ${r.local_updated.length}` +
+                    (rSkipped ? `\n  · 跳过外部账号 ${rSkipped}` : '') +
+                    failMsg
                 );
                 this.load();
             } catch (e) { alert('清理失败：' + e.message); }

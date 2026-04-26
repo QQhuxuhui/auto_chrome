@@ -37,6 +37,7 @@ select.pill option { background: #0a0a0f; color: #e5e7eb; }
 .pill.abandoned { background: #44403c; color: #d6d3d1; }
 .pill.removed_from_family { background: #581c87; color: #e9d5ff; }
 .pill.join_failed_region { background: #9a3412; color: #fed7aa; }
+.pill.sold { background: #1e3a8a; color: #c7d2fe; }
 .drawer {
     position: fixed; top: 0; right: 0; height: 100vh; width: min(560px, 100%);
     background: #0a0a0f; border-left: 1px solid rgba(100,100,150,0.3);

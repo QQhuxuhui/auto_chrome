@@ -48,6 +48,7 @@
                 <th>FA 验证码</th>
                 <th>占用</th>
                 <th>已停用</th>
+                <th>添加时间</th>
                 <th>操作</th>
             </tr></thead>
             <template x-for="h in hosts" :key="h.id">
@@ -80,11 +81,20 @@
                         </td>
                         <td>
                             <template x-if="h.totp_secret">
-                                <span>
-                                    <span class="mono text-sm tracking-widest" x-text="(totpCache['host-'+h.id] || {}).code || '…'"></span>
-                                    <span class="ml-1 text-xs text-slate-400" x-text="ttlFor('host-'+h.id) > 0 ? ttlFor('host-'+h.id)+'s' : ''"></span>
-                                    <button @click="copyCred((totpCache['host-'+h.id] || {}).code)" class="ml-1 text-xs text-blue-400">复制</button>
-                                </span>
+                                <div>
+                                    <div>
+                                        <span class="mono text-sm tracking-widest" x-text="(totpCache['host-'+h.id] || {}).code || '…'"></span>
+                                        <span class="ml-1 text-xs text-slate-400" x-text="ttlFor('host-'+h.id) > 0 ? ttlFor('host-'+h.id)+'s' : ''"></span>
+                                        <button @click="copyCred((totpCache['host-'+h.id] || {}).code)" class="ml-1 text-xs text-blue-400">复制</button>
+                                    </div>
+                                    <div class="text-xs mt-0.5">
+                                        <span class="text-slate-500">种子</span>
+                                        <span class="mono ml-1" x-text="revealed['host-totp-'+h.id] ? h.totp_secret : '••••••'"></span>
+                                        <button @click="toggleReveal('host-totp', h.id)" class="ml-1 text-blue-400"
+                                                x-text="revealed['host-totp-'+h.id] ? '隐' : '显'"></button>
+                                        <button @click="copyCred(h.totp_secret)" class="ml-1 text-blue-400">复制</button>
+                                    </div>
+                                </div>
                             </template>
                             <template x-if="!h.totp_secret"><span>—</span></template>
                         </td>
@@ -92,9 +102,14 @@
                         <td>
                             <input type="checkbox" :checked="h.disabled" @change="toggleDisabled(h)">
                         </td>
+                        <td class="text-xs text-slate-400 mono whitespace-nowrap"
+                            :title="h.created_at ? App.timeago(h.created_at) : ''"
+                            x-text="fmtDateTime(h.created_at)"></td>
                         <td class="space-x-2 text-sm">
                             <button @click="openHostManage(h)" class="text-cyan-400"
                                     title="打开管理面板：编辑备注 / 查看修改已绑定子号 / 绑定待处理子号">管理</button>
+                            <button @click="copyAccountLine(h)" class="text-blue-400"
+                                    title="复制此账号到剪贴板，格式：email:password:recovery:totp">复制账号</button>
                             <button @click="copyHostMembers(h)" class="text-blue-400"
                                     title="复制此母号下活跃子号的邮箱到剪贴板，一行一个（不含已废弃）">复制子号</button>
                             <button @click="openHostStart(h)" class="text-amber-400"
@@ -123,7 +138,7 @@
                 </tbody>
             </template>
             <tbody x-show="!hosts.length">
-                <tr><td colspan="7" class="text-center text-slate-500 py-4">暂无母号</td></tr>
+                <tr><td colspan="8" class="text-center text-slate-500 py-4">暂无母号</td></tr>
             </tbody>
         </table>
     </section>
@@ -172,6 +187,7 @@
                 <th>失败次数</th>
                 <th>凭证</th>
                 <th>平台状态</th>
+                <th>添加时间</th>
                 <th>操作</th>
             </tr></thead>
             <tbody>
@@ -205,11 +221,20 @@
                         </td>
                         <td>
                             <template x-if="m.totp_secret">
-                                <span>
-                                    <span class="mono text-sm tracking-widest" x-text="(totpCache['member-'+m.id] || {}).code || '…'"></span>
-                                    <span class="ml-1 text-xs text-slate-400" x-text="ttlFor('member-'+m.id) > 0 ? ttlFor('member-'+m.id)+'s' : ''"></span>
-                                    <button @click="copyCred((totpCache['member-'+m.id] || {}).code)" class="ml-1 text-xs text-blue-400">复制</button>
-                                </span>
+                                <div>
+                                    <div>
+                                        <span class="mono text-sm tracking-widest" x-text="(totpCache['member-'+m.id] || {}).code || '…'"></span>
+                                        <span class="ml-1 text-xs text-slate-400" x-text="ttlFor('member-'+m.id) > 0 ? ttlFor('member-'+m.id)+'s' : ''"></span>
+                                        <button @click="copyCred((totpCache['member-'+m.id] || {}).code)" class="ml-1 text-xs text-blue-400">复制</button>
+                                    </div>
+                                    <div class="text-xs mt-0.5">
+                                        <span class="text-slate-500">种子</span>
+                                        <span class="mono ml-1" x-text="revealed['member-totp-'+m.id] ? m.totp_secret : '••••••'"></span>
+                                        <button @click="toggleReveal('member-totp', m.id)" class="ml-1 text-blue-400"
+                                                x-text="revealed['member-totp-'+m.id] ? '隐' : '显'"></button>
+                                        <button @click="copyCred(m.totp_secret)" class="ml-1 text-blue-400">复制</button>
+                                    </div>
+                                </div>
                             </template>
                             <template x-if="!m.totp_secret"><span>—</span></template>
                         </td>
@@ -254,17 +279,26 @@
                                     <span class="pill invite_failed"
                                           :title="m.antigravity.forbidden_reason || 'AI credits 耗尽'">❌ 配额封禁</span>
                                 </template>
-                                <template x-if="!m.antigravity.disabled && !m.antigravity.is_forbidden && m.antigravity.validation_blocked">
+                                <template x-if="!m.antigravity.disabled && !m.antigravity.is_forbidden && m.antigravity.proxy_disabled">
+                                    <span class="pill invite_failed"
+                                          :title="m.antigravity.proxy_disabled_reason || '代理被批量禁用'">❌ 代理禁用</span>
+                                </template>
+                                <template x-if="!m.antigravity.disabled && !m.antigravity.is_forbidden && !m.antigravity.proxy_disabled && m.antigravity.validation_blocked">
                                     <span class="pill oauth_failed">⚠️ 需验证</span>
                                 </template>
-                                <template x-if="!m.antigravity.disabled && !m.antigravity.is_forbidden && !m.antigravity.validation_blocked">
+                                <template x-if="!m.antigravity.disabled && !m.antigravity.is_forbidden && !m.antigravity.proxy_disabled && !m.antigravity.validation_blocked">
                                     <span class="pill done">✅ 正常</span>
                                 </template>
                             </template>
                         </td>
+                        <td class="text-xs text-slate-400 mono whitespace-nowrap"
+                            :title="m.created_at ? App.timeago(m.created_at) : ''"
+                            x-text="fmtDateTime(m.created_at)"></td>
                         <td class="space-x-2 text-sm">
                             <button @click="openDetail(m)" class="text-blue-400">详情</button>
                             <button @click="openEdit(m)" class="text-cyan-400">编辑</button>
+                            <button @click="copyAccountLine(m)" class="text-blue-400"
+                                    title="复制此账号到剪贴板，格式：email:password:recovery:totp">复制账号</button>
                             <!-- 有凭证（refresh token）就显示推送按钮，不再受 status/disabled 约束。
                                  未推过 → "推送"；已推过 → "重推"（覆盖平台记录）。 -->
                             <template x-if="m.token && (!m.antigravity || !m.antigravity.id)">
@@ -282,7 +316,7 @@
                         </td>
                     </tr>
                 </template>
-                <tr x-show="!members.length"><td colspan="11" class="text-center text-slate-500 py-4">暂无子号</td></tr>
+                <tr x-show="!members.length"><td colspan="12" class="text-center text-slate-500 py-4">暂无子号</td></tr>
             </tbody>
         </table>
     </section>
@@ -364,6 +398,7 @@
                                 <div>disabled: <span :class="detail.antigravity.disabled ? 'text-red-400' : ''" x-text="detail.antigravity.disabled ? `是 (${detail.antigravity.disabled_reason || '未知'})` : '否'"></span></div>
                                 <div>需验证: <span :class="detail.antigravity.validation_blocked ? 'text-yellow-400' : ''" x-text="detail.antigravity.validation_blocked ? '是' : '否'"></span></div>
                                 <div>quota 禁用: <span :class="detail.antigravity.is_forbidden ? 'text-orange-400' : ''" x-text="detail.antigravity.is_forbidden ? `是 (${detail.antigravity.forbidden_reason || '未知'})` : '否'"></span></div>
+                                <div>代理禁用: <span :class="detail.antigravity.proxy_disabled ? 'text-red-400' : ''" x-text="detail.antigravity.proxy_disabled ? `是 (${detail.antigravity.proxy_disabled_reason || '未知'})` : '否'"></span></div>
                             </div>
                         </template>
                         <template x-if="detail.antigravity && detail.antigravity.push_error">
@@ -609,9 +644,9 @@ function accounts() {
         hostStartHost: null,
         hostStartForm: { stages1: true, stages2: true, stages3: true, concurrency: 1, removeUnknown: false, manualMode: false },
         hostStartError: '',
-        ALL_STATUSES: ['new','invite_pending','invite_failed','joined','accept_failed','oauth_failed','join_failed_region','done','abandoned','removed_from_family'],
+        ALL_STATUSES: ['new','invite_pending','invite_failed','joined','accept_failed','oauth_failed','join_failed_region','done','abandoned','removed_from_family','sold'],
         ACTIVE_STATUSES: ['new','invite_pending','invite_failed','joined','accept_failed','oauth_failed','join_failed_region','done'],
-        ARCHIVED_STATUSES: ['abandoned','removed_from_family'],
+        ARCHIVED_STATUSES: ['abandoned','removed_from_family','sold'],
         // 每行的密码遮蔽状态：key 为 "host-<id>" / "member-<id>"，布尔值 true 表示已显示。
         revealed: {},
         // TOTP 代码缓存：key 同上，值为 { code, expiresAt(秒) }。
@@ -631,6 +666,7 @@ function accounts() {
                 'abandoned': '已放弃',
                 'removed_from_family': '已移除',
                 'join_failed_region': '加入失败（地区不符）',
+                'sold': '已出售',
             }[s] || s;
         },
         async load() {
@@ -881,6 +917,18 @@ function accounts() {
             if (!text) return;
             const ok = await App.copyText(text);
             if (!ok) alert('复制失败');
+        },
+        fmtDateTime(iso) {
+            if (!iso) return '—';
+            const d = new Date(iso);
+            if (Number.isNaN(d.getTime())) return '—';
+            const p = (n) => String(n).padStart(2, '0');
+            return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+        },
+        async copyAccountLine(r) {
+            const line = [r.email || '', r.password || '', r.recovery_email || '', r.totp_secret || ''].join(':');
+            const ok = await App.copyText(line);
+            if (!ok) alert('复制失败，下面是内容请手动复制：\n\n' + line);
         },
         ttlFor(key) {
             // Binding reads `this.tick` so Alpine re-evaluates each second.

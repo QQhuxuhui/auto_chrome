@@ -20,6 +20,7 @@ module.exports = async function routes(app) {
                     email: a.email, password: a.pass,
                     recovery_email: a.recovery || null,
                     totp_secret: a.totp_secret || null,
+                    owner_worker_id: app.workerId,
                 });
                 if (r.inserted) inserted++; else skipped++;
             }
@@ -36,6 +37,7 @@ module.exports = async function routes(app) {
                     email: a.email, password: a.pass,
                     recovery_email: a.recovery || null,
                     totp_secret: a.totp_secret || null,
+                    owner_worker_id: app.workerId,
                 });
                 if (r.inserted) inserted++; else skipped++;
             }
@@ -52,14 +54,17 @@ module.exports = async function routes(app) {
         const hp = path.join(root, 'hosts.txt');
         const mp = path.join(root, 'members.txt');
         const result = { hosts: null, members: null };
+        // Multi-tenant: count only THIS worker's rows. Otherwise B's machine
+        // would compare its file's count against A+B's combined DB count and
+        // wrongly report "already imported".
         if (fs.existsSync(hp)) {
             const accts = parseAccounts(hp);
-            const dbHosts = await hostsDb.listHosts({ pageSize: 10000 });
+            const dbHosts = await hostsDb.listHosts({ pageSize: 10000, ownerId: app.workerId });
             result.hosts = { path: hp, fileCount: accts.length, dbCount: dbHosts.length, shouldImport: dbHosts.length < accts.length };
         }
         if (fs.existsSync(mp)) {
             const accts = parseAccounts(mp);
-            const dbMembers = await membersDb.listMembers({ pageSize: 10000 });
+            const dbMembers = await membersDb.listMembers({ pageSize: 10000, ownerId: app.workerId });
             result.members = { path: mp, fileCount: accts.length, dbCount: dbMembers.length, shouldImport: dbMembers.length < accts.length };
         }
         return result;

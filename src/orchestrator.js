@@ -16,6 +16,7 @@
 require('dotenv').config({ path: require('path').resolve(__dirname, '..', '.env') });
 const { log, createWorkerLogger } = require('./common/logger');
 const { findChrome, launchRealChrome } = require('./common/chrome');
+const { runWithOwner } = require('./common/owner-context');
 const hostsDb = require('./db/hosts');
 const runsDb  = require('./db/runs');
 const db = require('./db');
@@ -154,8 +155,20 @@ async function main() {
     let finalStatus = 'completed';
     let finalError = null;
 
+    // Heartbeat: every 10s nudge last_heartbeat_at so cross-machine reapers
+    // (which can't trust local pid) know we're still alive. unref() so the
+    // timer never holds the process open after main() returns.
+    const HEARTBEAT_MS = parseInt(process.env.RUN_HEARTBEAT_MS, 10) || 10_000;
+    const heartbeatTimer = setInterval(() => {
+        runsDb.heartbeatRun(runId).catch(e => {
+            log(`heartbeat write failed (non-fatal): ${e.message}`, 'WARN');
+        });
+    }, HEARTBEAT_MS);
+    heartbeatTimer.unref();
+
     const onSig = (sig) => {
         log(`orchestrator: received ${sig}, will update run to cancelled then exit`);
+        clearInterval(heartbeatTimer);
         runsDb.updateRunStatus(runId, 'cancelled').catch(() => { })
             .finally(() => process.exit(sig === 'SIGTERM' ? 143 : 130));
     };
@@ -205,6 +218,7 @@ async function main() {
         if (e.stack) console.error(e.stack);
     }
 
+    clearInterval(heartbeatTimer);
     await runsDb.updateRunStatus(runId, finalStatus, {
         stats: {
             reconcile: Array.isArray(stats.reconcile) ? { changes: stats.reconcile.length } : null,
@@ -217,9 +231,17 @@ async function main() {
 }
 
 if (require.main === module) {
-    main().catch(e => {
-        log(`orchestrator fatal: ${e.message}`, 'ERROR');
-        process.exit(1);
+    // Multi-tenant: every DB call inside main() (and the stage modules it
+    // invokes) reads the active owner from this ALS frame, so we don't have
+    // to thread WORKER_ID through ~15 helper signatures. WORKER_ID is set as
+    // an env var by the parent server (see routes/pipeline.js + ops.js fork
+    // call). Falsy WORKER_ID → null context → unfiltered queries (legacy).
+    const workerId = process.env.WORKER_ID || null;
+    runWithOwner(workerId, () => {
+        main().catch(e => {
+            log(`orchestrator fatal: ${e.message}`, 'ERROR');
+            process.exit(1);
+        });
     });
 }
 

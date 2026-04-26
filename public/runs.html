@@ -19,15 +19,22 @@
 <main x-data="runsPage()" x-init="load(); interval = setInterval(load, 3000)"
       @beforeunload.window="clearInterval(interval)" class="space-y-4">
 
+    <div class="text-xs text-slate-400 mb-2" x-show="me">
+        本机 worker: <span class="mono" x-text="(me?.workerLabel || '?') + ' (' + (me?.workerId || '').slice(0, 8) + '…)'"></span>
+        — 自家 run 高亮,他人 run 灰显且不可取消。
+    </div>
     <table class="data card">
-        <thead><tr><th>#</th><th>状态</th><th>阶段</th><th>启动方式</th><th>开始时间</th><th>耗时</th><th>统计</th><th></th></tr></thead>
+        <thead><tr><th>#</th><th>状态</th><th>阶段</th><th>启动方式</th><th>所属</th><th>开始时间</th><th>耗时</th><th>统计</th><th></th></tr></thead>
         <tbody>
             <template x-for="r in runs" :key="r.id">
-                <tr :class="r.status === 'running' ? 'bg-blue-950/30' : ''">
+                <tr :class="rowClass(r)">
                     <td x-text="r.id"></td>
                     <td><span class="pill" x-text="statusLabel(r.status)"></span></td>
                     <td class="mono" x-text="r.stages"></td>
                     <td class="text-xs" x-text="r.launched_by"></td>
+                    <td class="text-xs mono"
+                        :title="r.worker_id || '(无 worker_id, 旧数据)'"
+                        x-text="ownerLabel(r)"></td>
                     <td class="text-xs" x-text="App.timeago(r.started_at)"></td>
                     <td class="text-xs" x-text="duration(r)"></td>
                     <td class="mono text-xs truncate max-w-xs" x-text="r.stats ? JSON.stringify(r.stats) : '—'"></td>
@@ -62,7 +69,17 @@
 <script>
 function runsPage() {
     return {
-        runs: [], drawerOpen: false, current: null, interval: null,
+        runs: [], drawerOpen: false, current: null, interval: null, me: null,
+        isOwn(r) { return this.me && r.worker_id && r.worker_id === this.me.workerId; },
+        rowClass(r) {
+            if (r.status !== 'running') return this.isOwn(r) ? '' : 'opacity-60';
+            return this.isOwn(r) ? 'bg-blue-950/30' : 'bg-slate-800/40 opacity-70';
+        },
+        ownerLabel(r) {
+            if (!r.worker_id) return '— (旧)';
+            if (this.isOwn(r)) return '本机';
+            return r.worker_id.slice(0, 8) + '…';
+        },
         statusLabel(s) {
             return {
                 'new': '待处理',
@@ -78,9 +95,14 @@ function runsPage() {
                 'abandoned': '已放弃',
                 'removed_from_family': '已移除',
                 'join_failed_region': '加入失败（地区不符）',
+                'sold': '已出售',
             }[s] || s;
         },
         async load() {
+            // me only needs to load once; cache it across the polling interval.
+            if (!this.me) {
+                try { this.me = await App.api('GET', '/api/me'); } catch (_) { /* non-critical */ }
+            }
             try { this.runs = await App.api('GET', '/api/pipeline/runs'); } catch (_) { }
         },
         duration(r) {

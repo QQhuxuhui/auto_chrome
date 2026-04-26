@@ -992,7 +992,13 @@ async function reconcileHost(hostRecord, browser, runId, wlog, options = {}) {
             let reason;
             if (disabledLocal) {
                 const ag = disabledLocal.antigravity || {};
-                reason = ag.disabled ? 'platform disabled' : (ag.is_forbidden ? 'quota forbidden' : 'platform banned');
+                reason = ag.disabled
+                    ? 'platform disabled'
+                    : ag.is_forbidden
+                        ? 'quota forbidden'
+                        : ag.proxy_disabled
+                            ? 'proxy disabled'
+                            : 'platform banned';
             } else {
                 reason = 'unknown';
             }
@@ -1044,11 +1050,14 @@ async function reconcileHost(hostRecord, browser, runId, wlog, options = {}) {
                     id: null,
                     disabled: false, disabled_reason: null,
                     is_forbidden: false, forbidden_reason: null,
+                    proxy_disabled: false, proxy_disabled_reason: null, proxy_disabled_at: null,
                 });
                 const ag = disabledLocal.antigravity || {};
                 const msgReason = ag.disabled
                     ? `disabled: ${ag.disabled_reason || 'unknown'}`
-                    : `quota forbidden: ${ag.forbidden_reason || 'credits exhausted'}`;
+                    : ag.is_forbidden
+                        ? `quota forbidden: ${ag.forbidden_reason || 'credits exhausted'}`
+                        : `proxy disabled: ${ag.proxy_disabled_reason || 'unknown'}`;
                 await eventsDb.logEvent({
                     memberId: disabledLocal.id, hostId: hostRecord.id, runId,
                     stage: 'reconcile', eventType: 'note',

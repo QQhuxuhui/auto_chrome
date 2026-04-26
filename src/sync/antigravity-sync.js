@@ -12,6 +12,11 @@ function pickMirror(acct) {
         disabled: !!acct.disabled,
         disabled_reason: acct.disabled_reason || null,
         disabled_at: acct.disabled_at || null,
+        // proxy_disabled 是平台另一种"软禁用":refresh_token 还在,但代理配置被批量
+        // 关掉 → 实际不可用。运营上视同 disabled,纳入 cleanup 范围。
+        proxy_disabled: !!acct.proxy_disabled,
+        proxy_disabled_reason: acct.proxy_disabled_reason || null,
+        proxy_disabled_at: acct.proxy_disabled_at || null,
         validation_blocked: !!acct.validation_blocked,
         validation_blocked_until: acct.validation_blocked_until || null,
         validation_blocked_reason: acct.validation_blocked_reason || null,
@@ -21,13 +26,20 @@ function pickMirror(acct) {
     };
 }
 
-async function syncFromRemote() {
+// All public functions accept an `ownerId` so multi-tenant installs only
+// touch their own members. The Antigravity platform itself is shared across
+// installs (one global account list); each install only mirrors / pushes /
+// deletes the rows it owns locally.
+async function syncFromRemote({ ownerId } = {}) {
     const { accounts = [] } = await antigravity.listAccounts();
     const emailsLower = accounts.map(a => String(a.email || '').toLowerCase()).filter(Boolean);
-    const locals = await membersDb.listMembersByEmailLower(emailsLower);
+    // Only pull locals owned by this worker. Foreign-owned platform accounts
+    // appear as "orphans" from this install's perspective — could be owned by
+    // another worker; we don't know and don't touch them.
+    const locals = await membersDb.listMembersByEmailLower(emailsLower, { ownerId });
     const localByEmail = new Map(locals.map(m => [m.email.toLowerCase(), m]));
 
-    const out = { matched: 0, updated: 0, newly_disabled: [], newly_forbidden: [], orphans: [] };
+    const out = { matched: 0, updated: 0, newly_disabled: [], newly_forbidden: [], newly_proxy_disabled: [], orphans: [] };
 
     for (const acct of accounts) {
         const emailLower = String(acct.email || '').toLowerCase();
@@ -40,8 +52,9 @@ async function syncFromRemote() {
         out.matched++;
         const wasDisabled = !!(local.antigravity && local.antigravity.disabled);
         const wasForbidden = !!(local.antigravity && local.antigravity.is_forbidden);
+        const wasProxyDisabled = !!(local.antigravity && local.antigravity.proxy_disabled);
         const mirror = pickMirror(acct);
-        await membersDb.updateAntigravity(local.id, mirror);
+        await membersDb.updateAntigravity(local.id, mirror, { ownerId });
         out.updated++;
         if (!wasDisabled && mirror.disabled) {
             out.newly_disabled.push({ memberId: local.id, email: local.email, reason: mirror.disabled_reason });
@@ -50,12 +63,15 @@ async function syncFromRemote() {
         if (!wasForbidden && mirror.is_forbidden) {
             out.newly_forbidden.push({ memberId: local.id, email: local.email, reason: mirror.forbidden_reason });
         }
+        if (!wasProxyDisabled && mirror.proxy_disabled) {
+            out.newly_proxy_disabled.push({ memberId: local.id, email: local.email, reason: mirror.proxy_disabled_reason });
+        }
     }
     return out;
 }
 
-async function pushAccount(memberId) {
-    const member = await membersDb.getMemberById(memberId);
+async function pushAccount(memberId, { ownerId } = {}) {
+    const member = await membersDb.getMemberById(memberId, { ownerId });
     if (!member) return { success: false, error: 'member not found' };
     if (member.status !== 'done') {
         return { success: false, error: `member status=${member.status}, expected 'done'` };
@@ -74,7 +90,7 @@ async function pushAccount(memberId) {
             validation_blocked: !!resp.validation_blocked,
             last_synced_at: new Date().toISOString(),
         };
-        await membersDb.updateAntigravity(memberId, partial);
+        await membersDb.updateAntigravity(memberId, partial, { ownerId });
         return { success: true };
     } catch (e) {
         const partial = {
@@ -84,16 +100,16 @@ async function pushAccount(memberId) {
                 message: e.message || String(e),
             },
         };
-        await membersDb.updateAntigravity(memberId, partial);
+        await membersDb.updateAntigravity(memberId, partial, { ownerId });
         return { success: false, error: e.message };
     }
 }
 
-async function pushAllPending() {
-    const pending = await membersDb.listMembersNeedingPush();
+async function pushAllPending({ ownerId } = {}) {
+    const pending = await membersDb.listMembersNeedingPush({ ownerId });
     const out = { total: pending.length, pushed: 0, failed: 0, errors: [] };
     for (const m of pending) {
-        const r = await pushAccount(m.id);
+        const r = await pushAccount(m.id, { ownerId });
         if (r.success) out.pushed++;
         else {
             out.failed++;
@@ -103,14 +119,14 @@ async function pushAllPending() {
     return out;
 }
 
-async function deleteAccount(memberId) {
-    const member = await membersDb.getMemberById(memberId);
+async function deleteAccount(memberId, { ownerId } = {}) {
+    const member = await membersDb.getMemberById(memberId, { ownerId });
     if (!member) return { success: false, error: 'member not found' };
     const agId = member.antigravity && member.antigravity.id;
     if (!agId) return { success: false, error: 'member has no antigravity.id' };
     try {
         await antigravity.deleteAccount(agId);
-        await membersDb.updateAntigravity(memberId, { id: null, disabled: false, disabled_reason: null });
+        await membersDb.updateAntigravity(memberId, { id: null, disabled: false, disabled_reason: null }, { ownerId });
         return { success: true };
     } catch (e) {
         return { success: false, error: e.message, status: e.status };

@@ -20,14 +20,15 @@ module.exports = async function routes(app) {
         let hostIds = explicitHostIds;
         let autoFiltered = false;
         if (!hostIds.length && !allHosts) {
-            hostIds = await members.listHostIdsNeedingCleanup();
+            hostIds = await members.listHostIdsNeedingCleanup({ ownerId: app.workerId });
             autoFiltered = true;
             if (!hostIds.length) {
                 return { runId: null, skipped: true, reason: 'no host has cleanup work' };
             }
         }
 
-        const current = await runs.getCurrentRun();
+        // Multi-tenant: only block on this worker's run, not other users'.
+        const current = await runs.getCurrentRunForWorker(app.workerId);
         if (current) return reply.code(409).send({ error: `run #${current.id} already running` });
 
         const run = await runs.createRun({
@@ -35,6 +36,7 @@ module.exports = async function routes(app) {
             stages: 'reconcile',
             host_filter: hostIds,
             concurrency: 1,
+            worker_id: app.workerId,
         });
 
         const orchestratorPath = path.resolve(__dirname, '..', 'orchestrator.js');
@@ -46,6 +48,7 @@ module.exports = async function routes(app) {
 
         const child = fork(orchestratorPath, args, {
             stdio: ['ignore', 'inherit', 'inherit', 'ipc'],
+            env: { ...process.env, WORKER_ID: app.workerId },
         });
         await runs.setRunPid(run.id, child.pid);
         return { runId: run.id, pid: child.pid, hostIds, autoFiltered };
