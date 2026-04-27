@@ -15,6 +15,7 @@
  */
 
 const path = require('path');
+const { chromeProfilesDir } = require('../common/paths');
 const { findChrome, launchRealChrome, sleep } = require('../common/chrome');
 const { createWorkerLogger } = require('../common/logger');
 const { googleLogin } = require('../common/google-login');
@@ -80,7 +81,7 @@ async function openHostLoginSession(host, { chromePath } = {}) {
     // cookies and don't prompt 2FA every time.
     const hostId = Number(host.id);
     const workerId = 1000 + hostId;
-    const dataDir = path.resolve(__dirname, '..', `chrome_data_temp_host_login_${hostId}`);
+    const dataDir = path.join(chromeProfilesDir, `host_login_${hostId}`);
     const wlog = createWorkerLogger(workerId);
 
     wlog.info(`host-login: ${host.email} (host_id=${hostId}), dataDir=${dataDir}`);
