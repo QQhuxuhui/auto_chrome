@@ -22,6 +22,7 @@ require('dotenv').config({ path: require('path').resolve(__dirname, '.env') });
 const fs = require('fs');
 const path = require('path');
 const { randomUUID } = require('crypto');
+const PATHS = require('./common/paths');
 
 // Node 内置 fetch (undici) 默认不读 HTTPS_PROXY 环境变量。
 // 用 EnvHttpProxyAgent —— 自动读取 HTTP(S)_PROXY 且尊重 NO_PROXY，
@@ -79,7 +80,7 @@ const ANTIGRAVITY_UA = process.env.ANTIGRAVITY_UA || 'antigravity/1.20.5 windows
 const PROBE_MODEL = process.env.PROBE_MODEL || 'gemini-3-pro-high';
 
 const REPO_ROOT = path.resolve(__dirname, '..');
-const CRED_FILE = process.env.CRED_FILE || path.resolve(__dirname, 'credentials.json');
+const CRED_FILE = process.env.CRED_FILE || PATHS.credentialsFile;
 
 // 每个 worker 分配一段回调端口，避免并发冲突
 const CB_PORT_BASE = parseInt(process.env.CB_PORT_BASE, 10) || 18900;
