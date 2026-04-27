@@ -54,3 +54,9 @@ Desktop.ini
 tools/dist/
 tools/*.exe
 auto-chrome-tools.exe
+
+# pkg build artefacts
+dist/
+
+# runtime state written next to exe (and at repo root in dev)
+data/
