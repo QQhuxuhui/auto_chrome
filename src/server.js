@@ -2,7 +2,7 @@
  * Fastify server — local account management UI + API.
  * Bind to 127.0.0.1 only (no auth).
  */
-require('dotenv').config({ path: require('path').resolve(__dirname, '..', '.env') });
+require('./common/paths').loadEnv();
 const path = require('path');
 const Fastify = require('fastify');
 const { loadOrCreateWorkerIdentity } = require('./common/worker-id');

@@ -13,7 +13,7 @@
  *   --host-ids "1,2"         : only for --reconcile-only, restrict host IDs
  *   --manual                 : skip host login (stage 2 host-monitor + reconcile prelude when stages ⊆ {2,3})
  */
-require('dotenv').config({ path: require('path').resolve(__dirname, '..', '.env') });
+require('./common/paths').loadEnv();
 const { log, createWorkerLogger } = require('./common/logger');
 const { findChrome, launchRealChrome } = require('./common/chrome');
 const hostsDb = require('./db/hosts');
