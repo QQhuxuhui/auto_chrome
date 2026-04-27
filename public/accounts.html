@@ -53,9 +53,14 @@
             </tr></thead>
             <template x-for="h in hosts" :key="h.id">
                 <tbody>
-                    <tr>
+                    <tr :class="isHostRunning(h) ? 'bg-emerald-900/30' : ''">
                         <td class="mono">
-                            <div x-text="h.email"></div>
+                            <div class="flex items-center gap-2">
+                                <span x-text="h.email"></span>
+                                <span x-show="isHostRunning(h)"
+                                      class="text-xs text-emerald-300 bg-emerald-800/60 px-1.5 py-0.5 rounded animate-pulse"
+                                      title="该母号当前在运行中的 pipeline run 的 host_filter 里">● 运行中</span>
+                            </div>
                             <div x-show="h.notes" class="text-xs text-slate-400 mt-0.5 whitespace-pre-wrap break-all"
                                  x-text="h.notes"></div>
                         </td>
@@ -629,6 +634,8 @@ function accounts() {
         // { hostId: pid } — non-empty means a manual login Chrome is running; button greys out.
         activeLoginSessions: {},
         _loginSessionsTimer: null,
+        // 当前 pipeline_runs.status='running' 的 host_filter（小写 email 列表）。空 = 没跑或自动模式。
+        runningHostEmails: [],
         // Host management drawer state (one drawer at a time). `hostManaging` is
         // the currently-open host object or null. Other maps are keyed by hostId
         // so drafts / cached lookups survive drawer close → re-open.
@@ -670,7 +677,7 @@ function accounts() {
             }[s] || s;
         },
         async load() {
-            await Promise.all([this.loadHosts(), this.loadMembers(), this.loadMigrate(), this.loadArchivedCount(), this.loadLoginSessions()]);
+            await Promise.all([this.loadHosts(), this.loadMembers(), this.loadMigrate(), this.loadArchivedCount(), this.loadLoginSessions(), this.loadRunningHosts()]);
             // Kick off the TOTP ticker once data is loaded.
             if (!this._totpTimer) {
                 this._totpTimer = setInterval(() => {
@@ -679,10 +686,13 @@ function accounts() {
                 }, 1000);
                 this.refreshTOTP();
             }
-            // Poll active login sessions every 3s so the button label flips back
-            // from "已登录" to "登录" as soon as the user closes Chrome.
+            // Poll: login sessions + running-pipeline host filter. 3s 节奏让
+            // "登录"按钮和"运行中"高亮能近实时反馈。
             if (!this._loginSessionsTimer) {
-                this._loginSessionsTimer = setInterval(() => this.loadLoginSessions(), 3000);
+                this._loginSessionsTimer = setInterval(() => {
+                    this.loadLoginSessions();
+                    this.loadRunningHosts();
+                }, 3000);
             }
         },
         async loadLoginSessions() {
@@ -692,6 +702,19 @@ function accounts() {
                 for (const r of rows) map[r.hostId] = r.pid;
                 this.activeLoginSessions = map;
             } catch (_) { /* non-critical */ }
+        },
+        async loadRunningHosts() {
+            try {
+                const s = await App.api('GET', '/api/status');
+                const run = s && s.currentRun;
+                if (!run || run.status !== 'running') { this.runningHostEmails = []; return; }
+                const hf = Array.isArray(run.host_filter) ? run.host_filter : [];
+                this.runningHostEmails = hf.map(e => String(e || '').toLowerCase()).filter(Boolean);
+            } catch (_) { /* non-critical */ }
+        },
+        isHostRunning(h) {
+            if (!this.runningHostEmails.length) return false;
+            return this.runningHostEmails.includes(String(h.email || '').toLowerCase());
         },
         async loginHost(h) {
             try {
