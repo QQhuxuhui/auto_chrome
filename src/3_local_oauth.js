@@ -23,24 +23,16 @@ const fs = require('fs');
 const path = require('path');
 const { randomUUID } = require('crypto');
 
-// Node 内置 fetch (undici) 默认不读 HTTPS_PROXY 环境变量。
-// 用 EnvHttpProxyAgent —— 自动读取 HTTP(S)_PROXY 且尊重 NO_PROXY，
-// 避免把 localhost:9234 (Chrome debug port) 这类请求也推到代理去，
-// 导致 launchRealChrome 的端口探测 30s 超时。
-{
-    const proxyUrl = process.env.HTTPS_PROXY || process.env.https_proxy
-        || process.env.HTTP_PROXY || process.env.http_proxy;
-    if (proxyUrl) {
-        const { setGlobalDispatcher, EnvHttpProxyAgent } = require('undici');
-        setGlobalDispatcher(new EnvHttpProxyAgent());
-        console.log(`[proxy] Node fetch via EnvHttpProxyAgent (${proxyUrl}, honors NO_PROXY)`);
-    }
-}
+// Node fetch does not automatically use the same proxy as Chrome.
+// Configure undici from HTTP(S)_PROXY, or from the Windows user proxy when available.
+// Keep localhost out of the proxy path for Chrome debug and OAuth callback ports.
+require('./common/node-fetch-proxy').setupNodeFetchProxy({ log: console.log });
 
 const { log, createWorkerLogger, setVerbose, StepTimer } = require('./common/logger');
 const {
     sleep, rand, findChrome, launchRealChrome, restartChrome,
     isChromeAlive, clearBrowserSession, newPage, takeScreenshot,
+    isBlankLikePageUrl,
 } = require('./common/chrome');
 const { parseAccounts, AsyncMutex } = require('./common/state');
 const { googleLogin } = require('./common/google-login');
@@ -164,12 +156,34 @@ function startCbServer(startPort, wlog) {
  */
 async function obtainAuthCode({ page, authUrl, member, cbServer, wlog, timeoutMs = 120000 }) {
     let keepPolling = true;
+
+    function navigateAuthUrl(label) {
+        return page.bringToFront()
+            .catch(() => { })
+            .then(() => page.goto(authUrl, { waitUntil: 'domcontentloaded', timeout: 60000 }))
+            .then(() => {
+                let cur = '';
+                try { cur = page.url(); } catch (_) { }
+                wlog.debug(`  ${label}: url=${cur.slice(0, 100)}`);
+            })
+            .catch(e => {
+                wlog.debug(`  ${label}: ${e.message}`);
+            });
+    }
+
     const consentPoller = (async () => {
         await sleep(2500);
         let ticks = 0;
         while (keepPolling) {
             ticks++;
             try {
+                const currentUrl = page.url();
+                if (isBlankLikePageUrl(currentUrl) && ticks <= 6) {
+                    wlog.warn(`  [consent] blank/new-tab OAuth page; retrying authUrl navigation (#${ticks})`);
+                    navigateAuthUrl(`authUrl retry #${ticks}`);
+                    await sleep(2500);
+                    continue;
+                }
                 const totpHandled = await handleTotpChallenge(page, member, wlog);
                 if (totpHandled) { await sleep(4000); continue; }
                 const hit = await clickOAuthConsentTarget(page, member.email);
@@ -186,12 +200,7 @@ async function obtainAuthCode({ page, authUrl, member, cbServer, wlog, timeoutMs
         }
     })();
 
-    // 启动导航（不 await，靠 codePromise 决定何时结束）
-    page.goto(authUrl, { waitUntil: 'domcontentloaded', timeout: 60000 })
-        .catch(e => {
-            // callback 跳本地时，chrome 有可能因为连接复用报轻微错误；真正结果看 codePromise
-            wlog.debug(`  authUrl goto: ${e.message}`);
-        });
+    navigateAuthUrl('authUrl goto');
 
     let timeoutId;
     const timeoutP = new Promise((_, rej) => {
@@ -490,8 +499,10 @@ async function runStage3({ runId, concurrency = 1, hostIds } = {}) {
     if (!work.length) return { ok: 0, ng: 0 };
 
     const workers = _workers3 = [];
+    const stage3RunLabel = runId || `manual_${Date.now()}`;
     for (let w = 0; w < Math.min(concurrency, work.length); w++) {
-        const chrome = await launchRealChrome(chromePath, w);
+        const dataDir = path.resolve(__dirname, `chrome_data_temp_stage3_run${stage3RunLabel}_w${w}`);
+        const chrome = await launchRealChrome(chromePath, w, { dataDir });
         workers.push({ id: w, ...chrome });
         if (w < concurrency - 1) await sleep(rand(2000, 3000));
     }
