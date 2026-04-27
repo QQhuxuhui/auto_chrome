@@ -1,0 +1,16 @@
+{
+    "pkg": {
+        "scripts": [
+            "src/**/*.js",
+            "!src/**/*.test.js"
+        ],
+        "assets": [
+            "public/**/*",
+            ".env",
+            "src/db/schema.sql",
+            "node_modules/puppeteer-core/lib/**/*.json",
+            "src/node_modules/puppeteer-core/lib/**/*.json"
+        ],
+        "targets": ["node22-win-x64"]
+    }
+}
