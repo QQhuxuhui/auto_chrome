@@ -18,6 +18,7 @@ const fs = require('fs');
 const path = require('path');
 const http = require('http');
 const https = require('https');
+const PATHS = require('./common/paths');
 
 // ============ 配置 ============
 const CLIENT_ID = process.env.CLIENT_ID || '1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com';
@@ -26,9 +27,9 @@ const SCOPES = 'openid https://www.googleapis.com/auth/userinfo.email https://ww
 const TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const CONCURRENCY = parseInt(process.env.CONCURRENCY, 10) || 3;
 const BASE_DEBUG_PORT = parseInt(process.env.DEBUG_PORT, 10) || 9234;
-const OUTPUT = path.resolve(__dirname, 'credentials.json');
-const FAILED = path.resolve(__dirname, 'failed.json');
-const ENABLE_API_FAILED = path.resolve(__dirname, 'enableAPI_failed.json');
+const OUTPUT = PATHS.credentialsFile;
+const FAILED = PATHS.failedFile;
+const ENABLE_API_FAILED = PATHS.enableApiFailedFile;
 const MAX_RETRIES = 2; // 单账号最大重试次数
 
 // ============ 每个 Worker 预分配独立端口段 ============
@@ -372,7 +373,7 @@ function findChrome() {
 async function launchRealChrome(chromePath, workerId = 0) {
     const wlog = createWorkerLogger(workerId);
     const debugPort = BASE_DEBUG_PORT + workerId;
-    const CHROME_DATA = path.resolve(__dirname, `chrome_data_temp_auth_${workerId}`);
+    const CHROME_DATA = path.join(PATHS.chromeProfilesDir, `auth_${workerId}`);
     if (!fs.existsSync(CHROME_DATA)) fs.mkdirSync(CHROME_DATA, { recursive: true });
 
     wlog.debug(`Launch Chrome: debugPort=${debugPort}, dataDir=${CHROME_DATA}`);
@@ -1168,7 +1169,7 @@ async function listVisibleElements(page) {
 async function takeScreenshot(page, label, wlog) {
     try {
         const safeName = label.replace(/[^a-zA-Z0-9_-]/g, '_');
-        const ssPath = path.resolve(__dirname, `debug_${safeName}_${Date.now()}.png`);
+        const ssPath = path.join(PATHS.debugDir, `${safeName}_${Date.now()}.png`);
         await page.screenshot({ path: ssPath, fullPage: true });
         wlog.debug(`Screenshot saved: ${ssPath}`);
         return ssPath;
@@ -1755,6 +1756,7 @@ async function main() {
     // Fallback account file search
     if (!fs.existsSync(accountsFile)) {
         const fallbacks = [
+            path.join(PATHS.dataDir, 'accounts.txt'),
             path.resolve(__dirname, '..', 'accounts.txt'),
             path.resolve(__dirname, 'accounts.txt'),
             path.resolve(process.cwd(), 'accounts.txt'),
