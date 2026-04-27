@@ -2,10 +2,32 @@
  * Fastify server — local account management UI + API.
  * Bind to 127.0.0.1 only (no auth).
  */
+// pkg-mode crash guard: keep the console window open so the user can read the
+// error before the process exits. Dev mode (no process.pkg) keeps default
+// behaviour (process exits and node prints stack to stderr).
+if (process.pkg) {
+    process.on('uncaughtException', (e) => {
+        if (e && e.userMessage) {
+            console.error(`\n[FATAL] ${e.userMessage}`);
+        } else {
+            console.error('\n[FATAL]', e && e.message ? e.message : e);
+            if (e && e.stack) console.error(e.stack);
+        }
+        console.error('\n按任意键退出...');
+        process.stdin.resume();
+        process.stdin.once('data', () => process.exit(1));
+    });
+    process.on('unhandledRejection', (e) => {
+        console.error('\n[UNHANDLED REJECTION]', e && e.message ? e.message : e);
+        if (e && e.stack) console.error(e.stack);
+    });
+}
 require('./common/paths').loadEnv();
 const path = require('path');
 const Fastify = require('fastify');
 const { loadOrCreateWorkerIdentity } = require('./common/worker-id');
+const PATHS = require('./common/paths');
+const { printBanner, openDefaultBrowser, waitForKeypress } = require('./common/banner');
 
 const PORT = parseInt(process.env.SERVER_PORT, 10) || 3000;
 const HOST = process.env.SERVER_HOST || '127.0.0.1';
@@ -150,7 +172,28 @@ async function claimLegacyOwnerlessRows(app) {
 async function start() {
     const app = await build();
     try {
-        await app.listen({ port: PORT, host: HOST });
+        try {
+            await app.listen({ port: PORT, host: HOST });
+        } catch (e) {
+            if (e && e.code === 'EADDRINUSE') {
+                console.error(`\n端口 ${PORT} 已被占用——可能已有一个 auto_chrome 在跑。`);
+                console.error(`请在浏览器打开 http://${HOST}:${PORT}`);
+                if (process.pkg) {
+                    console.error('按任意键退出...');
+                    await waitForKeypress();
+                }
+                process.exit(1);
+            }
+            throw e;
+        }
+        if (process.pkg) {
+            printBanner({
+                version: PATHS.version,
+                dataDir: PATHS.dataDir,
+                listenUrl: `http://${HOST}:${PORT}`,
+            });
+            openDefaultBrowser(`http://${HOST}:${PORT}`);
+        }
 
         await claimLegacyOwnerlessRows(app);
         await reapStaleRunsOnBoot(app);
