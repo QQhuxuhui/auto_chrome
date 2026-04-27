@@ -3,10 +3,9 @@
  */
 
 const fs = require('fs');
-const path = require('path');
 const { log } = require('./logger');
 
-const FAILED_FILE = path.resolve(__dirname, '..', '..', 'failed.json');
+const FAILED_FILE = require('./paths').failedFile;
 
 // ============ AsyncMutex ============
 class AsyncMutex {
