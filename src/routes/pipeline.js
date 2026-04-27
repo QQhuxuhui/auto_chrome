@@ -3,6 +3,7 @@ const { fork } = require('child_process');
 const runs = require('../db/runs');
 const events = require('../db/events');
 const { isPidAlive } = require('../common/pid');
+const { findChrome } = require('../common/chrome');
 
 const activeChildren = new Map();  // runId -> child_process
 
@@ -26,6 +27,10 @@ module.exports = async function routes(app) {
             return { runId: run.id, pid: null, dryRun: true };
         }
 
+        const chromePath = findChrome();
+        if (!chromePath) {
+            return reply.code(422).send({ error: '未找到系统 Chrome。请先安装 Chrome。' });
+        }
         const orchestratorPath = path.resolve(__dirname, '..', 'orchestrator.js');
         const args = [
             '--run-id', String(run.id),
@@ -41,13 +46,17 @@ module.exports = async function routes(app) {
         if (manualMode) {
             args.push('--manual');
         }
-        const child = fork(orchestratorPath, args, {
-            stdio: ['ignore', 'inherit', 'inherit', 'ipc'],
-            detached: false,
-            // Pass WORKER_ID so the orchestrator can stamp pipeline_runs.worker_id
-            // and write heartbeats. Hosts/members are shared so no owner filtering.
-            env: { ...process.env, WORKER_ID: app.workerId },
-        });
+        let child;
+        try {
+            child = fork(orchestratorPath, args, {
+                stdio: ['ignore', 'inherit', 'inherit', 'ipc'],
+                detached: false,
+                env: { ...process.env, WORKER_ID: app.workerId },
+            });
+        } catch (e) {
+            app.log.error({ err: e.message }, 'fork orchestrator failed');
+            return reply.code(500).send({ error: 'fork orchestrator 失败', detail: e.message });
+        }
         activeChildren.set(run.id, child);
         await runs.setRunPid(run.id, child.pid);
 
