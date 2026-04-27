@@ -20,14 +20,15 @@ module.exports = async function routes(app) {
         let hostIds = explicitHostIds;
         let autoFiltered = false;
         if (!hostIds.length && !allHosts) {
-            hostIds = await members.listHostIdsNeedingCleanup({ ownerId: app.workerId });
+            hostIds = await members.listHostIdsNeedingCleanup();
             autoFiltered = true;
             if (!hostIds.length) {
                 return { runId: null, skipped: true, reason: 'no host has cleanup work' };
             }
         }
 
-        // Multi-tenant: only block on this worker's run, not other users'.
+        // pipeline_runs is partitioned by worker — block only on this install's
+        // own running pipeline, not another machine's.
         const current = await runs.getCurrentRunForWorker(app.workerId);
         if (current) return reply.code(409).send({ error: `run #${current.id} already running` });
 

@@ -130,34 +130,20 @@ async function reapStaleRow(app, runs, r, reason) {
     }
 }
 
-// One-time migration: when this install boots and finds rows with NULL
-// owner_worker_id (legacy rows from before the multi-tenant migration), claim
-// them as ours. The assumption is that the existing DB content belongs to the
-// install that boots first after the migration lands. Subsequent installs see
-// no NULL rows (they're all stamped) and only see their own data.
+// One-time migration: claim any pipeline_runs rows with NULL worker_id as
+// ours. Hosts/members are shared so no owner stamp is needed for them.
 async function claimLegacyOwnerlessRows(app) {
     const dbMod = require('./db');
     try {
-        const r1 = await dbMod.query(
-            "UPDATE hosts SET owner_worker_id = $1 WHERE owner_worker_id IS NULL RETURNING id",
-            [app.workerId]
-        );
-        const r2 = await dbMod.query(
-            "UPDATE members SET owner_worker_id = $1 WHERE owner_worker_id IS NULL RETURNING id",
-            [app.workerId]
-        );
-        const r3 = await dbMod.query(
+        const r = await dbMod.query(
             "UPDATE pipeline_runs SET worker_id = $1 WHERE worker_id IS NULL RETURNING id",
             [app.workerId]
         );
-        const total = r1.rowCount + r2.rowCount + r3.rowCount;
-        if (total > 0) {
-            app.log.warn(
-                `legacy owner stamp: claimed ${r1.rowCount} hosts, ${r2.rowCount} members, ${r3.rowCount} runs as worker_id=${app.workerId}`
-            );
+        if (r.rowCount > 0) {
+            app.log.warn(`legacy worker stamp: claimed ${r.rowCount} pipeline_runs as worker_id=${app.workerId}`);
         }
     } catch (e) {
-        app.log.warn({ err: e.message }, 'legacy owner stamp failed');
+        app.log.warn({ err: e.message }, 'legacy worker stamp failed');
     }
 }
 
@@ -177,10 +163,9 @@ async function start() {
             const ms = Number.isFinite(SYNC_MS) && SYNC_MS > 0 ? SYNC_MS : 5 * 60 * 1000;
             const sync = require('./sync/antigravity-sync');
             setInterval(() => {
-                // Scheduled sync mirrors only THIS install's members. Other
-                // installs run their own scheduled sync against the same
-                // platform; each only touches its own owner_worker_id rows.
-                sync.syncFromRemote({ ownerId: app.workerId })
+                // Members are shared — every install pulls the full Antigravity
+                // account list and merges into the shared pool.
+                sync.syncFromRemote()
                     .then(r => app.log.info({ event: 'antigravity-sync', ...r }, `antigravity sync: matched=${r.matched} orphans=${r.orphans.length}`))
                     .catch(e => app.log.warn({ err: e.message }, 'antigravity scheduled sync failed'));
             }, ms).unref();

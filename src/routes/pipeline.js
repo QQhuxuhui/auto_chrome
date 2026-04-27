@@ -9,8 +9,8 @@ const activeChildren = new Map();  // runId -> child_process
 module.exports = async function routes(app) {
     app.post('/api/pipeline/start', async (req, reply) => {
         const { stages = '1,2,3', hostFilter = [], concurrency = 1, dryRun = false, removeUnknownMembers = false, manualMode = false } = req.body || {};
-        // Multi-tenant: only block on a run owned by this worker. Foreign-worker
-        // runs from other users do not prevent this user from starting their own.
+        // pipeline_runs is partitioned by worker — block only on this install's
+        // own running pipeline, not another machine's.
         const current = await runs.getCurrentRunForWorker(app.workerId);
         if (current) return reply.code(409).send({ error: `run #${current.id} already running`, runId: current.id });
 
@@ -44,9 +44,8 @@ module.exports = async function routes(app) {
         const child = fork(orchestratorPath, args, {
             stdio: ['ignore', 'inherit', 'inherit', 'ipc'],
             detached: false,
-            // Pass WORKER_ID so the orchestrator can scope every DB query to
-            // this install. Without it stage 1 would still scan the global
-            // member pool and pick foreign-owned rows.
+            // Pass WORKER_ID so the orchestrator can stamp pipeline_runs.worker_id
+            // and write heartbeats. Hosts/members are shared so no owner filtering.
             env: { ...process.env, WORKER_ID: app.workerId },
         });
         activeChildren.set(run.id, child);

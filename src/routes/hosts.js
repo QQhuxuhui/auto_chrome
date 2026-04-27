@@ -45,7 +45,6 @@ module.exports = async function routes(app) {
                     recovery_email: it.recovery_email,
                     totp_secret: it.totp_secret,
                     notes: it.notes,
-                    owner_worker_id: app.workerId,
                 });
                 if (r.inserted) out.inserted++; else out.skipped++;
             } catch (e) {
@@ -57,14 +56,14 @@ module.exports = async function routes(app) {
 
     app.patch('/api/hosts/:id', async (req, reply) => {
         const id = parseInt(req.params.id, 10);
-        const row = await hosts.updateHost(id, req.body || {}, { ownerId: app.workerId });
+        const row = await hosts.updateHost(id, req.body || {});
         if (!row) return reply.code(404).send({ error: 'not found' });
         return row;
     });
 
     app.delete('/api/hosts/:id', async (req, reply) => {
         const id = parseInt(req.params.id, 10);
-        await hosts.deleteHost(id, { ownerId: app.workerId });
+        await hosts.deleteHost(id);
         reply.code(204).send();
     });
 
@@ -75,7 +74,6 @@ module.exports = async function routes(app) {
             search,
             page: page ? parseInt(page, 10) : undefined,
             pageSize: pageSize ? parseInt(pageSize, 10) : undefined,
-            ownerId: app.workerId,
         });
     });
 
@@ -85,7 +83,7 @@ module.exports = async function routes(app) {
     // Chrome is spawned — it doesn't wait for the session to end.
     app.post('/api/hosts/:id/login', async (req, reply) => {
         const id = parseInt(req.params.id, 10);
-        const host = await hosts.getHostById(id, { ownerId: app.workerId });
+        const host = await hosts.getHostById(id);
         if (!host) return reply.code(404).send({ error: 'host not found' });
 
         const existing = activeLoginSessions.get(id);
@@ -121,7 +119,7 @@ module.exports = async function routes(app) {
     // 通过 body { count: N } 覆盖（仍被 slot_free clamp）。
     app.post('/api/hosts/:id/quick-bind', async (req, reply) => {
         const id = parseInt(req.params.id, 10);
-        const host = await hosts.getHostById(id, { ownerId: app.workerId });
+        const host = await hosts.getHostById(id);
         if (!host) return reply.code(404).send({ error: 'host not found' });
         if (host.disabled) return reply.code(400).send({ error: `host ${host.email} is disabled` });
 
@@ -139,7 +137,7 @@ module.exports = async function routes(app) {
             : slotFree;
         const take = Math.min(requested, slotFree);
 
-        const bound = await members.quickBindNewMembersToHost(id, take, { ownerId: app.workerId });
+        const bound = await members.quickBindNewMembersToHost(id, take);
 
         // Audit 事件：每个被绑定的 member 写一条 manual 记录
         for (const m of bound) {

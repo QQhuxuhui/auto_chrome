@@ -16,7 +16,6 @@
 require('dotenv').config({ path: require('path').resolve(__dirname, '..', '.env') });
 const { log, createWorkerLogger } = require('./common/logger');
 const { findChrome, launchRealChrome } = require('./common/chrome');
-const { runWithOwner } = require('./common/owner-context');
 const hostsDb = require('./db/hosts');
 const runsDb  = require('./db/runs');
 const db = require('./db');
@@ -231,17 +230,9 @@ async function main() {
 }
 
 if (require.main === module) {
-    // Multi-tenant: every DB call inside main() (and the stage modules it
-    // invokes) reads the active owner from this ALS frame, so we don't have
-    // to thread WORKER_ID through ~15 helper signatures. WORKER_ID is set as
-    // an env var by the parent server (see routes/pipeline.js + ops.js fork
-    // call). Falsy WORKER_ID → null context → unfiltered queries (legacy).
-    const workerId = process.env.WORKER_ID || null;
-    runWithOwner(workerId, () => {
-        main().catch(e => {
-            log(`orchestrator fatal: ${e.message}`, 'ERROR');
-            process.exit(1);
-        });
+    main().catch(e => {
+        log(`orchestrator fatal: ${e.message}`, 'ERROR');
+        process.exit(1);
     });
 }
 

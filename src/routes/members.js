@@ -13,13 +13,12 @@ module.exports = async function routes(app) {
             hasToken: has_token !== undefined ? (has_token === '1' || has_token === 'true') : undefined,
             page: page ? parseInt(page, 10) : undefined,
             pageSize: pageSize ? parseInt(pageSize, 10) : undefined,
-            ownerId: app.workerId,
         });
     });
 
     app.get('/api/members/:id', async (req, reply) => {
         const id = parseInt(req.params.id, 10);
-        const m = await members.getMemberById(id, { ownerId: app.workerId });
+        const m = await members.getMemberById(id);
         if (!m) return reply.code(404).send({ error: 'not found' });
         const evts = await events.listEventsForMember(id, 50);
         return { ...m, events: evts };
@@ -44,7 +43,6 @@ module.exports = async function routes(app) {
                     recovery_email: it.recovery_email || it.recovery,
                     totp_secret: it.totp_secret,
                     notes: it.notes,
-                    owner_worker_id: app.workerId,
                 });
                 if (r.inserted) out.inserted++;
                 else out.skipped++;
@@ -58,13 +56,12 @@ module.exports = async function routes(app) {
     app.patch('/api/members/:id', async (req, reply) => {
         const id = parseInt(req.params.id, 10);
         const action = req.query.action;
-        const owner = { ownerId: app.workerId };
-        if (action === 'reset') return members.resetMember(id, owner);
-        if (action === 'abandon') return members.abandonMember(id, owner);
+        if (action === 'reset') return members.resetMember(id);
+        if (action === 'abandon') return members.abandonMember(id);
         if (action === 'clear_fail_count') {
-            const before = await members.getMemberById(id, owner);
+            const before = await members.getMemberById(id);
             if (!before) return reply.code(404).send({ error: 'not found' });
-            const row = await members.clearFailCount(id, owner);
+            const row = await members.clearFailCount(id);
             if (before.fail_count && row) {
                 try {
                     await events.logEvent({
@@ -79,12 +76,12 @@ module.exports = async function routes(app) {
             return row;
         }
 
-        const before = await members.getMemberById(id, owner);
+        const before = await members.getMemberById(id);
         if (!before) return reply.code(404).send({ error: 'not found' });
 
         let row;
         try {
-            row = await members.updateMember(id, req.body || {}, owner);
+            row = await members.updateMember(id, req.body || {});
         } catch (e) {
             return reply.code(400).send({ error: e.message });
         }
@@ -115,7 +112,7 @@ module.exports = async function routes(app) {
 
     app.delete('/api/members/:id', async (req, reply) => {
         const id = parseInt(req.params.id, 10);
-        await members.deleteMember(id, { ownerId: app.workerId });
+        await members.deleteMember(id);
         reply.code(204).send();
     });
 
@@ -128,7 +125,7 @@ module.exports = async function routes(app) {
             .map(x => parseInt(x, 10))
             .filter(n => Number.isInteger(n) && n > 0);
         if (!ids.length) return reply.code(400).send({ error: 'ids required (non-empty array)' });
-        const deleted = await members.deleteMembersByIds(ids, { ownerId: app.workerId });
+        const deleted = await members.deleteMembersByIds(ids);
         return { requested: ids.length, deleted };
     });
 };

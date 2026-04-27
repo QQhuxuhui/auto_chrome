@@ -9,11 +9,6 @@ CREATE TABLE IF NOT EXISTS hosts (
   totp_secret       TEXT,
   notes             TEXT,
   disabled          BOOLEAN NOT NULL DEFAULT FALSE,
-  -- Multi-tenant ownership (see common/worker-id.js). All read paths filter
-  -- on this column; writes stamp it from the current install. NULL means
-  -- "legacy / unowned" — boot-time stamping claims any pre-existing rows for
-  -- the first install that boots after the migration lands.
-  owner_worker_id   TEXT,
   created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -53,9 +48,6 @@ CREATE TABLE IF NOT EXISTS members (
   token           TEXT,
   token_meta      JSONB,
   antigravity     JSONB,
-
-  -- See hosts.owner_worker_id — same per-install ownership semantics.
-  owner_worker_id TEXT,
 
   created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -117,28 +109,26 @@ END $$;
 
 CREATE INDEX IF NOT EXISTS idx_runs_worker_status ON pipeline_runs(worker_id, status);
 
--- Multi-tenant ownership migration for hosts and members. Idempotent — adds
--- the column if missing, leaves existing data untouched. Boot-time stamping
--- in server.js claims any rows where owner_worker_id IS NULL for the
--- starting install (one-time migration of pre-multi-tenant data).
+-- Drop legacy multi-tenant ownership columns + indexes from hosts/members.
+-- Idempotent: only fires when the column actually exists. Hosts and members
+-- are now shared across all installs.
 DO $$
 BEGIN
   IF EXISTS (
-    SELECT 1 FROM information_schema.tables
-    WHERE table_schema = 'public' AND table_name = 'hosts'
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'hosts' AND column_name = 'owner_worker_id'
   ) THEN
-    ALTER TABLE hosts ADD COLUMN IF NOT EXISTS owner_worker_id TEXT;
+    DROP INDEX IF EXISTS idx_hosts_owner;
+    ALTER TABLE hosts DROP COLUMN owner_worker_id;
   END IF;
   IF EXISTS (
-    SELECT 1 FROM information_schema.tables
-    WHERE table_schema = 'public' AND table_name = 'members'
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'members' AND column_name = 'owner_worker_id'
   ) THEN
-    ALTER TABLE members ADD COLUMN IF NOT EXISTS owner_worker_id TEXT;
+    DROP INDEX IF EXISTS idx_members_owner;
+    ALTER TABLE members DROP COLUMN owner_worker_id;
   END IF;
 END $$;
-
-CREATE INDEX IF NOT EXISTS idx_hosts_owner   ON hosts(owner_worker_id);
-CREATE INDEX IF NOT EXISTS idx_members_owner ON members(owner_worker_id);
 
 -- Migrations for existing DBs (idempotent: safe to run on fresh DBs too).
 -- The CREATE TABLE IF NOT EXISTS above won't update a pre-existing members
