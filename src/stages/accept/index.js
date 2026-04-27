@@ -13,6 +13,7 @@
  * Inter-host boundary: fully tear down before starting the next host.
  */
 const path = require('path');
+const { chromeProfilesDir } = require('../../common/paths');
 const { log, createWorkerLogger } = require('../../common/logger');
 const {
     sleep, rand, findChrome, launchRealChrome, restartChrome,
@@ -39,7 +40,7 @@ function isManualMode() {
 }
 
 async function launchHostMonitorChrome(chromePath, host) {
-    const dataDir = path.resolve(__dirname, '..', '..', `chrome_data_temp_pipeline_H${host.id}`);
+    const dataDir = path.join(chromeProfilesDir, `pipeline_H${host.id}`);
     const debugPort = (parseInt(process.env.DEBUG_PORT, 10) || 9234) + 100 + (host.id % 50);
     const chrome = await launchRealChrome(chromePath, 'H', { dataDir, debugPort });
     return chrome;
