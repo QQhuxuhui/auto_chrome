@@ -9,6 +9,7 @@ const path = require('path');
 const http = require('http');
 const https = require('https');
 const { log, createWorkerLogger } = require('./logger');
+const { chromeProfilesDir, debugDir } = require('./paths');
 
 // ============ 基础工具 ============
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -77,7 +78,7 @@ function findChrome() {
 const BASE_DEBUG_PORT = parseInt(process.env.DEBUG_PORT, 10) || 9234;
 
 function buildChromeArgs({ workerId = 0, dataDir, debugPort, extraArgs = [], lang = 'en-US', viewport = '1280,800' }) {
-    const resolvedDataDir = dataDir || path.resolve(__dirname, '..', `chrome_data_temp_pipeline_${workerId}`);
+    const resolvedDataDir = dataDir || path.join(chromeProfilesDir, `pipeline_${workerId}`);
     return [
         `--remote-debugging-port=${debugPort}`,
         `--user-data-dir=${resolvedDataDir}`,
@@ -114,7 +115,7 @@ function buildChromeArgs({ workerId = 0, dataDir, debugPort, extraArgs = [], lan
 async function launchRealChrome(chromePath, workerId = 0, opts = {}) {
     const wlog = createWorkerLogger(workerId);
     const debugPort = opts.debugPort || (BASE_DEBUG_PORT + workerId);
-    const dataDir = opts.dataDir || path.resolve(__dirname, '..', `chrome_data_temp_pipeline_${workerId}`);
+    const dataDir = opts.dataDir || path.join(chromeProfilesDir, `pipeline_${workerId}`);
     if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
     const args = buildChromeArgs({ workerId, dataDir, debugPort, extraArgs: opts.extraArgs, lang: opts.lang, viewport: opts.viewport });
 
@@ -768,7 +769,7 @@ async function forceEnglishUI(page, wlog) {
 async function takeScreenshot(page, label, wlog) {
     try {
         const safeName = label.replace(/[^a-zA-Z0-9_-]/g, '_');
-        const ssPath = path.resolve(__dirname, '..', `debug_${safeName}_${Date.now()}.png`);
+        const ssPath = path.join(debugDir, `${safeName}_${Date.now()}.png`);
         await page.screenshot({ path: ssPath, fullPage: true });
         wlog.debug(`Screenshot saved: ${ssPath}`);
         return ssPath;
