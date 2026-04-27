@@ -47,10 +47,16 @@ module.exports = async function routes(app) {
         ];
         if (hostIds.length) args.push('--host-ids', hostIds.join(','));
 
-        const child = fork(orchestratorPath, args, {
-            stdio: ['ignore', 'inherit', 'inherit', 'ipc'],
-            env: { ...process.env, WORKER_ID: app.workerId },
-        });
+        let child;
+        try {
+            child = fork(orchestratorPath, args, {
+                stdio: ['ignore', 'inherit', 'inherit', 'ipc'],
+                env: { ...process.env, WORKER_ID: app.workerId },
+            });
+        } catch (e) {
+            app.log.error({ err: e.message }, 'fork orchestrator (ops) failed');
+            return reply.code(500).send({ error: 'fork orchestrator 失败', detail: e.message });
+        }
         await runs.setRunPid(run.id, child.pid);
         return { runId: run.id, pid: child.pid, hostIds, autoFiltered };
     });
