@@ -47,6 +47,9 @@ Desktop.ini
 .codex
 .codex/
 
+# Git worktrees
+.worktrees/
+
 # Tools 构建产物（exe 嵌入了 API key，dist/ 为构建中间产物）
 tools/dist/
 tools/*.exe
