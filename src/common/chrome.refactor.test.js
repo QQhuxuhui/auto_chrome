@@ -16,7 +16,7 @@ test('buildChromeArgs merges extraArgs', () => {
 
 test('buildChromeArgs falls back to default pipeline dataDir when not provided', () => {
     const args = buildChromeArgs({ workerId: 2, debugPort: 9236 });
-    assert.ok(args.some(a => a.includes('chrome_data_temp_pipeline_2')));
+    assert.ok(args.some(a => a.includes(`${path.sep}pipeline_2`)));
 });
 
 test('buildChromeArgs preserves stealth flag set', () => {
