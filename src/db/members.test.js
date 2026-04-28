@@ -82,13 +82,13 @@ test('transitionToFailed increments fail_count and clears host when releaseHost=
     assert.equal(updated.last_error, 'boom');
 });
 
-test('transitionToFailed promotes to abandoned after 3 fails', async () => {
+test('transitionToFailed counts fails without auto-abandoning', async () => {
     const { member } = await members.upsertMember({ email: 'test-mem-4@example.com', password: 'pw' });
     await members.transitionToInvitePending(member.id, hostId);
     await members.transitionToFailed(member.id, { newStatus: 'invite_failed', error: 'e1', releaseHost: true });
     await members.transitionToFailed(member.id, { newStatus: 'invite_failed', error: 'e2', releaseHost: true });
     const third = await members.transitionToFailed(member.id, { newStatus: 'invite_failed', error: 'e3', releaseHost: true });
-    assert.equal(third.status, 'abandoned');
+    assert.equal(third.status, 'invite_failed');
     assert.equal(third.fail_count, 3);
 });
 

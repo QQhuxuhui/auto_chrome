@@ -4,8 +4,6 @@
  */
 const db = require('./index');
 
-const ABANDON_THRESHOLD = 3;
-
 function mapRow(row) {
     if (!row) return null;
     return { ...row };
@@ -211,18 +209,20 @@ async function transitionToDone(memberId, token, tokenMeta) {
 }
 
 async function transitionToFailed(memberId, { newStatus, error, releaseHost }) {
+    // fail_count is incremented purely as a counter — no auto-abandon threshold.
+    // Operators must explicitly abandon a member via abandonMember if they want to retire it.
     const sql = `
         UPDATE members
-        SET status = CASE WHEN fail_count + 1 >= $4 THEN 'abandoned' ELSE $2 END,
+        SET status = $2,
             fail_count = fail_count + 1,
             last_error = $3,
             last_error_at = NOW(),
-            host_id = CASE WHEN $5 THEN NULL ELSE host_id END,
+            host_id = CASE WHEN $4 THEN NULL ELSE host_id END,
             updated_at = NOW()
         WHERE id = $1
         RETURNING *
     `;
-    const { rows } = await db.query(sql, [memberId, newStatus, error || null, ABANDON_THRESHOLD, !!releaseHost]);
+    const { rows } = await db.query(sql, [memberId, newStatus, error || null, !!releaseHost]);
     return mapRow(rows[0]);
 }
 
@@ -258,7 +258,7 @@ async function resetMember(memberId) {
 
 /**
  * Clear fail_count + last_error without touching status/host_id. Lets an
- * operator take a member that crossed the ABANDON_THRESHOLD and put it back
+ * operator wipe the failure history for a member and put it back
  * in play for the next stage run without losing any other state.
  */
 async function clearFailCount(memberId) {
@@ -366,11 +366,13 @@ async function listMembersForStage(stage, { hostIds } = {}) {
     const useHostFilter = Array.isArray(hostIds);
     let sql, params;
     if (s === '1') {
-        params = [ABANDON_THRESHOLD];
+        params = [];
         // Stage 1: host assigned at runtime via pickHost; host filter not applicable here.
+        // fail_count is only a counter — failed members keep flowing back into the queue
+        // until an operator explicitly abandons them.
         sql = `
             SELECT * FROM members
-            WHERE status IN ('new','invite_failed') AND fail_count < $1
+            WHERE status IN ('new','invite_failed')
             ORDER BY created_at ASC
         `;
     } else if (s === '2') {
@@ -391,17 +393,17 @@ async function listMembersForStage(stage, { hostIds } = {}) {
         }
     } else if (s === '3') {
         if (useHostFilter) {
-            params = [ABANDON_THRESHOLD, hostIds];
+            params = [hostIds];
             sql = `
                 SELECT * FROM members
-                WHERE status IN ('joined','oauth_failed') AND fail_count < $1 AND host_id = ANY($2)
+                WHERE status IN ('joined','oauth_failed') AND host_id = ANY($1)
                 ORDER BY joined_at ASC NULLS LAST, updated_at ASC
             `;
         } else {
-            params = [ABANDON_THRESHOLD];
+            params = [];
             sql = `
                 SELECT * FROM members
-                WHERE status IN ('joined','oauth_failed') AND fail_count < $1
+                WHERE status IN ('joined','oauth_failed')
                 ORDER BY joined_at ASC NULLS LAST, updated_at ASC
             `;
         }
@@ -444,5 +446,4 @@ module.exports = {
     quickBindNewMembersToHost,
     listMembersForStage,
     countByStatus,
-    ABANDON_THRESHOLD,
 };
