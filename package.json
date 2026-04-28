@@ -4,7 +4,7 @@
     "private": true,
     "description": "Build harness — packages src/server.js as a single Windows exe.",
     "scripts": {
-        "build": "pkg src/server.js --config pkg.config.json --output dist/auto_chrome.exe"
+        "build": "pkg src/server.js --config pkg.config.json --output dist/auto_chrome.exe --public --public-packages \"*\""
     },
     "devDependencies": {
         "@yao-pkg/pkg": "^6.4.0"
