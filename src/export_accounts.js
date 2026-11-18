@@ -66,17 +66,27 @@ async function main() {
             if (cookies[account.index]) continue;
             const result = results[account.index];
             let browser, page;
+            const started = Date.now();
+            result.startedAt = new Date(started).toISOString();
+            result.timings = {};
+            result.steps = [];
             const log = text => console.log(`[${account.index + 1}/${accounts.length}] ${text}`);
             try {
                 result.status = 'running';
                 await save();
                 log('启动独立环境');
                 const accountDir = createHash('sha256').update(account.email).digest('hex');
+                let phaseStarted = Date.now();
                 browser = await launchChrome(path.join(profileRoot, 'auto_chrome', 'gemini', accountDir));
-                page = await browser.newPage();
-                await loginAccount(page, account, log);
+                page = (await browser.pages()).find(tab => tab.url() === 'about:blank') || await browser.newPage();
+                result.timings.launchMs = Date.now() - phaseStarted;
+                phaseStarted = Date.now();
+                await loginAccount(page, account, log, undefined, result.steps);
+                result.timings.loginMs = Date.now() - phaseStarted;
+                phaseStarted = Date.now();
                 await page.bringToFront();
                 const exported = await exportCookies(page, account.email, cookieDir);
+                result.timings.exportMs = Date.now() - phaseStarted;
                 cookies[account.index] = exported.cookieText;
                 Object.assign(result, { status: 'success', filePath: exported.filePath });
                 log('Cookie 已导出');
@@ -87,6 +97,8 @@ async function main() {
                 log(`失败：${result.error}`);
             } finally {
                 if (browser?.connected) await browser.close().catch(() => {});
+                result.timings.totalMs = Date.now() - started;
+                result.completedAt = new Date().toISOString();
                 await save();
             }
         }

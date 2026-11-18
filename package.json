@@ -5,7 +5,7 @@
   "description": "在 Chrome 中登录 Gemini 并核对账号",
   "scripts": {
     "start": "node src/login_only.js",
-    "test": "node --test src/common/gemini-session.test.js"
+    "test": "node --test src/common/gemini-session.test.js src/common/account-login.test.js"
   },
   "engines": {
     "node": ">=18"
