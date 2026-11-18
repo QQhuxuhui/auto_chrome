@@ -1,48 +1,12 @@
-# Dependencies
 node_modules/
-
-# Runtime output
-src/credentials.json
-src/failed.json
-src/enableAPI_failed.json
-failed.json
-state.json
-gpt_plus_state.json
-# Local backups of state/failed files (e.g. state.json.bak.20260409_xxx)
-*.bak.[0-9]*
-
-# Sensitive files
-src/.env
+.env
+accounts.txt
 hosts.txt
 members.txt
+plus.txt
 sub2api.txt
-
-# Chrome temp data
-src/chrome_data_temp_auth_*/
-src/chrome_data_temp_pipeline_*/
-
-# Debug screenshots
-src/debug_*.png
-
-# Claude Code
-.claude/
-
-# OS files
+data/
+logs/
+*.log
 Thumbs.db
-Desktop.ini
 .DS_Store
-
-# Editor files
-*.swp
-*.swo
-.vscode/
-.idea/
-
-# Codex workspace
-.codex
-.codex/
-
-# Tools 构建产物（exe 嵌入了 API key，dist/ 为构建中间产物）
-tools/dist/
-tools/*.exe
-auto-chrome-tools.exe
