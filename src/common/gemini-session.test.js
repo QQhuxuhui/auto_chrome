@@ -2,6 +2,10 @@ const assert = require('node:assert/strict');
 const { test } = require('node:test');
 const puppeteer = require('puppeteer-core');
 const { geminiAccountState, loginToGemini } = require('./gemini-session');
+const { exportCookies } = require('./cookie-export');
+const fs = require('node:fs/promises');
+const { tmpdir } = require('node:os');
+const path = require('node:path');
 
 test('在 Chrome 中识别 Gemini 账号状态', async t => {
     const browser = await puppeteer.launch(process.env.CHROME_PATH
@@ -48,7 +52,24 @@ test('在 Chrome 中识别 Gemini 账号状态', async t => {
         assert.equal(await page.evaluate(geminiAccountState, email), false);
         await page.close();
     });
-    await t.test('从游客页打开 Google 登录入口，返回 Gemini 后确认邮箱', async () => {
+    await t.test('仅导出当前 Gemini URL 的 Cookie，并拒绝不匹配邮箱', async () => {
+        const dir = await fs.mkdtemp(path.join(tmpdir(), 'gemini-cookie-test-'));
+        const page = await fixture(`<header><button aria-label="Google Account: ${email}">头像</button></header>`);
+        try {
+            await browser.defaultBrowserContext().setCookie(
+                { name: 'gemini_test', value: 'fixture', domain: 'gemini.google.com', path: '/' },
+                { name: 'other_test', value: 'excluded', domain: 'example.test', path: '/' });
+            await assert.rejects(exportCookies(page, 'other@example.test', dir), /拒绝导出/);
+            const exported = await exportCookies(page, email, dir);
+            assert.match(exported.cookieText, /gemini_test=fixture/);
+            assert.doesNotMatch(exported.cookieText, /other_test|[\r\n]/);
+            assert.equal(await fs.readFile(exported.filePath, 'utf8'), exported.cookieText);
+        } finally {
+            await page.close();
+            await fs.rm(dir, { recursive: true });
+        }
+    });
+    await t.test('顶部链接被布局隐藏时仍能从游客页登录并确认邮箱', async () => {
         const page = await browser.newPage();
         const signIn = 'https://accounts.google.com/ServiceLogin';
         let visitedSignIn = false;
@@ -58,7 +79,7 @@ test('在 Chrome 中识别 Gemini 账号状态', async t => {
             if (req.url() === target) {
                 body = visitedSignIn
                     ? `<header><button aria-label="Google Account: ${email}">头像</button></header>`
-                    : `<a href="${signIn}">登录</a>`;
+                    : `<a hidden href="${signIn}">登录</a><a href="#">登录</a>`;
             } else if (req.url() === signIn) {
                 visitedSignIn = true;
                 body = `<a href="${target}">返回 Gemini</a>`;

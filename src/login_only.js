@@ -3,8 +3,9 @@ const { homedir } = require('node:os');
 const path = require('node:path');
 const { createInterface } = require('node:readline/promises');
 const { parseArgs } = require('node:util');
-const puppeteer = require('puppeteer-core');
+const { launchChrome } = require('./common/chrome');
 const { loginToGemini } = require('./common/gemini-session');
+const { exportCookies } = require('./common/cookie-export');
 
 async function main() {
     const { values } = parseArgs({ options: { email: { type: 'string' }, help: { type: 'boolean', short: 'h' } } });
@@ -27,18 +28,14 @@ async function main() {
 
     const accountDir = createHash('sha256').update(email).digest('hex');
     const profileRoot = process.env.LOCALAPPDATA || path.join(homedir(), '.local', 'share');
-    const browser = await puppeteer.launch({
-        ...(process.env.CHROME_PATH ? { executablePath: process.env.CHROME_PATH } : { channel: 'chrome' }),
-        headless: false,
-        pipe: true,
-        defaultViewport: null,
-        userDataDir: path.join(profileRoot, 'auto_chrome', 'gemini', accountDir),
-    });
+    const browser = await launchChrome(path.join(profileRoot, 'auto_chrome', 'gemini', accountDir));
     try {
         const page = (await browser.pages())[0] || await browser.newPage();
         console.log('请在 Chrome 窗口完成 Google 登录。要使用身份验证器，可在验证页选择“试试其他方式”。');
         const signedInTab = await loginToGemini(browser, page, email);
         await signedInTab.bringToFront();
+        const { filePath } = await exportCookies(signedInTab, email, path.resolve(__dirname, '..', 'cookies'));
+        console.log(`Cookie 已保存：${filePath}`);
         console.log('已在 Gemini 核对目标邮箱。可以继续使用此窗口，关闭 Chrome 即可退出。');
         if (browser.connected) await new Promise(resolve => browser.once('disconnected', resolve));
     } finally {

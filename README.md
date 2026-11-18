@@ -14,3 +14,13 @@ npm start -- --email name@example.com
 出现 Google 登录页后，在浏览器里输入密码并完成验证。需要切换验证方式时，点“试试其他方式”，再选“从 Google 身份验证器应用获取验证码”。返回 Gemini 并核对邮箱后，终端会提示成功。关闭浏览器即可退出。
 
 Windows 的会话保存在 `%LOCALAPPDATA%\auto_chrome\gemini`，其他平台默认使用 `~/.local/share/auto_chrome/gemini`。运行 `npm test` 可用本机 Chrome 和模拟页面验证登录流程。
+
+Chrome 以普通进程启动，脚本通过本机调试连接读取页面。每个邮箱对应独立的配置目录；相同邮箱再次运行会复用会话。邮箱核对成功后，当前 Gemini URL 适用的 Cookie 保存至 `cookies/<邮箱>.cookie.txt`，不会打印 Cookie 原文。
+
+批量导出使用 `邮箱----密码----辅助邮箱----验证器密钥----其他字段` 格式的账号文件：
+
+```sh
+node src/export_accounts.js --file accounts.txt --output "C:/Users/你的用户名/Downloads/gemini-cookies.txt" --concurrency 2
+```
+
+合并 TXT 每行一个账号的 Cookie，按输入文件顺序排列。只有在 Gemini 核对邮箱成功的账号才会写入；进度和失败原因保存在同名 `.status.json` 文件中，可用 `--resume` 继续尚未成功的账号。批量流程支持密码和验证器验证码；其他挑战会记录为失败，不会将游客 Cookie 当作成功结果。

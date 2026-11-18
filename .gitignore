@@ -6,6 +6,7 @@ members.txt
 plus.txt
 sub2api.txt
 data/
+cookies/
 logs/
 *.log
 Thumbs.db

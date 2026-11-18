@@ -26,7 +26,6 @@ function geminiAccountState(expectedEmail) {
 function googleSignInLink() {
     if (location.origin !== 'https://gemini.google.com') return null;
     const link = Array.from(document.links).find(el => el.origin === 'https://accounts.google.com'
-        && el.getClientRects().length && getComputedStyle(el).visibility === 'visible'
         && [el.textContent, el.getAttribute('aria-label')].some(label => /^(sign in|登录|登入)$/i.test((label || '').trim())));
     return link ? link.href : null;
 }
