@@ -77,7 +77,7 @@ async function main() {
                 log('启动独立环境');
                 const accountDir = createHash('sha256').update(account.email).digest('hex');
                 let phaseStarted = Date.now();
-                browser = await launchChrome(path.join(profileRoot, 'auto_chrome', 'gemini', accountDir));
+                browser = await launchChrome(path.join(profileRoot, 'auto_chrome', 'gemini', accountDir), { portableCookies: true });
                 page = (await browser.pages()).find(tab => tab.url() === 'about:blank') || await browser.newPage();
                 result.timings.launchMs = Date.now() - phaseStarted;
                 phaseStarted = Date.now();
@@ -88,7 +88,8 @@ async function main() {
                 const exported = await exportCookies(page, account.email, cookieDir);
                 result.timings.exportMs = Date.now() - phaseStarted;
                 cookies[account.index] = exported.cookieText;
-                Object.assign(result, { status: 'success', filePath: exported.filePath });
+                Object.assign(result, { status: 'success', filePath: exported.filePath,
+                    cookieMetadataPath: exported.metadataPath, conflictingCookieNames: exported.conflictingNames });
                 log('Cookie 已导出');
             } catch (error) {
                 result.status = 'failed';

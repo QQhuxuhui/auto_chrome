@@ -28,7 +28,7 @@ async function main() {
 
     const accountDir = createHash('sha256').update(email).digest('hex');
     const profileRoot = process.env.LOCALAPPDATA || path.join(homedir(), '.local', 'share');
-    const browser = await launchChrome(path.join(profileRoot, 'auto_chrome', 'gemini', accountDir));
+    const browser = await launchChrome(path.join(profileRoot, 'auto_chrome', 'gemini', accountDir), { portableCookies: true });
     try {
         const page = (await browser.pages())[0] || await browser.newPage();
         console.log('请在 Chrome 窗口完成 Google 登录。要使用身份验证器，可在验证页选择“试试其他方式”。');

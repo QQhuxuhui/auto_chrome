@@ -18,6 +18,47 @@ test('验证器算法符合 RFC 测试向量', () => {
     assert.equal(totp('GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ', 59000), '287082');
 });
 
+test('已有会话尚在渲染时，不沿隐藏登录链接重新登录', async t => {
+    const browser = await puppeteer.launch(process.env.CHROME_PATH
+        ? { executablePath: process.env.CHROME_PATH } : { channel: 'chrome' });
+    t.after(() => browser.close());
+    const page = await browser.newPage();
+    const email = 'existing@example.test';
+    let loginRequests = 0;
+    await page.setRequestInterception(true);
+    page.on('request', request => {
+        if (new URL(request.url()).origin !== 'https://gemini.google.com') { loginRequests++; return request.abort(); }
+        return request.respond({ contentType: 'text/html; charset=utf-8', body: `<a hidden href="https://accounts.google.com/ServiceLogin">登录</a><script>setTimeout(()=>{document.body.innerHTML='<header><button aria-label="Google Account: ${email}">头像</button></header>';},500);</script>` });
+    });
+    await loginAccount(page, { email }, () => {}, 5000);
+    assert.equal(loginRequests, 0);
+});
+
+test('跳过Google补充设置和Gemini可选内容应用后核对邮箱', async t => {
+    const browser = await puppeteer.launch(process.env.CHROME_PATH
+        ? { executablePath: process.env.CHROME_PATH } : { channel: 'chrome' });
+    t.after(() => browser.close());
+    const page = await browser.newPage();
+    const email = 'optional@example.test';
+    let visitedGds = false;
+    await page.setRequestInterception(true);
+    page.on('request', request => {
+        const url = new URL(request.url());
+        let body;
+        if (url.origin === 'https://accounts.google.com') return request.respond({ status: 302, headers: { location: 'https://gds.google.com/web/landing' } });
+        if (url.origin === 'https://gds.google.com') { visitedGds = true; body = '<p>可选补充设置</p>'; }
+        else if (url.origin === 'https://gemini.google.com') body = visitedGds
+            ? `<button id="skip">Use without content apps</button><script>document.querySelector('#skip').onclick=()=>document.body.innerHTML='<a href="https://accounts.google.com/SignOutOptions" aria-label="Google Account: ${email}">Account</a>';</script>`
+            : '<a href="https://accounts.google.com/ServiceLogin">登录</a>';
+        else return request.abort();
+        return request.respond({ contentType: 'text/html; charset=utf-8', body });
+    });
+    const steps = [];
+    await loginAccount(page, { email }, () => {}, 10000, steps);
+    assert.equal(visitedGds, true);
+    assert.deepEqual(steps.map(step=>step.stage), ['打开登录页', '跳过Google补充设置', '跳过可选内容应用', '邮箱确认成功']);
+});
+
 test('模拟完整登录：等待延迟渲染，阶段就绪立即推进且仅提交一次', async t => {
     const browser = await puppeteer.launch(process.env.CHROME_PATH
         ? { executablePath: process.env.CHROME_PATH } : { channel: 'chrome' });
