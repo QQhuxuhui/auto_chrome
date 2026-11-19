@@ -18,6 +18,29 @@ test('验证器算法符合 RFC 测试向量', () => {
     assert.equal(totp('GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ', 59000), '287082');
 });
 
+test('邮箱提交后提示找不到此账号时终止，不重复提交邮箱', async t => {
+    const browser = await puppeteer.launch(process.env.CHROME_PATH
+        ? { executablePath: process.env.CHROME_PATH } : { channel: 'chrome' });
+    t.after(() => browser.close());
+    const page = await browser.newPage();
+    await page.setRequestInterception(true);
+    page.on('request', request => {
+        const origin = new URL(request.url()).origin;
+        const body = origin === 'https://gemini.google.com'
+            ? '<a href="https://accounts.google.com/v3/signin/identifier">登录</a>'
+            : `<form><input id="identifierId"><button>下一步</button></form><p></p><script>
+                document.querySelector('form').onsubmit = event => {
+                    event.preventDefault(); document.querySelector('p').textContent = '找不到此账号';
+                };
+            </script>`;
+        return request.respond({ contentType: 'text/html; charset=utf-8', body });
+    });
+    const steps = [];
+    await assert.rejects(loginAccount(page, { email: 'missing@example.test' }, () => {}, 5000, steps),
+        /Google 提示账号不可用/);
+    assert.equal(steps.filter(step => step.stage === '邮箱').length, 1);
+});
+
 test('已有会话尚在渲染时，不沿隐藏登录链接重新登录', async t => {
     const browser = await puppeteer.launch(process.env.CHROME_PATH
         ? { executablePath: process.env.CHROME_PATH } : { channel: 'chrome' });

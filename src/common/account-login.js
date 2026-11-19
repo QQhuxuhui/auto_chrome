@@ -142,7 +142,7 @@ async function loginAccount(page, account, log = () => {}, timeoutMs = 360000, s
         if (/此浏览器或应用可能不安全|browser or app may not be secure/i.test(state.text)) throw new Error('Google 拒绝浏览器登录');
         if (/密码错误|Wrong password|密码不正确/i.test(state.text)) throw new Error('Google 提示密码错误');
         if (/密码.{0,40}(?:发生了更改|已更改|已更改过)|password was changed/i.test(state.text)) throw new Error('Google提示密码已更改，输入凭据失效');
-        if (/账号已停用|account has been disabled|Couldn't find your Google Account|找不到您的 Google 账号/i.test(state.text)) throw new Error('Google 提示账号不可用');
+        if (/账号已停用|account has been disabled|Couldn't find your Google Account|找不到您的 Google 账号|找不到此账号/i.test(state.text)) throw new Error('Google 提示账号不可用');
         const action = loginAction(state);
         const unavailableSelection = /\/challenge\/selection\/?$/.test(url.pathname)
             && !state.busy && !state.totp && !action
