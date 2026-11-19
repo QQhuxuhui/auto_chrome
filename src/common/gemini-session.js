@@ -1,6 +1,6 @@
 const { setTimeout: sleep } = require('node:timers/promises');
 
-// 此函数在页面内执行。只读取 Gemini 顶部账号控件中的邮箱。
+// 此函数在页面内执行。只读取 Gemini 顶部或侧栏的账号控件中的邮箱。
 function geminiAccountState(expectedEmail) {
     if (location.origin !== 'https://gemini.google.com') return false;
 
@@ -9,10 +9,14 @@ function geminiAccountState(expectedEmail) {
     const email = expectedEmail.trim().toLowerCase();
     for (const el of controls) {
         const isAccountLink = el.origin === 'https://accounts.google.com' && el.pathname === '/SignOutOptions';
-        if (!isAccountLink && !el.closest('header, [role="banner"]')) continue;
+        const isSidebarAccount = el.matches('sidenav-mavatar-footer a.mavatar-footer-left');
+        const knownAccountControl = isAccountLink || isSidebarAccount;
+        if (!knownAccountControl && !el.closest('header, [role="banner"]')) continue;
         const labels = [el.getAttribute('aria-label'), el.getAttribute('title')].filter(Boolean);
-        if (!labels.some(label => /Google\s*(?:Account\b|账号|帐号|帳戶|帳號)/i.test(label))) continue;
-        const emails = labels.join(' ').toLowerCase().split(/[\s:：,，()（）<>]+/).filter(part => part.includes('@'));
+        // 已知账号入口不依赖翻译后的“Google 账号”前缀，兼容其他语言。
+        if (!knownAccountControl && !labels.some(label => /Google\s*(?:Account\b|账号|帐号|帳戶|帳號)/i.test(label))) continue;
+        const emails = labels.join(' ').toLowerCase().replace(/[\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, '')
+            .split(/[\s:：,，()（）<>]+/).filter(part => part.includes('@'));
         if (emails.includes(email)) return 'signed-in';
         if (emails.length) return 'other-account';
     }

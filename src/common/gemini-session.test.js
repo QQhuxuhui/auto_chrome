@@ -41,6 +41,25 @@ test('在 Chrome 中识别 Gemini 账号状态', async t => {
         assert.equal(await page.evaluate(geminiAccountState, email), 'signed-in');
         await page.close();
     });
+    await t.test('新版侧栏账号入口支持本地化标签和双向文本标记', async () => {
+        const page = await fixture(`<sidenav-mavatar-footer><a class="mavatar-footer-left"
+            aria-label="Google એકાઉન્ટ: Test (\u202a${email}\u202c)">Test Pro</a></sidenav-mavatar-footer>`);
+        assert.equal(await page.evaluate(geminiAccountState, email), 'signed-in');
+        assert.equal(await page.evaluate(geminiAccountState, 'other@example.test'), 'other-account');
+        await page.close();
+    });
+    await t.test('已知 Google 账号链接不依赖界面语言', async () => {
+        const page = await fixture(`<a href="https://accounts.google.com/SignOutOptions"
+            aria-label="Compte Google : Test (${email})">Compte</a>`);
+        assert.equal(await page.evaluate(geminiAccountState, email), 'signed-in');
+        await page.close();
+    });
+    await t.test('普通正文中相似的侧栏样式不被当成账号入口', async () => {
+        const page = await fixture(`<main><a class="mavatar-footer-left"
+            aria-label="Google Account: ${email}">聊天内容</a></main>`);
+        assert.equal(await page.evaluate(geminiAccountState, email), false);
+        await page.close();
+    });
     await t.test('邮箱只有部分相同不能记作目标账号', async () => {
         const page = await fixture('<header><button aria-label="Google Account: Other (mytester@example.test)">头像</button></header>');
         assert.equal(await page.evaluate(geminiAccountState, email), 'other-account');
