@@ -34,6 +34,39 @@ test('已有会话尚在渲染时，不沿隐藏登录链接重新登录', async
     assert.equal(loginRequests, 0);
 });
 
+test('通行密钥跳过按钮在延迟跳转期间保持可点时，不重复提交', async t => {
+    const browser = await puppeteer.launch(process.env.CHROME_PATH
+        ? { executablePath: process.env.CHROME_PATH } : { channel: 'chrome' });
+    t.after(() => browser.close());
+    const page = await browser.newPage();
+    const email = 'passkey@example.test';
+    let visitedLogin = false;
+    await page.setRequestInterception(true);
+    page.on('request', request => {
+        const url = new URL(request.url());
+        let body;
+        if (url.origin === 'https://accounts.google.com') {
+            visitedLogin = true;
+            body = `<button>Not now</button><script>
+                let clicks=0;
+                document.querySelector('button').onclick=()=>{
+                    if (++clicks>1) { location.href='/v3/signin/unknownerror'; return; }
+                    setTimeout(()=>location.href='https://gemini.google.com/app',6500);
+                };
+            </script>`;
+        } else if (url.origin === 'https://gemini.google.com') {
+            body = visitedLogin
+                ? `<header><button aria-label="Google Account: ${email}">Account</button></header>`
+                : '<a href="https://accounts.google.com/v3/signin/speedbump/passkeyenrollment">登录</a>';
+        } else return request.abort();
+        return request.respond({ contentType: 'text/html; charset=utf-8', body });
+    });
+    const steps = [];
+    await loginAccount(page, { email }, () => {}, 15000, steps);
+    assert.equal(steps.filter(step => step.stage === '跳过通行密钥').length, 1);
+    assert.equal(steps.at(-1).stage, '邮箱确认成功');
+});
+
 test('跳过Google补充设置和Gemini可选内容应用后核对邮箱', async t => {
     const browser = await puppeteer.launch(process.env.CHROME_PATH
         ? { executablePath: process.env.CHROME_PATH } : { channel: 'chrome' });

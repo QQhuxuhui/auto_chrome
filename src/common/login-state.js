@@ -75,7 +75,10 @@ function skipReason(state) {
 }
 
 function retryDelay(action, attempts) {
-    // 密码/验证码提交保留保守间隔；按钮未推进时更早检查并重试。
+    // 通行密钥提示提交后可能仍显示可点按钮，后台登录完成前重复点击会使流程失效。
+    // 等待期间仍通过页面状态变化立即推进，无需固定睡满间隔。
+    if (action === '跳过通行密钥') return 60000;
+    // 密码/验证码提交保留保守间隔；其他按钮未推进时更早检查并重试。
     if (['邮箱', '密码', '验证器验证码'].includes(action)) return 25000;
     return attempts <= 1 ? 5000 : attempts === 2 ? 10000 : 25000;
 }
