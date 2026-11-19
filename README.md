@@ -37,6 +37,8 @@ node src/export_accounts.js --file accounts.txt --output "C:/Users/你的用户�
 
 目录批量导出：`node src/export_directory.js --input 账号目录 --output Cookie目录 --prefix gemini-20261119 --concurrency 4`。扫描目录内 TXT，按文件名和行号排序并按邮箱去重；同邮箱凭据冲突单独记录跳过。每 50 个成功账号发布一个 `前缀-001.txt` 文件，完整批次保持不变，全部处理完再发布不足 50 个的尾批。只有成功核对 Gemini 邮箱的账号才进入批次。
 
+大量账号可加 `--profile-root E:/gemini-profiles` 将独立浏览器配置放在空间充足的磁盘。恢复同一批次时继续指定相同路径；省略时沿用原来的本地用户配置目录。
+
 本次规则：人机验证和风控直接跳过；直接显示验证器输入框时填写验证码；Google 可选补充设置和 Gemini 的“不使用内容应用”选项跳过；强制补充资料无法跳过时记录原因。正常的两步验证不视为风控，隐藏的验证控件和聊天正文中的相关字样也不作为风控依据。
 
 `输出目录/_records/前缀/status.json` 保存总进度、来源文件、成功/失败/跳过原因、重复项、批次行号与邮箱映射、SHA256 和耗时；`success.json`、`unsuccessful.json` 分别保存跑通和没跑通记录。恢复时使用相同参数加 `--resume`，已结束的成功/失败/跳过项不会重跑。建立 `_records/前缀/pause.flag` 可让当前账号结束后停止领取新账号，移除该文件后可继续恢复。输入文件发生变化时拒绝复用进度。

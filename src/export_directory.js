@@ -11,6 +11,7 @@ async function main() {
     const { values } = parseArgs({ options: {
         input: { type: 'string' }, output: { type: 'string' }, prefix: { type: 'string' },
         concurrency: { type: 'string', default: '3' }, limit: { type: 'string' }, resume: { type: 'boolean' },
+        'profile-root': { type: 'string' },
     } });
     if (!values.input || !values.output || !/^[a-zA-Z0-9_-]+$/.test(values.prefix || '')) throw new Error('请指定 --input 账号目录 --output 输出目录 --prefix 批次前缀');
     const concurrency = Number(values.concurrency), limit = values.limit ? Number(values.limit) : Infinity;
@@ -18,6 +19,8 @@ async function main() {
     if (limit !== Infinity && (!Number.isInteger(limit) || limit < 1)) throw new Error('limit 必须为正整数');
     const input = await readAccounts(path.resolve(values.input));
     const out = path.resolve(values.output), records = path.join(out, '_records', values.prefix);
+    const profileRoot = values['profile-root'] ? path.resolve(values['profile-root'])
+        : path.join(process.env.LOCALAPPDATA || path.join(homedir(), '.local', 'share'), 'auto_chrome', 'gemini');
     const statusPath = path.join(records, 'status.json');
     await fs.mkdir(records, { recursive: true });
     let state;
@@ -92,8 +95,7 @@ async function main() {
             await save();
             try {
                 log('启动独立环境');
-                const profileRoot = process.env.LOCALAPPDATA || path.join(homedir(), '.local', 'share');
-                browser = await launchChrome(path.join(profileRoot, 'auto_chrome', 'gemini', digest(account.email)), { portableCookies: true });
+                browser = await launchChrome(path.join(profileRoot, digest(account.email)), { portableCookies: true });
                 page = (await browser.pages()).find(tab => tab.url() === 'about:blank') || await browser.newPage();
                 result.timings.launchMs = Date.now() - started;
                 const loginStart = Date.now();
