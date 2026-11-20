@@ -1,5 +1,7 @@
 # Gemini 登录
 
+批量导出并导入 WEBAPI 时，先阅读[账号导出、导入与保活操作手册](docs/gemini-account-import-runbook.md)。其中固定了每 50 个成功账号导入、尾批处理、服务器 TS 多轮验收、断点恢复、错误分类和旧配置清理流程。
+
 在本机 Chrome 中打开 Gemini，完成 Google 登录后自动核对页面上的账号邮箱。每个邮箱使用独立的 Chrome 配置目录，再次运行时可以继续使用该账号的会话。
 
 需要 Node.js 18 或更高版本和桌面版 Google Chrome。在仓库根目录运行以下命令。
