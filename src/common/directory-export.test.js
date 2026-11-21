@@ -14,6 +14,14 @@ test('每50个成功账号发布一个不可变批次，未完成账号不能被
     assert.deepEqual(readyBatches(rows, true)[0].map(row => row.index), first);
 });
 
+test('自定义30个成功账号发布，77个账号最后发布17个尾批', () => {
+    const rows = Array.from({ length: 77 }, (_, i) => ({ index: i + 1, status: 'success' }));
+    assert.deepEqual(readyBatches(rows, false, 30).map(batch => batch.length), [30, 30]);
+    assert.deepEqual(readyBatches(rows, true, 30).map(batch => batch.length), [30, 30, 17]);
+    rows[29].status = 'running';
+    assert.deepEqual(readyBatches(rows, false, 30), []);
+});
+
 test('常规2FA不算风控，直接验证码页不切换方式，可选信息只点跳过', () => {
     const base = { pathname: '/v3/signin/challenge/totp', buttons: ['试试其他方式'], text: '为了保护您的账号安全，Google 希望确认是您本人在尝试登录', totp: true };
     assert.equal(skipReason(base), null);

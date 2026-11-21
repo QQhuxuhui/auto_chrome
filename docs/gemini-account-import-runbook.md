@@ -24,7 +24,7 @@
 | 前一批次、本地/服务器样本保活脚本 | `E:\python_code\auto_log\auto_chrome-gemini\data\portable-soak-20261119` |
 | 已清空的旧配置目录 | `C:\Users\gjy62\AppData\Local\auto_chrome\gemini` |
 
-核心代码：`src/export_directory.js`、`src/common/directory-export.js`、`chrome.js`、`account-login.js`、`login-state.js`、`gemini-session.js`、`cookie-export.js`。
+核心代码：`src/export_directory.js`、`src/common/directory-export.js`、`chrome.js`、`account-login.js`、`login-state.js`、`gemini-session.js`、`gemini-initialization.js`、`cookie-export.js`。
 
 批次辅助脚本均位于上述 `data/portable-batch-20261119-2`：
 
@@ -64,6 +64,8 @@ node src/export_directory.js --input "<新账号目录>" --output "E:\python_cod
 
 - 每个邮箱使用独立的 SHA256 配置目录，导出启动器追加 `-portable-v2`。
 - 在 Gemini 可见账号控件中确认完整目标邮箱后才能导出。不能仅凭页面打开、出现聊天框或邮箱部分相同就记为成功。
+- 导出器现已在同一次登录、关闭浏览器之前调用 `ensureGeminiInitialized`，完成限定在 Gemini 初始化弹窗/提示条中的确认，并同时验证完整邮箱、可用输入框和无剩余弹窗；结果写入 `initialization`。不会点击聊天正文中的同名按钮或自动开启活动记录。初始化未通过就不记导出成功。
+- `--batch-size` 默认为 50；用户指定每 30 个时传 `--batch-size 30`，首轮尾批也发布。恢复批次必须沿用原批次大小，不能用改参数重新划分已发布文件。
 - 输出每账号单行 `name=value; name=value` 的 Cookie TXT，同时保存包含域、路径、同名冲突等信息的 JSON。
 - Cookie 来自当前 Gemini 地址以及相关 Google 登录、轮换与请求地址的并集；TXT 同名冲突优先当前 Gemini 地址，完整变体留在 JSON。不要擅自裁成两三个字段。
 - 并集 TXT 的语法与手动复制的 Cookie 请求头一致，但不等于任意一条浏览器请求实际发送的 Cookie 集合；分析某个端点时按 JSON 中的域和路径核对，不能把同名 Cookie 的唯一值视作适用于所有域。
@@ -71,6 +73,8 @@ node src/export_directory.js --input "<新账号目录>" --output "E:\python_cod
 - 批次按已处理的输入顺序发布，发布后不可变。保存 SHA256、每行邮箱映射和行数；累计满 50 即交给导入器，不等整份名单结束。
 
 ### 3.3 服务器导入与即时验收
+
+**首次使用初始化（2026-11-21 用户补充）**：每次导入还须完成 Gemini 首次使用确认，不能将邮箱确认、Cookie 非空、`check` 或 `rotate` 成功直接当成初始化完成。先核对实际部署的 WEBAPI 是否支持 onboarding／consent 初始化；支持则优先在服务器执行并验证，缺失时使用独立浏览器完成必要确认，并验证目标邮箱、无剩余初始化弹窗及可用对话输入框。2026-11-21 实查部署 `581d18f` 的 `check` 只获取 XSRF 验证登录态，`rotate` 只续期，没有首次确认提交；旧 `cookie-audit-20261118/browser-audit.cjs` 实际在本机浏览器处理确认。此能力会随版本变化，后续以部署源码和实测为准。用户已要求记住，无需再次询问。
 
 1. 核对部署实际支持的管理接口。当次服务器 PATCH 只用于状态修改，不能据此假定支持 Cookie 替换。
 2. 沿用已经验证的远端导入逻辑：每批文件锁、独立报告目录和 SQLite `before.db` 备份；按标准化邮箱匹配 label，匹配到多个账号则停止该导入并排查。
@@ -81,6 +85,9 @@ node src/export_directory.js --input "<新账号目录>" --output "E:\python_cod
 7. 登录、TS、身份等验收数据保存在本地 `server-import/batch-N.json` 和服务器私有批次报告中。补充批次有独立前缀，不能重复导入已发布行。
 
 ### 3.4 持续保活、重试与收尾
+
+- 导出后若要补做初始化，优先使用服务器**当前** Cookie 建立隔离浏览器上下文，而非直接打开可能已丢失会话 Cookie 的旧配置。`cookie-export.js` 的 `browserCookieData(metadata,currentCookieText)` 保留原域/路径及同名变体，并补齐服务器续期新产生而原始元数据没有的 `__Secure-1PSIDTS`、`__Secure-3PSIDTS`。恢复前校验服务器邮箱与 SAPISID/1PSID 身份；不要把旧元数据当作当前会话的完整 Cookie。
+- 若会话经过重新登录修复，自动续期观察须按新会话身份重新计数，不能把旧会话的续期轮数计入新会话验收。
 
 - 初次手动 rotate 成功不算后续自动保活。启动本批次专用只读观察器，记录 TS 的 SHA256 与 `last_success`；只有 TS 改变且成功时间推进才计为新一轮。
 - 新增启用账号继续观察至少两轮自动续期；保留停用的旧账号不为了观察而启用。当次服务器间隔约 10 分钟，实际以运行配置和记录为准。

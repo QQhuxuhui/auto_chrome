@@ -73,7 +73,7 @@ test('在 Chrome 中识别 Gemini 账号状态', async t => {
     });
     await t.test('多地址取并集，保留作用域和同名冲突，排除其他站点并拒绝不匹配邮箱', async () => {
         const dir = await fs.mkdtemp(path.join(tmpdir(), 'gemini-cookie-test-'));
-        const page = await fixture(`<header><button aria-label="Google Account: ${email}">头像</button></header>`);
+        const page = await fixture(`<header><button aria-label="Google Account: ${email}">头像</button></header><textarea></textarea>`);
         try {
             await browser.defaultBrowserContext().setCookie(
                 { name: 'gemini_test', value: 'fixture', domain: 'gemini.google.com', path: '/' },
@@ -86,11 +86,13 @@ test('在 Chrome 中识别 Gemini 账号状态', async t => {
                 { name: 'other_test', value: 'excluded', domain: 'example.test', path: '/' });
             await assert.rejects(exportCookies(page, 'other@example.test', dir), /拒绝导出/);
             const exported = await exportCookies(page, email, dir);
+            assert.equal(exported.initialization.verified, true);
             assert.match(exported.cookieText, /gemini_test=fixture/);
             for (const pair of ['account_test=account','path_test=bound','play_test=play','search_test=search','same_name=gemini']) assert.ok(exported.cookieText.includes(pair));
             assert.equal(exported.cookieText.split('same_name=').length - 1, 1);
             assert.deepEqual(exported.conflictingNames, ['same_name']);
             const metadata = JSON.parse(await fs.readFile(exported.metadataPath, 'utf8'));
+            assert.equal(metadata.initialization.verified, true);
             const bound = metadata.scopes.find(s => s.url === 'https://accounts.google.com/RotateBoundCookies');
             assert.equal(bound.cookies.find(c => c.name === 'same_name').value, 'accounts');
             assert.equal(bound.cookies.find(c => c.name === 'path_test').path, '/RotateBoundCookies');

@@ -12,9 +12,12 @@ async function main() {
         input: { type: 'string' }, output: { type: 'string' }, prefix: { type: 'string' },
         concurrency: { type: 'string', default: '3' }, limit: { type: 'string' }, resume: { type: 'boolean' },
         'profile-root': { type: 'string' },
+        'batch-size': { type: 'string', default: '50' },
     } });
     if (!values.input || !values.output || !/^[a-zA-Z0-9_-]+$/.test(values.prefix || '')) throw new Error('请指定 --input 账号目录 --output 输出目录 --prefix 批次前缀');
     const concurrency = Number(values.concurrency), limit = values.limit ? Number(values.limit) : Infinity;
+    const batchSize = Number(values['batch-size']);
+    if (!Number.isInteger(batchSize) || batchSize < 1) throw new Error('batch-size 必须为正整数');
     if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 4) throw new Error('并发数须为 1 至 4');
     if (limit !== Infinity && (!Number.isInteger(limit) || limit < 1)) throw new Error('limit 必须为正整数');
     const input = await readAccounts(path.resolve(values.input));
@@ -27,11 +30,12 @@ async function main() {
     if (values.resume) {
         state = JSON.parse(await fs.readFile(statusPath, 'utf8'));
         if (state.fingerprint !== input.fingerprint) throw new Error('输入文件已改变，不能复用此批次进度');
+        if ((state.batchSize || 50) !== batchSize) throw new Error('恢复时不能更改批次大小');
         for (const result of state.results) if (result.status === 'running') result.status = 'pending';
     } else {
         try { await fs.access(statusPath); throw new Error('批次已存在，请用 --resume'); }
         catch (error) { if (error.code !== 'ENOENT') throw error; }
-        state = { fingerprint: input.fingerprint, inputRows: input.inputRows, uniqueAccounts: input.accounts.length,
+        state = { fingerprint: input.fingerprint, batchSize, inputRows: input.inputRows, uniqueAccounts: input.accounts.length,
             duplicates: input.duplicates, invalid: input.invalid, startedAt: new Date().toISOString(), batches: [],
             results: input.accounts.map(account => ({ index: account.index, email: account.email, source: account.source,
                 status: account.conflict ? 'skipped' : 'pending', ...(account.conflict ? { reason: '重复账号凭据不一致，未尝试登录' } : {}) })) };
@@ -46,7 +50,7 @@ async function main() {
     function save() {
         writes = writes.then(async () => {
             const complete = state.results.every(result => !['pending', 'running'].includes(result.status));
-            const batches = readyBatches(state.results, complete);
+            const batches = readyBatches(state.results, complete, batchSize);
             for (let i = 0; i < batches.length; i++) {
                 const rows = batches[i];
                 const name = `${values.prefix}-${String(i + 1).padStart(3, '0')}.txt`;
@@ -102,7 +106,8 @@ async function main() {
                 await loginAccount(page, account, log, 240000, result.steps);
                 result.timings.loginMs = Date.now() - loginStart;
                 await page.bringToFront();
-                const exported = await exportCookies(page, account.email, path.join(records, 'accounts'));
+                const exported = await exportCookies(page, account.email, path.join(records, 'accounts'), { log });
+                result.initialization = exported.initialization;
                 cookieTexts.set(result.index, exported.cookieText);
                 result.cookiePath = exported.filePath;
                 result.cookieMetadataPath = exported.metadataPath;

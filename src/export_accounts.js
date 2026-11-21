@@ -85,11 +85,11 @@ async function main() {
                 result.timings.loginMs = Date.now() - phaseStarted;
                 phaseStarted = Date.now();
                 await page.bringToFront();
-                const exported = await exportCookies(page, account.email, cookieDir);
+                const exported = await exportCookies(page, account.email, cookieDir, { log });
                 result.timings.exportMs = Date.now() - phaseStarted;
                 cookies[account.index] = exported.cookieText;
                 Object.assign(result, { status: 'success', filePath: exported.filePath,
-                    cookieMetadataPath: exported.metadataPath, conflictingCookieNames: exported.conflictingNames });
+                    cookieMetadataPath: exported.metadataPath, conflictingCookieNames: exported.conflictingNames, initialization: exported.initialization });
                 log('Cookie 已导出');
             } catch (error) {
                 result.status = 'failed';
