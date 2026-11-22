@@ -2,6 +2,54 @@ const assert = require('node:assert/strict');
 const { test } = require('node:test');
 const { readyBatches } = require('./directory-export');
 const { loginAction, skipReason } = require('./login-state');
+const fs = require('node:fs/promises');
+const path = require('node:path');
+const os = require('node:os');
+const { atomicJson } = require('./directory-export');
+
+test('进度快照遇到短暂文件占用会重试，替换前保留原快照', async t => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'gemini-progress-'));
+    const file = path.join(dir, 'status.json');
+    await fs.writeFile(file, '{"success":29}');
+    const rename = fs.rename;
+    let attempts = 0;
+    t.mock.method(fs, 'rename', async (...args) => {
+        attempts++;
+        if (attempts <= 2) {
+            assert.deepEqual(JSON.parse(await fs.readFile(file, 'utf8')), { success: 29 });
+            throw Object.assign(new Error('temporarily busy'), { code: 'EPERM' });
+        }
+        return rename(...args);
+    });
+    try {
+        await atomicJson(file, { success: 33 });
+        assert.equal(attempts, 3);
+        assert.deepEqual(JSON.parse(await fs.readFile(file, 'utf8')), { success: 33 });
+    } finally {
+        t.mock.restoreAll();
+        await fs.unlink(file);
+        await fs.rmdir(dir);
+    }
+});
+
+test('非临时写入错误立即报错并保留旧进度及恢复文件', async t => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'gemini-progress-'));
+    const file = path.join(dir, 'status.json');
+    await fs.writeFile(file, '{"success":29}');
+    const failure = Object.assign(new Error('invalid rename'), { code: 'EINVAL' });
+    const mocked = t.mock.method(fs, 'rename', async () => { throw failure; });
+    try {
+        await assert.rejects(atomicJson(file, { success: 33 }), error => error === failure);
+        assert.equal(mocked.mock.callCount(), 1);
+        assert.deepEqual(JSON.parse(await fs.readFile(file, 'utf8')), { success: 29 });
+        assert.deepEqual(JSON.parse(await fs.readFile(`${file}.tmp`, 'utf8')), { success: 33 });
+    } finally {
+        t.mock.restoreAll();
+        await fs.unlink(file);
+        await fs.unlink(`${file}.tmp`);
+        await fs.rmdir(dir);
+    }
+});
 
 test('每50个成功账号发布一个不可变批次，未完成账号不能被越过', () => {
     const rows = Array.from({ length: 120 }, (_, i) => ({ index: i + 1, status: 'success' }));

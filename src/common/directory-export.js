@@ -1,6 +1,7 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { createHash } = require('node:crypto');
+const { setTimeout: sleep } = require('node:timers/promises');
 
 const digest = value => createHash('sha256').update(value).digest('hex');
 async function readAccounts(directory) {
@@ -54,7 +55,17 @@ function readyBatches(results, complete, batchSize = 50) {
 
 async function atomicJson(file, value) {
     await fs.writeFile(`${file}.tmp`, JSON.stringify(value, null, 2), { mode: 0o600 });
-    await fs.rename(`${file}.tmp`, file);
+    // Windows readers or scanners may briefly deny replacement of an open file.
+    // Keep the previous complete snapshot intact while retrying the rename.
+    for (let attempt = 0; ; attempt++) {
+        try {
+            await fs.rename(`${file}.tmp`, file);
+            return;
+        } catch (error) {
+            if (!['EPERM', 'EACCES', 'EBUSY'].includes(error.code) || attempt >= 7) throw error;
+            await sleep(Math.min(50 * 2 ** attempt, 500));
+        }
+    }
 }
 
 module.exports = { readAccounts, readyBatches, atomicJson, digest };

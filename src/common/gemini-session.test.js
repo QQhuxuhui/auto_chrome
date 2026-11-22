@@ -76,6 +76,17 @@ test('在 Chrome 中识别 Gemini 账号状态', async t => {
         const page = await fixture(`<header><button aria-label="Google Account: ${email}">头像</button></header><textarea></textarea>`);
         try {
             await browser.defaultBrowserContext().setCookie(
+                { name: 'SID', value: 'sid', domain: '.google.com', path: '/' },
+                { name: 'HSID', value: 'hsid', domain: '.google.com', path: '/' },
+                { name: 'SSID', value: 'ssid', domain: '.google.com', path: '/', secure: true },
+                { name: 'APISID', value: 'apisid', domain: '.google.com', path: '/' },
+                { name: 'SAPISID', value: 'sapisid', domain: '.google.com', path: '/', secure: true },
+                { name: '__Secure-1PSID', value: '1psid', domain: '.google.com', path: '/', secure: true, httpOnly: true },
+                { name: '__Secure-3PSID', value: '3psid', domain: '.google.com', path: '/', secure: true, httpOnly: true, sameSite: 'None' },
+                { name: 'SIDCC', value: 'sidcc', domain: '.google.com', path: '/' },
+                { name: '__Secure-1PSIDCC', value: '1psidcc', domain: '.google.com', path: '/', secure: true, httpOnly: true },
+                { name: 'OSID', value: 'osid', domain: 'gemini.google.com', path: '/', secure: true, httpOnly: true },
+                { name: '__Secure-OSID', value: 'sosid', domain: 'gemini.google.com', path: '/', secure: true, httpOnly: true, sameSite: 'None' },
                 { name: 'gemini_test', value: 'fixture', domain: 'gemini.google.com', path: '/' },
                 { name: 'account_test', value: 'account', domain: 'accounts.google.com', path: '/' },
                 { name: 'path_test', value: 'bound', domain: 'accounts.google.com', path: '/RotateBoundCookies' },
