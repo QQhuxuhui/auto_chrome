@@ -6,6 +6,7 @@ const { parseArgs } = require('node:util');
 const { launchChrome } = require('./common/chrome');
 const { loginAccount } = require('./common/account-login');
 const { exportCookies } = require('./common/cookie-export');
+const { atomicWriteFile, atomicJson, createWriteQueue } = require('./common/directory-export');
 
 async function main() {
     const { values } = parseArgs({ options: {
@@ -44,19 +45,17 @@ async function main() {
         catch (error) { if (error.code !== 'ENOENT') throw error; }
     }
     await fs.mkdir(path.dirname(output), { recursive: true });
-    let writes = Promise.resolve();
+    const enqueueWrite = createWriteQueue();
     function save() {
-        writes = writes.then(async () => {
+        return enqueueWrite(async () => {
             const successful = cookies.filter(Boolean);
             if (successful.length) {
-                await fs.writeFile(`${output}.tmp`, successful.join('\r\n') + '\r\n', { mode: 0o600 });
-                await fs.rename(`${output}.tmp`, output);
+                await atomicWriteFile(output, successful.join('\r\n') + '\r\n', { mode: 0o600 });
             }
             let line = 0;
             const snapshot = results.map(result => ({ ...result, outputLine: result.status === 'success' ? ++line : null }));
-            await fs.writeFile(statusPath, JSON.stringify(snapshot, null, 2), { mode: 0o600 });
+            await atomicJson(statusPath, snapshot);
         });
-        return writes;
     }
     await save();
     let cursor = 0;

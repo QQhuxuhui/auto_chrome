@@ -90,20 +90,38 @@ test('通行密钥跳过按钮在延迟跳转期间保持可点时，不重复�
     assert.equal(steps.at(-1).stage, '邮箱确认成功');
 });
 
-test('跳过Google补充设置和Gemini可选内容应用后核对邮箱', async t => {
+test('跳过Google补充设置时经passive ServiceLogin补齐OSID并核对邮箱', async t => {
     const browser = await puppeteer.launch(process.env.CHROME_PATH
         ? { executablePath: process.env.CHROME_PATH } : { channel: 'chrome' });
     t.after(() => browser.close());
     const page = await browser.newPage();
     const email = 'optional@example.test';
     let visitedGds = false;
+    let sawPassiveSso = false;
     await page.setRequestInterception(true);
     page.on('request', request => {
         const url = new URL(request.url());
         let body;
-        if (url.origin === 'https://accounts.google.com') return request.respond({ status: 302, headers: { location: 'https://gds.google.com/web/landing' } });
+        if (url.origin === 'https://accounts.google.com') {
+            if (visitedGds && url.pathname === '/ServiceLogin' && url.searchParams.get('passive') === '1209600') {
+                sawPassiveSso = true;
+                return request.respond({ status: 302, headers: { location: 'https://gemini.google.com/accounts/SetOSID' } });
+            }
+            return request.respond({ status: 302, headers: { location: 'https://gds.google.com/web/landing' } });
+        }
         if (url.origin === 'https://gds.google.com') { visitedGds = true; body = '<p>可选补充设置</p>'; }
-        else if (url.origin === 'https://gemini.google.com') body = visitedGds
+        else if (url.origin === 'https://gemini.google.com' && url.pathname === '/accounts/SetOSID') {
+            return request.respond({
+                status: 302,
+                headers: {
+                    location: 'https://gemini.google.com/app',
+                    'set-cookie': [
+                        'OSID=osid-test; Path=/; Secure; HttpOnly',
+                        '__Secure-OSID=sosid-test; Path=/; Secure; HttpOnly; SameSite=None',
+                    ],
+                },
+            });
+        } else if (url.origin === 'https://gemini.google.com') body = visitedGds
             ? `<button id="skip">Use without content apps</button><script>document.querySelector('#skip').onclick=()=>document.body.innerHTML='<a href="https://accounts.google.com/SignOutOptions" aria-label="Google Account: ${email}">Account</a>';</script>`
             : '<a href="https://accounts.google.com/ServiceLogin">登录</a>';
         else return request.abort();
@@ -112,7 +130,55 @@ test('跳过Google补充设置和Gemini可选内容应用后核对邮箱', async
     const steps = [];
     await loginAccount(page, { email }, () => {}, 10000, steps);
     assert.equal(visitedGds, true);
+    assert.equal(sawPassiveSso, true);
     assert.deepEqual(steps.map(step=>step.stage), ['打开登录页', '跳过Google补充设置', '跳过可选内容应用', '邮箱确认成功']);
+});
+
+test('confirmidentifier 重新登录确认页先核对目标邮箱再推进，邮箱不符立即拒绝', async t => {
+    const browser = await puppeteer.launch(process.env.CHROME_PATH
+        ? { executablePath: process.env.CHROME_PATH } : { channel: 'chrome' });
+    t.after(() => browser.close());
+
+    const okPage = await browser.newPage();
+    const email = 'relogin@example.test';
+    let confirmed = false;
+    await okPage.setRequestInterception(true);
+    okPage.on('request', req => {
+        const url = new URL(req.url());
+        if (url.origin === 'https://gemini.google.com') {
+            const body = confirmed
+                ? `<header><button aria-label="Google Account: ${email}">Account</button></header>`
+                : '<a href="https://accounts.google.com/v3/signin/confirmidentifier">登录</a>';
+            return req.respond({ contentType: 'text/html; charset=utf-8', body });
+        }
+        if (url.origin === 'https://accounts.google.com') {
+            return req.respond({
+                contentType: 'text/html; charset=utf-8',
+                body: `<p>欢迎回来，\u202a${email}\u202c</p><button id="next">下一步</button>
+                    <script>document.querySelector('#next').onclick=()=>{ location.href='https://gemini.google.com/app'; };</script>`,
+            });
+        }
+        return req.abort();
+    });
+    okPage.on('framenavigated', frame => {
+        if (frame.url() === 'https://gemini.google.com/app' && steps.some(s => s.stage === '确认已有邮箱')) confirmed = true;
+    });
+    const steps = [];
+    await loginAccount(okPage, { email }, () => {}, 10000, steps);
+    assert.ok(steps.some(s => s.stage === '确认已有邮箱'));
+    await okPage.close();
+
+    const mismatchPage = await browser.newPage();
+    await mismatchPage.setRequestInterception(true);
+    mismatchPage.on('request', req => {
+        const url = new URL(req.url());
+        if (url.origin === 'https://gemini.google.com') {
+            return req.respond({ contentType: 'text/html; charset=utf-8', body: '<a href="https://accounts.google.com/v3/signin/confirmidentifier">登录</a>' });
+        }
+        return req.respond({ contentType: 'text/html; charset=utf-8', body: '<p>other@example.test</p><button>Next</button>' });
+    });
+    await assert.rejects(loginAccount(mismatchPage, { email }, () => {}, 5000), /重新登录确认页的邮箱与目标账号不符/);
+    await mismatchPage.close();
 });
 
 test('模拟完整登录：等待延迟渲染，阶段就绪立即推进且仅提交一次', async t => {

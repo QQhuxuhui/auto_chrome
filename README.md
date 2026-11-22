@@ -13,7 +13,7 @@ npm start -- --email name@example.com
 
 运行 `npm start` 或在 Windows 双击 `run.bat`，也可以按提示输入邮箱。使用非默认安装位置的 Chrome 时，将 `CHROME_PATH` 设为浏览器可执行文件的路径。
 
-出现 Google 登录页后，在浏览器里输入密码并完成验证。需要切换验证方式时，点“试试其他方式”，再选“从 Google 身份验证器应用获取验证码”。返回 Gemini 并核对邮箱后，终端会提示成功。关闭浏览器即可退出。
+出现 Google 登录页后，在浏览器里输入密码并完成验证。需要切换验证方式时，点“试试其他方式”，再选“从 Google 身份验证器应用获取验证码”。返回 Gemini 并核对邮箱后，脚本会自动冻结并关闭浏览器以固定导出的 Cookie（如需保留窗口可加 `--keep-open`）。
 
 Windows 的会话保存在 `%LOCALAPPDATA%\auto_chrome\gemini`，其他平台默认使用 `~/.local/share/auto_chrome/gemini`。运行 `npm test` 可用本机 Chrome 和模拟页面验证登录流程。
 
@@ -21,7 +21,7 @@ Cookie 导出入口使用邮箱目录的 `-portable-v2` 独立配置。该进程
 
 Chrome 以普通进程启动，脚本通过本机调试连接读取页面。每个邮箱对应独立的配置目录；相同邮箱再次运行会复用会话。邮箱核对成功后，多地址 Cookie 字段并集保存至 `cookies/<邮箱>.cookie.txt`，不会打印 Cookie 原文。
 
-并集范围为当前 Gemini 页面、Gemini batchexecute/StreamGenerate、accounts.google.com 的 RotateCookies/RotateBoundCookies/RotateBoundGaps、play.google.com/log、www.google.com/。只读取此账号环境中这些 URL 适用的 Cookie，不会访问这些地址来人为生成缺失字段。导出前校验页面处于默认槽位（非 `/u/1` 等副槽位）且 Google 主会话与 Gemini 专属 `OSID` / `__Secure-OSID` 已落盘，随后切至 `about:blank` 停止后台滚动刷新再做一致性读取。TXT 每个名称仅保留一个值；同一作用域滚动更新保留最新值，跨作用域同名不同值优先当前 Gemini URL。配套 `<邮箱>.cookies.json` 保存各地址的完整 Cookie 对象（包含值、域、路径、到期等 CDP 元数据）和跨作用域冲突名称。JSON 同样属于私密凭据文件，不应提交版本库。
+并集范围为当前 Gemini 页面、Gemini batchexecute/StreamGenerate、accounts.google.com 的 RotateCookies/RotateBoundCookies/RotateBoundGaps、play.google.com/log、www.google.com/。导出前校验页面处于默认槽位（非 `/u/1` 等副槽位）且 Google 主会话与 Gemini 专属 `OSID` / `__Secure-OSID` 已落盘（若主会话有效而缺 `OSID`，会自动访问 `/usage` 触发 `SetOSID` 续接），随后关闭同上下文多余标签、切至 `about:blank` 并断网停止后台滚动刷新再做一致性读取。TXT 每个名称仅保留一个值；同一作用域滚动更新保留最新值，跨作用域同名不同值优先当前 Gemini URL。配套 `<邮箱>.cookies.json` 保存各地址的完整 Cookie 对象（包含值、域、路径、到期等 CDP 元数据）和跨作用域冲突名称。JSON 同样属于私密凭据文件，不应提交版本库。
 
 并集 TXT 是兼容性导出文件，不等同于任意一条请求的实际 Cookie 请求头；按目标站点发送时应依据 JSON 中的作用域选择 Cookie。JSON 保留全部同名变体，不能将 TXT 简化后的唯一值视为适用于所有域。并集不能替代 Chrome 绑定会话的挑战响应，也不保证解决保活。已有批次不会自动更新，`--resume` 会复用此前成功结果；需要新格式时另用新输出或批次前缀。
 

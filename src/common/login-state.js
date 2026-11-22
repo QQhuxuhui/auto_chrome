@@ -34,6 +34,7 @@ function loginAction(state) {
     if (state.busy) return null;
     const has = re => state.buttons.some(text => re.test(text));
     const route = state.pathname;
+    if (/\/confirmidentifier\/?$/.test(route)) return has(/^(Next|下一步|继续|Continue)$/i) ? '确认已有邮箱' : null;
     if (/\/accountchooser\/?$/.test(route)) return state.chooser ? '选择目标账号' : null;
     // 验证器输入框已出现时直接提交，不再切换验证方式。
     if (state.totp && /\/challenge\//.test(route)) return '验证器验证码';

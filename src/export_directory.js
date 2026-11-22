@@ -5,7 +5,7 @@ const { parseArgs } = require('node:util');
 const { launchChrome } = require('./common/chrome');
 const { loginAccount } = require('./common/account-login');
 const { exportCookies } = require('./common/cookie-export');
-const { readAccounts, readyBatches, atomicJson, digest } = require('./common/directory-export');
+const { readAccounts, readyBatches, atomicWriteFile, atomicJson, createWriteQueue, digest } = require('./common/directory-export');
 
 async function main() {
     const { values } = parseArgs({ options: {
@@ -46,9 +46,9 @@ async function main() {
         if (!text || /[\r\n]/.test(text)) throw new Error('已保存的 Cookie 格式无效');
         cookieTexts.set(result.index, text);
     }
-    let writes = Promise.resolve();
+    const enqueueWrite = createWriteQueue();
     function save() {
-        writes = writes.then(async () => {
+        return enqueueWrite(async () => {
             const complete = state.results.every(result => !['pending', 'running'].includes(result.status));
             const batches = readyBatches(state.results, complete, batchSize);
             for (let i = 0; i < batches.length; i++) {
@@ -68,8 +68,7 @@ async function main() {
                     alreadyPublished = true;
                 } catch (error) { if (error.code !== 'ENOENT') throw error; }
                 if (!alreadyPublished) {
-                    await fs.writeFile(`${file}.tmp`, text, { mode: 0o600 });
-                    await fs.rename(`${file}.tmp`, file);
+                    await atomicWriteFile(file, text, { mode: 0o600 });
                 }
                 state.batches.push({ number: i + 1, file, count: rows.length, sha256, createdAt: new Date().toISOString(),
                     accounts: rows.map(row => ({ index: row.index, email: row.email })) });
@@ -82,7 +81,6 @@ async function main() {
             await atomicJson(path.join(records, 'success.json'), state.results.filter(row => row.status === 'success'));
             await atomicJson(path.join(records, 'unsuccessful.json'), state.results.filter(row => ['failed', 'skipped'].includes(row.status)));
         });
-        return writes;
     }
     await save();
     const queue = state.results.filter(result => result.status === 'pending').slice(0, limit);

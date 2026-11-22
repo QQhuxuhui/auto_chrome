@@ -3,6 +3,7 @@ const path = require('node:path');
 const { setTimeout: sleep } = require('node:timers/promises');
 const { geminiAccountState } = require('./gemini-session');
 const { ensureGeminiInitialized } = require('./gemini-initialization');
+const { atomicWriteFile } = require('./directory-export');
 
 const REQUIRED_GOOGLE_COOKIES = [
     'SID', 'HSID', 'SSID', 'APISID', 'SAPISID',
@@ -54,13 +55,30 @@ function missingRequiredCookies(cookies) {
     return missing;
 }
 
-async function waitForRequiredCookies(client, urls, { cookieTimeoutMs = 15000, pollMs = 250 } = {}) {
-    const deadline = Date.now() + Math.max(0, cookieTimeoutMs);
+async function waitForRequiredCookies(tab, client, urls, { cookieTimeoutMs = 15000, pollMs = 250, log = () => {} } = {}) {
+    const started = Date.now();
+    const deadline = started + Math.max(0, cookieTimeoutMs);
+    const osidTriggerAfterMs = Math.min(1500, Math.floor(Math.max(0, cookieTimeoutMs) / 2));
+    let osidHandshakeAttempted = false;
     let missing = [];
     do {
         const { cookies } = await client.send('Network.getCookies', { urls });
         missing = missingRequiredCookies(cookies || []);
         if (!missing.length) return;
+        const onlyGeminiOsidMissing = missing.every(name => REQUIRED_GEMINI_COOKIES.includes(name));
+        if (onlyGeminiOsidMissing && !osidHandshakeAttempted && typeof tab?.goto === 'function'
+            && Date.now() - started >= osidTriggerAfterMs && deadline - Date.now() > pollMs) {
+            osidHandshakeAttempted = true;
+            log('检测到缺少 Gemini OSID，访问 /usage 触发 SetOSID 续接');
+            await tab.goto('https://gemini.google.com/usage?hl=en', {
+                waitUntil: 'domcontentloaded',
+                timeout: Math.min(30000, Math.max(3000, deadline - Date.now())),
+            }).catch(() => {});
+            if (typeof tab.url === 'function' && tab.url().startsWith('https://gemini.google.com')) {
+                assertDefaultGeminiSlot(tab.url());
+            }
+            continue;
+        }
         if (Date.now() >= deadline) break;
         await sleep(Math.min(pollMs, Math.max(1, deadline - Date.now())));
     } while (Date.now() <= deadline);
@@ -90,7 +108,7 @@ async function readConsistentScopes(client, urls) {
     return scopes;
 }
 
-async function exportCookies(tab, email, outputDir, { log = () => {}, cookieTimeoutMs = 15000, freezeSettleMs = 200 } = {}) {
+async function exportCookies(tab, email, outputDir, { log = () => {}, cookieTimeoutMs = 15000, freezeSettleMs = 200, freezeBeforeSnapshot = true } = {}) {
     assertDefaultGeminiSlot(tab.url());
     if (await tab.evaluate(geminiAccountState, email) !== 'signed-in') {
         throw new Error('尚未在 Gemini 核对目标邮箱，拒绝导出');
@@ -101,10 +119,24 @@ async function exportCookies(tab, email, outputDir, { log = () => {}, cookieTime
     const urls = exportUrls(activeUrl);
     const client = await tab.createCDPSession();
     try {
-        await waitForRequiredCookies(client, urls, { cookieTimeoutMs });
-        // 确认必要 Cookie 齐全后切到空白页，停止后台请求在读取或关窗前继续刷新 SIDCC/1PSIDTS。
-        if (typeof tab.goto === 'function') {
+        await waitForRequiredCookies(tab, client, urls, { cookieTimeoutMs, log });
+        // 确认必要 Cookie 齐全后关闭同上下文多余标签、切空白页并断网，彻底阻止读取或关窗前继续刷新 SIDCC/1PSIDTS。
+        if (freezeBeforeSnapshot && typeof tab.goto === 'function') {
+            const currentContext = typeof tab.browserContext === 'function' ? tab.browserContext() : null;
+            const pages = (await tab.browser?.()?.pages?.().catch(() => [])) || [];
+            for (const other of pages) {
+                if (other === tab) continue;
+                if (currentContext && typeof other.browserContext === 'function' && other.browserContext() !== currentContext) continue;
+                const otherUrl = typeof other.url === 'function' ? other.url() : '';
+                if (otherUrl && otherUrl !== 'about:blank' && !otherUrl.startsWith('chrome://')) {
+                    await other.close().catch(() => {});
+                }
+            }
             await tab.goto('about:blank', { waitUntil: 'load', timeout: 10000 }).catch(() => {});
+            await client.send('Network.enable').catch(() => {});
+            await client.send('Network.emulateNetworkConditions', {
+                offline: true, latency: 0, downloadThroughput: 0, uploadThroughput: 0,
+            }).catch(() => {});
             if (freezeSettleMs > 0) await sleep(freezeSettleMs);
         }
         const scopes = await readConsistentScopes(client, urls);
@@ -132,13 +164,13 @@ async function exportCookies(tab, email, outputDir, { log = () => {}, cookieTime
         await fs.mkdir(outputDir, { recursive: true });
         const filePath = path.join(outputDir, `${email.replace(/[^a-zA-Z0-9@._+-]/g, '_')}.cookie.txt`);
         const metadataPath = filePath.replace(/\.cookie\.txt$/, '.cookies.json');
-        await fs.writeFile(metadataPath, JSON.stringify({
+        await atomicWriteFile(metadataPath, JSON.stringify({
             schemaVersion: 1, exportedAt: new Date().toISOString(), initialization,
             format: 'multi-url-cookie-union',
             collisionPolicy: 'first URL wins across distinct scopes; latest wins for identical domain/path; all variants retained in scopes',
             conflictingNames: [...conflicts], scopes,
         }, null, 2), { encoding: 'utf8', mode: 0o600 });
-        await fs.writeFile(filePath, cookieText, { encoding: 'utf8', mode: 0o600 });
+        await atomicWriteFile(filePath, cookieText, { encoding: 'utf8', mode: 0o600 });
         return { cookieText, filePath, metadataPath, conflictingNames: [...conflicts], initialization };
     } finally {
         await client.detach();

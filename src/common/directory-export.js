@@ -53,13 +53,12 @@ function readyBatches(results, complete, batchSize = 50) {
     return batches;
 }
 
-async function atomicJson(file, value) {
-    await fs.writeFile(`${file}.tmp`, JSON.stringify(value, null, 2), { mode: 0o600 });
+async function renameWithRetry(source, target) {
     // Windows readers or scanners may briefly deny replacement of an open file.
     // Keep the previous complete snapshot intact while retrying the rename.
     for (let attempt = 0; ; attempt++) {
         try {
-            await fs.rename(`${file}.tmp`, file);
+            await fs.rename(source, target);
             return;
         } catch (error) {
             if (!['EPERM', 'EACCES', 'EBUSY'].includes(error.code) || attempt >= 7) throw error;
@@ -68,4 +67,23 @@ async function atomicJson(file, value) {
     }
 }
 
-module.exports = { readAccounts, readyBatches, atomicJson, digest };
+async function atomicWriteFile(file, content, options = { mode: 0o600 }) {
+    const tmp = `${file}.tmp`;
+    await fs.writeFile(tmp, content, options);
+    await renameWithRetry(tmp, file);
+}
+
+async function atomicJson(file, value) {
+    await atomicWriteFile(file, JSON.stringify(value, null, 2), { mode: 0o600 });
+}
+
+function createWriteQueue() {
+    let pending = Promise.resolve();
+    return function enqueue(task) {
+        const next = pending.then(task);
+        pending = next.catch(() => {});
+        return next;
+    };
+}
+
+module.exports = { readAccounts, readyBatches, renameWithRetry, atomicWriteFile, atomicJson, createWriteQueue, digest };

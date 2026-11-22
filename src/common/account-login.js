@@ -130,11 +130,19 @@ async function loginAccount(page, account, log = () => {}, timeoutMs = 360000, s
             continue;
         }
         geminiEnteredAt = 0;
-        // 已实测：此入口位于2FA之后，为Google可选设置引导；返回Gemini即可跳过。
+        // 已实测：此入口位于2FA之后，为Google可选设置引导；优先点页内跳过或经passive ServiceLogin补齐SetOSID。
         if (url.origin === 'https://gds.google.com' && url.pathname === '/web/landing') {
             if (++supplementalVisits > 2) throw Object.assign(new Error('Google补充设置无法跳过'), { code: 'ACCOUNT_SKIPPED' });
             record('跳过Google补充设置');
-            await page.goto('https://gemini.google.com/app', { waitUntil: 'domcontentloaded', timeout: 45000 });
+            if (await clickText(page, '^(跳过|以后再说|暂不|不用了|Skip|Not now|Maybe later|No thanks)$')) {
+                lastAction = '跳过Google补充设置';
+                lastAt = Date.now();
+                continue;
+            }
+            const target = supplementalVisits === 1
+                ? 'https://accounts.google.com/ServiceLogin?passive=1209600&continue=https%3A%2F%2Fgemini.google.com%2Fapp'
+                : 'https://gemini.google.com/app';
+            await page.goto(target, { waitUntil: 'domcontentloaded', timeout: 45000 });
             continue;
         }
         if (url.origin !== 'https://accounts.google.com') throw new Error('登录跳转到非预期网站');
@@ -144,6 +152,12 @@ async function loginAccount(page, account, log = () => {}, timeoutMs = 360000, s
         if (/密码.{0,40}(?:发生了更改|已更改|已更改过)|password was changed/i.test(state.text)) throw new Error('Google提示密码已更改，输入凭据失效');
         if (/账号已停用|account has been disabled|Couldn't find your Google Account|找不到您的 Google 账号|找不到此账号/i.test(state.text)) throw new Error('Google 提示账号不可用');
         const action = loginAction(state);
+        if (action === '确认已有邮箱') {
+            const normalizedText = (state.text || '').replace(/[\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, '').toLowerCase();
+            if (!normalizedText.includes(account.email.toLowerCase())) {
+                throw new Error('重新登录确认页的邮箱与目标账号不符');
+            }
+        }
         const unavailableSelection = /\/challenge\/selection\/?$/.test(url.pathname)
             && !state.busy && !state.totp && !action
             && /选择您想要使用的登录方式|Choose how you want to sign in/i.test(state.text)
@@ -184,6 +198,7 @@ async function loginAccount(page, account, log = () => {}, timeoutMs = 360000, s
             await page.keyboard.press('Enter');
         }
         if (action === '选择身份验证器') submitted = await clickText(page, '身份验证器|Authenticator');
+        if (action === '确认已有邮箱') submitted = await clickText(page, '^(Next|下一步|继续|Continue)$');
         if (action === '选择目标账号') submitted = await chooseAccount(page, account.email);
         if (action === '其他验证方式') submitted = await clickText(page, '^(试试其他方式|Try another way)$');
         if (action === '跳过通行密钥') submitted = await clickText(page, '^(以后再说|Not now|Skip)$');

@@ -5,7 +5,23 @@ const { loginAction, skipReason } = require('./login-state');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const os = require('node:os');
-const { atomicJson } = require('./directory-export');
+const { atomicJson, createWriteQueue } = require('./directory-export');
+
+test('串行写入队列在单次失败后不会污染后续 worker 的保存操作', async () => {
+    const enqueue = createWriteQueue();
+    const events = [];
+    const first = enqueue(async () => {
+        events.push('first');
+        throw new Error('disk full');
+    });
+    const second = enqueue(async () => {
+        events.push('second');
+        return 'ok';
+    });
+    await assert.rejects(first, /disk full/);
+    assert.equal(await second, 'ok');
+    assert.deepEqual(events, ['first', 'second']);
+});
 
 test('进度快照遇到短暂文件占用会重试，替换前保留原快照', async t => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'gemini-progress-'));

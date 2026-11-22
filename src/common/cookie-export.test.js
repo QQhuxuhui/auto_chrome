@@ -158,3 +158,69 @@ test('browserCookieData 为旧导出补齐服务器修复后的 Gemini OSID 双�
     assert.equal(secureOsid.domain, 'gemini.google.com');
     assert.equal(secureOsid.sameSite, 'None');
 });
+
+test('主会话已齐但缺 OSID 时主动访问 /usage 触发 SetOSID 续接后再冻结导出', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'cookie-export-osid-heal-'));
+    try {
+        let osidMinted = false;
+        const cdpCalls = [];
+        const extraTabClosed = { closed: false };
+        const ctx = {};
+        const tab = {
+            navigations: [],
+            currentUrl: 'https://gemini.google.com/app',
+            url() { return this.currentUrl; },
+            browserContext() { return ctx; },
+            browser() {
+                return {
+                    pages: async () => [
+                        tab,
+                        {
+                            url: () => 'https://gemini.google.com/app?extra=1',
+                            browserContext: () => ctx,
+                            close: async () => { extraTabClosed.closed = true; },
+                        },
+                    ],
+                };
+            },
+            async goto(target) {
+                this.navigations.push(target);
+                this.currentUrl = target;
+                if (target === 'https://gemini.google.com/usage?hl=en') {
+                    osidMinted = true;
+                }
+            },
+            async evaluate(fn) {
+                if (fn.name === 'geminiAccountState') return 'signed-in';
+                if (fn.name === 'inspectInitialization') return { action: null, editor: true, dialogs: 0 };
+                return null;
+            },
+            async createCDPSession() {
+                return {
+                    async send(method, params) {
+                        cdpCalls.push({ method, params });
+                        if (method !== 'Network.getCookies') return {};
+                        if (!osidMinted) {
+                            return {
+                                cookies: baseCookies([
+                                    { name: 'OSID', domain: 'gemini.google.com', path: '/', value: null },
+                                    { name: '__Secure-OSID', domain: 'gemini.google.com', path: '/', value: null },
+                                ]),
+                            };
+                        }
+                        return { cookies: baseCookies() };
+                    },
+                    async detach() {},
+                };
+            },
+        };
+        const result = await exportCookies(tab, 'tester@example.test', dir, { cookieTimeoutMs: 2000, freezeSettleMs: 0 });
+        assert.deepEqual(tab.navigations, ['https://gemini.google.com/usage?hl=en', 'about:blank']);
+        assert.equal(extraTabClosed.closed, true);
+        assert.ok(cdpCalls.some(c => c.method === 'Network.emulateNetworkConditions' && c.params?.offline === true));
+        assert.match(result.cookieText, /\bOSID=osid-1\b/);
+        assert.match(result.cookieText, /\b__Secure-OSID=sosid-1\b/);
+    } finally {
+        await fs.rm(dir, { recursive: true, force: true });
+    }
+});
